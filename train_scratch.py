@@ -423,6 +423,10 @@ def train(args: argparse.Namespace) -> None:
             print(f"resumed from step={resume_step} tokens={resume_tokens:,}")
 
     model.to(device)
+    for opt_state in optimizer.state.values():
+        for key, value in opt_state.items():
+            if isinstance(value, torch.Tensor):
+                opt_state[key] = value.to(device)
     optimizer.zero_grad(set_to_none=True)
 
     autocast_dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16

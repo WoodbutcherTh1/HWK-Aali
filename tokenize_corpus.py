@@ -70,6 +70,8 @@ def iter_parquet_texts(path: Path):
         column = "qa"
     elif {"instruction", "output"}.issubset(columns):
         column = "instruct"
+    elif "messages" in columns:
+        column = "messages"
     else:
         raise ValueError(f"no usable text column in {path}: {columns}")
 
@@ -99,6 +101,25 @@ def iter_parquet_texts(path: Path):
             context = batch.column("context").to_pylist() if "context" in columns else [""] * len(question)
             for q, a, c in zip(question, answer, context):
                 text = _clean(f"Q: {q or ''}\nA: {a or ''}\nCtx: {c or ''}")
+                if len(text) >= MIN_DOC_CHARS:
+                    yield text
+        return
+    if column == "messages":
+        for batch in parquet_file.iter_batches(columns=["messages"], batch_size=4096):
+            for value in batch.column("messages").to_pylist():
+                if not value:
+                    continue
+                lines = []
+                for turn in value:
+                    if isinstance(turn, dict):
+                        role = turn.get("role", "user")
+                        content_piece = turn.get("content", "")
+                    else:
+                        role, content_piece = "user", turn
+                    role_label = "Assistant" if str(role).lower() in ("assistant", "model", "bot") else "User"
+                    if content_piece:
+                        lines.append(f"{role_label}: {content_piece}")
+                text = _clean("\n".join(lines))
                 if len(text) >= MIN_DOC_CHARS:
                     yield text
         return
