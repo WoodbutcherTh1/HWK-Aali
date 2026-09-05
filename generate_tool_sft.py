@@ -26,24 +26,15 @@ random.seed(1337)
 OUT_PATH = Path(__file__).resolve().parent / "data" / "tool_calling_sft.jsonl"
 
 SYSTEM_AR = (
-    "أنت آلي، مساعد ذكاء اصطناعي محلي. لديك أدوات لقراءة/كتابة الملفات، تشغيل "
-    "أوامر مسموحة، البحث في الويب، قراءة الصور والمستندات والفيديو، والمهارات "
-    "المحفوظة. عند الحاجة لأداة أجب حصراً بكائن JSON واحد بالشكل "
-    "{\"tool\": \"اسم_الأداة\", \"arguments\": {...}}. بعد تنفيذ الأداة ستصلك "
-    "نتيجتها كرسالة تبدأ بـ 'نتيجة الأداة:'. للإجابة النهائية بعد إتمام العمل "
-    "أو إن لم تحتج أداة أصلاً استخدم {\"tool\": \"final\", \"content\": \"ردك\"}. "
-    "أجب دائماً بنفس لغة المستخدم، وكن صادقاً إن لم تعرف الإجابة."
+    "أنت آلي. للأدوات أجب بـ {\"tool\": اسم, \"arguments\": {...}}. "
+    "للنهائي استخدم {\"tool\": \"final\", \"content\": ردك}. "
+    "أجب بلغة المستخدم وكن صادقاً."
 )
 
 SYSTEM_EN = (
-    "You are Aali, a local AI assistant. You have tools to read/write files, "
-    "run allow-listed commands, search the web, read images/documents/video, "
-    "and load saved skills. When a tool is needed, reply with exactly one "
-    "JSON object: {\"tool\": \"tool_name\", \"arguments\": {...}}. After it "
-    "runs you'll get its result as a message starting with 'Tool result:'. "
-    "For your final answer once done, or when no tool is needed at all, use "
-    "{\"tool\": \"final\", \"content\": \"your reply\"}. Always answer in the "
-    "user's language, and be honest when you don't know something."
+    "You are Aali. For tools reply {\"tool\": name, \"arguments\": {...}}. "
+    "For the final answer use {\"tool\": \"final\", \"content\": reply}. "
+    "Answer in the user's language and be honest."
 )
 
 
@@ -413,6 +404,10 @@ def main() -> None:
         gen_no_tool_examples,
         gen_ambiguous_clarify_examples,
         gen_error_handling_examples,
+        gen_bulk_write_variations,
+        gen_bulk_read_variations,
+        gen_multi_step_file_org_examples,
+        gen_more_no_tool_examples,
     ]
     episodes: list[dict] = []
     for gen in generators:
@@ -430,6 +425,132 @@ def main() -> None:
         if m["role"] == "assistant" and '"tool"' in m["content"]
     )
     print(f"total assistant turns using the tool-call protocol: {tool_calls}")
+
+
+
+
+# ---------------------------------------------------------------------------
+# Bulk templated variations — same real tool schemas, many more phrasings,
+# paths, and content so the model sees more surface variety than the 49
+# hand-written seed episodes above.
+# ---------------------------------------------------------------------------
+
+WRITE_TEMPLATES_AR = [
+    "أنشئ ملف {f} فيه: {c}",
+    "سوي ملف جديد اسمه {f} واكتب جوّه: {c}",
+    "بدي ملف {f} يحتوي: {c}",
+]
+WRITE_TEMPLATES_EN = [
+    "Create a file named {f} containing: {c}",
+    "Make a new file {f} with this text: {c}",
+    "I need a file {f} that says: {c}",
+]
+BULK_FILES_AR = ["يوميات.txt", "أفكار.txt", "جرد.txt", "عناوين.txt", "اتصالات.txt", "مصاريف.txt"]
+BULK_CONTENT_AR = ["اجتماع غداً", "فكرة مشروع جديد", "10 قطع متبقية", "لا تنسَ الرد", "فاتورة الكهرباء"]
+BULK_FILES_EN = ["diary.txt", "ideas.txt", "inventory.txt", "contacts.txt", "expenses.txt", "shopping.txt"]
+BULK_CONTENT_EN = ["Meeting tomorrow", "New project idea", "10 units left", "Don't forget to reply", "Electric bill due"]
+
+
+def gen_bulk_write_variations() -> list[dict]:
+    out = []
+    for i in range(len(BULK_FILES_AR)):
+        f, c = BULK_FILES_AR[i], BULK_CONTENT_AR[i % len(BULK_CONTENT_AR)]
+        tmpl = WRITE_TEMPLATES_AR[i % len(WRITE_TEMPLATES_AR)]
+        user = tmpl.format(f=f, c=c)
+        call = tool_call("write_file", {"path": f, "content": c})
+        result = tool_result_msg(True, {"ok": True, "result": {"path": f, "created": True}})
+        ans = final(f"تم إنشاء {f} بالمحتوى المطلوب ✅")
+        out.append(episode(SYSTEM_AR, user, [("assistant", call), ("user", result), ("assistant", ans)]))
+    for i in range(len(BULK_FILES_EN)):
+        f, c = BULK_FILES_EN[i], BULK_CONTENT_EN[i % len(BULK_CONTENT_EN)]
+        tmpl = WRITE_TEMPLATES_EN[i % len(WRITE_TEMPLATES_EN)]
+        user = tmpl.format(f=f, c=c)
+        call = tool_call("write_file", {"path": f, "content": c})
+        result = tool_result_msg(False, {"ok": True, "result": {"path": f, "created": True}})
+        ans = final(f"Created {f} with that content ✅")
+        out.append(episode(SYSTEM_EN, user, [("assistant", call), ("user", result), ("assistant", ans)]))
+    return out
+
+
+READ_PATHS = [
+    ("عقد_الإيجار.pdf", "read_document", "الإيجار الشهري وطريقة الدفع موضحة بالصفحة الأولى."),
+    ("fatura.jpg", "read_image", "Total due: $87.30"),
+    ("سجل.txt", "read_file", "لا يوجد أخطاء مسجلة اليوم."),
+    ("call_recording.mp3", "analyze_video", "Discussed pricing and next steps."),
+]
+
+
+def gen_bulk_read_variations() -> list[dict]:
+    out = []
+    for path, tool, content in READ_PATHS:
+        is_ar = any(ord(ch) > 0x0590 for ch in path) or any(ord(ch) > 0x0590 for ch in content)
+        if tool == "read_document":
+            user = f"شو مكتوب بملف {path}؟"
+            call = tool_call(tool, {"path": path})
+        elif tool == "read_image":
+            user = f"Read the text in {path}"
+            call = tool_call(tool, {"path": path})
+        elif tool == "read_file":
+            user = f"افتح {path} وقلي شو فيه"
+            call = tool_call(tool, {"path": path})
+        else:
+            user = f"What's discussed in {path}?"
+            call = tool_call(tool, {"path": path, "transcript": True})
+        key = "text" if tool in ("read_image",) else ("transcript" if tool == "analyze_video" else "content")
+        result = tool_result_msg(is_ar, {"ok": True, "result": {key: content}})
+        ans = final(content if not is_ar else f"المحتوى: {content}")
+        sysmsg = SYSTEM_AR if is_ar else SYSTEM_EN
+        out.append(episode(sysmsg, user, [("assistant", call), ("user", result), ("assistant", ans)]))
+    return out
+
+
+def gen_multi_step_file_org_examples() -> list[dict]:
+    """Two-tool chains: list then move/delete based on what's found."""
+    out = []
+    user = "شوف شو في مجلد assets وانقل الصور لمجلد images"
+    call1 = tool_call("list_files", {"path": "assets", "recursive": False})
+    result1 = tool_result_msg(True, {"ok": True, "result": {"entries": ["logo.png", "readme.md", "icon.png"]}})
+    call2 = tool_call("make_directory", {"path": "images", "exist_ok": True})
+    result2 = tool_result_msg(True, {"ok": True, "result": {"created": True}})
+    call3 = tool_call("move_file", {"source": "assets/logo.png", "destination": "images/logo.png"})
+    result3 = tool_result_msg(True, {"ok": True, "result": {"moved": True}})
+    call4 = tool_call("move_file", {"source": "assets/icon.png", "destination": "images/icon.png"})
+    result4 = tool_result_msg(True, {"ok": True, "result": {"moved": True}})
+    ans = final("نقلت الصورتين (logo.png وicon.png) من assets لمجلد images الجديد ✅")
+    out.append(episode(SYSTEM_AR, user, [
+        ("assistant", call1), ("user", result1),
+        ("assistant", call2), ("user", result2),
+        ("assistant", call3), ("user", result3),
+        ("assistant", call4), ("user", result4),
+        ("assistant", ans),
+    ]))
+    user = "Check the project_x folder and delete any file that isn't .py"
+    call1 = tool_call("list_files", {"path": "project_x", "recursive": False})
+    result1 = tool_result_msg(False, {"ok": True, "result": {"entries": ["main.py", "notes.txt", "utils.py"]}})
+    call2 = tool_call("delete_file", {"path": "project_x/notes.txt", "missing_ok": True})
+    result2 = tool_result_msg(False, {"ok": True, "result": {"deleted": True}})
+    ans = final("Kept main.py and utils.py, deleted notes.txt since it's not a .py file ✅")
+    out.append(episode(SYSTEM_EN, user, [
+        ("assistant", call1), ("user", result1),
+        ("assistant", call2), ("user", result2),
+        ("assistant", ans),
+    ]))
+    return out
+
+
+def gen_more_no_tool_examples() -> list[dict]:
+    out = []
+    pairs = [
+        (SYSTEM_AR, "ترجم لي كلمة apple", "apple تعني تفاحة بالعربي."),
+        (SYSTEM_AR, "شو الفرق بين == و=؟", "= للإسناد (تخزين قيمة)، == للمقارنة بين قيمتين."),
+        (SYSTEM_AR, "قلي نكتة", "ليش الكمبيوتر بيبرد بسرعة؟ لأنه فيه ويندوز 😄"),
+        (SYSTEM_EN, "What's the capital of Jordan?", "The capital of Jordan is Amman."),
+        (SYSTEM_EN, "Convert 10 km to miles", "10 kilometers is about 6.2 miles."),
+        (SYSTEM_EN, "Give me a one-line definition of recursion", "Recursion is a function calling itself to solve smaller instances of the same problem."),
+    ]
+    for sysmsg, user, ans in pairs:
+        out.append(episode(sysmsg, user, [("assistant", final(ans))]))
+    return out
 
 
 if __name__ == "__main__":
