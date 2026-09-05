@@ -10,6 +10,15 @@
 
 إذا أردت إضافة corpora جديدة، راجع `download_corpora.py` (تمت إضافة `instruct` و`arabic_instruct` و`math` و`orca_math` و`reasoning` مؤخراً) ثم أعد `scripts/tokenize.bat`.
 
+بالإضافة، `download_github_corpora.py` (جديد) يسحب 3 مجموعات تعليمات مفتوحة الترخيص من GitHub مباشرة (لا تحتاج huggingface_hub ولا مفاتيح API): `alpaca` (52K), `code_alpaca` (20K تعليمات برمجة), `alpaca_gpt4` (52K، أعلى جودة لأنها مولّدة عبر GPT-4). شغّلها بـ:
+
+```
+.venv\Scripts\python download_github_corpora.py
+.venv\Scripts\python tokenize_corpus.py --tokenizer D:/hwk-data/tokenizer/hwk_spm.model --corpus alpaca --corpus code_alpaca --corpus alpaca_gpt4
+```
+
+وأيضاً `generate_tool_sft.py` يولّد `data/tool_calling_sft.jsonl`: أمثلة تعليمية تُعلّم آلي استخدام الأدوات الفعلية (write_file, read_file, run_command, web_search...) بصيغة JSON بالضبط كما يتوقعها `agent_loop.py`.
+
 ## 2. إطلاق تدريب Phase A الحقيقي (على RTX 3070 عندك)
 
 هذا يتطلب جهازك فعلياً (GPU + PyTorch) — أنا (آلي عبر الجسر السحابي) لا أملك GPU ولا PyTorch في بيئتي، فلا أستطيع تشغيله من هنا. الأمر جاهز ومُعدّ مسبقاً:
