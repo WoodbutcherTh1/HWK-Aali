@@ -11,3 +11,6 @@ node_modules/
 file-agent/logs/*.log
 file-agent/sessions.jsonl
 .pytest_cache/
+
+# One-off device-side edit helper scripts (not part of the project)
+_scratch/

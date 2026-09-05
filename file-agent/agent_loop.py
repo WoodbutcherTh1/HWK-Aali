@@ -14,6 +14,7 @@ import requests
 
 from agent_log import log_event, new_request_id
 from file_agent import execute_tool, get_tool_definitions
+import providers
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -33,6 +34,16 @@ or modify files. All paths are relative to the configured workspace and must
 stay inside it. Never claim an operation succeeded when a tool reports an
 error. Explain the changes in your final response.
 
+You also have skills and web tools. Call list_skills to see the available
+playbooks (name + one-line description) and use_skill(name) to load one's
+full instructions when a task matches it — do this before improvising a
+multi-step task that a skill already covers. Call web_search when you need
+current information or the user asks you to look something up, then
+fetch_url on the most relevant result to read the actual page; never invent
+a URL's contents. For audio/video/OCR use analyze_video and read_image —
+both already call ffmpeg/Whisper/OCR for you, so never ask the user to
+install or run those tools themselves.
+
 Rules: plan small steps and verify each tool result before the next; keep edits
 minimal; answer in the user's language; if a request is ambiguous, ask instead
 of guessing; medical and legal answers are informational only; be honest about
@@ -40,11 +51,76 @@ what you cannot do.
 القواعد: خطّط خطوات صغيرة وتحقق من نتيجة كل أداة قبل التالية؛ اجعل التعديلات
 أصغر ما يمكن؛ أجب بلغة المستخدم؛ إن كان الطلب غامضًا فاسأل بدل التخمين؛ إجابات
 الطب والقانون إفادة فقط؛ كن صادقًا بحدود قدرتك.
+
+لديك أيضًا مهارات (skills) وأدوات ويب: استخدم list_skills لرؤية المهارات المتاحة ثم use_skill(name) لتحميل تفاصيلها إن كانت مناسبة للمهمة قبل أن تخترع خطوات من عندك. استخدم web_search عندما تحتاج معلومة حديثة أو يطلب المستخدم البحث، ثم fetch_url على أفضل نتيجة لقراءة الصفحة فعليًا — لا تختلق محتوى رابط أبدًا. لمهام الصوت والفيديو والـ OCR استخدم analyze_video و read_image فهما يستدعيان ffmpeg وWhisper والتعرف على النص تلقائيًا؛ لا تطلب من المستخدم تثبيت أو تشغيل هذه الأدوات بنفسه.
 """
 
 
 class AgentLoopError(RuntimeError):
     """Expected, user-facing agent error."""
+
+
+# --- confirmation policy -------------------------------------------------
+# The web/CLI clients send a `policy` with every request:
+#   "auto"        - current default behaviour, no extra prompting.
+#   "aggressive"  - same hard rules, but the model is told to act decisively
+#                   and finish multi-step tasks without pausing to narrate.
+#   "always_ask"  - a hard server-side gate: overwrite/recursive-delete/
+#                   run_command calls are refused until the caller resends
+#                   the same message with confirmed=True (the frontend does
+#                   this after the user clicks "confirm" on the model's
+#                   explanation of what it wants to do).
+_POLICY_PROMPTS = {
+    "auto": "",
+    "aggressive": (
+        "\nالوضع: قوي — أنجز كل خطوات الطلب بأقل عدد من الأسئلة وبأسرع طريقة ممكنة "
+        "طالما بقيت داخل حدود الأمان."
+    ),
+    "always_ask": (
+        "\nالوضع: اسأل دائماً — قبل أي إجراء خطير (استبدال ملف، حذف مجلد، تنفيذ أمر) "
+        "قد يرفضه الخادم إن لم يوافق المستخدم صراحة أولاً؛ إن وصلتك نتيجة "
+        "confirmation_required فتوقف عن تكرار نفس الأداة، واشرح للمستخدم بوضوح ماذا "
+        "تريد أن تفعل ولماذا، واطلب تأكيده بدل التخمين."
+    ),
+}
+
+
+def _is_dangerous_call(tool_name: str, args: dict[str, Any]) -> bool:
+    """True for tool calls the 'always_ask' policy must gate."""
+    if tool_name == "run_command":
+        return True
+    if tool_name in ("write_file", "move_file") and args.get("overwrite"):
+        return True
+    if tool_name == "delete_file" and args.get("recursive"):
+        return True
+    return False
+
+
+def _policy_gate(
+    tool_name: str,
+    args: dict[str, Any],
+    policy: str,
+    confirmed: bool,
+    gate_state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Synthetic tool-result dict that short-circuits execution, or None
+    when the call is allowed to run."""
+    if policy != "always_ask" or confirmed or not _is_dangerous_call(tool_name, args):
+        return None
+    if gate_state is not None:
+        gate_state["blocked"] = True
+        gate_state["tool"] = tool_name
+        gate_state["arguments"] = args
+    return {
+        "ok": False,
+        "error": {
+            "type": "confirmation_required",
+            "message": (
+                f"الوضع «اسأل دائماً» يمنع تنفيذ {tool_name} قبل موافقة صريحة من "
+                "المستخدم. اشرح له ماذا تريد أن تفعل ولماذا، ثم توقف عن التنفيذ حتى يوافق."
+            ),
+        },
+    }
 
 
 def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
@@ -103,6 +179,57 @@ def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
         return "make_directory", {"path": match.group(1)}
 
     return None
+
+
+# --- conversation compaction --------------------------------------------
+# The same idea as Claude Code's "compacting our conversation" step: once a
+# conversation has enough turns that replaying it in full would waste context
+# on every future request, fold the older turns into one short summary and
+# keep only the most recent turns verbatim. Works with whichever local model
+# is available (Ollama); with none available it still compacts, honestly
+# labelled as un-summarized rather than silently losing the older turns.
+COMPACT_KEEP_RECENT = 12
+
+
+def compact_history(
+    history: list[dict[str, str]] | None,
+    *,
+    keep_recent: int = COMPACT_KEEP_RECENT,
+) -> tuple[list[dict[str, str]], str | None]:
+    """Return (new_history, summary_text). summary_text is None when the
+    history was already short enough and nothing was compacted."""
+    history = list(history or [])
+    if len(history) <= keep_recent:
+        return history, None
+    split = len(history) - keep_recent
+    older, recent = history[:split], history[split:]
+    transcript = "\n".join(
+        f"{turn.get('role')}: {turn.get('content')}"
+        for turn in older
+        if isinstance(turn.get("content"), str)
+    )[:12000]
+    summary_text: str | None = None
+    if _ollama_available():
+        message = _ollama_chat([
+            {"role": "system", "content": "أنت تلخّص محادثات بدقة وإيجاز شديدين."},
+            {"role": "user", "content": (
+                "لخّص المحادثة التالية بين المستخدم وآلي في نقاط قصيرة بالعربية: "
+                "القرارات المتخذة، الملفات والمسارات المهمة، وأي تفضيلات ذكرها "
+                "المستخدم. لا تضف أي شرح خارج نقاط الملخص.\n\n" + transcript
+            )},
+        ])
+        if message:
+            content = str(message.get("content", "")).strip()
+            summary_text = content or None
+    if summary_text is None:
+        summary_text = (
+            f"[تم اختصار {len(older)} رسالة أقدم دون تلخيص ذكي — النموذج المحلي "
+            "غير متاح الآن للتلخيص، فبقيت الرسائل الحديثة فقط.]"
+        )
+    new_history = [
+        {"role": "assistant", "content": f"ملخص المحادثة السابقة:\n{summary_text}"}
+    ] + recent
+    return new_history, summary_text
 
 
 def _ollama_available() -> bool:
@@ -249,6 +376,10 @@ def _ollama_agent_loop(
     request_id: str,
     max_iterations: int,
     history: list[dict[str, str]] | None = None,
+    *,
+    policy: str = "auto",
+    confirmed: bool = False,
+    gate_state: dict[str, Any] | None = None,
 ) -> str:
     """Conversational local brain using a DETERMINISTIC JSON protocol.
 
@@ -266,11 +397,15 @@ def _ollama_agent_loop(
         "list_files (path) | search_files (pattern) | make_directory (path) | "
         "move_file (source, destination) | delete_file (path) | run_command (command) | "
         "read_image (path) | read_document (path) | analyze_video (path) | "
-        "make_n8n_workflow (description)\n"
+        "make_n8n_workflow (description) | list_skills () | use_skill (name) | "
+        "fetch_url (url) | web_search (query)\n"
         "قواعد: اكتب المحتوى الكامل داخل حقل content دائماً، وأنجز كل خطوات الطلب قبل final، "
         "وأجب داخل final بنفس لغة المستخدم (عربية للعربية، ولا الصينية أبداً)، "
-        "وإجابات الطب والقانون إفادة عامة فقط."
-    )
+        "وإجابات الطب والقانون إفادة عامة فقط. "
+        "استخدم list_skills ثم use_skill(name) عندما تطابق مهارة محفوظة المهمة الحالية قبل الارتجال. "
+        "استخدم web_search عند الحاجة لمعلومة حديثة ثم fetch_url على أفضل نتيجة لقراءتها فعلياً؛ "
+        "لا تختلق نتائج بحث أو محتوى صفحة أبداً."
+    ) + _POLICY_PROMPTS.get(policy, "")
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     # Few-shot anchor in the JSON protocol itself — small models imitate
     # structure far better than they follow rules.
@@ -313,7 +448,9 @@ def _ollama_agent_loop(
                     "type": "invalid_arguments",
                     "message": "أرسل المحتوى الكامل داخل حقل content — بدون الملف يكون فارغاً."}}
             else:
-                result = execute_tool(tool_name, args, root)
+                result = _policy_gate(tool_name, args, policy, confirmed, gate_state)
+                if result is None:
+                    result = execute_tool(tool_name, args, root)
             tools_used += 1
             log_event(request_id, "tool_result", tool=tool_name,
                       result=result, mode="local-ollama")
@@ -477,6 +614,10 @@ def _local_model_loop(
     model_path: str | Path,
     max_iterations: int,
     history: list[dict[str, str]] | None = None,
+    *,
+    policy: str = "auto",
+    confirmed: bool = False,
+    gate_state: dict[str, Any] | None = None,
 ) -> str:
     """Use the from-scratch checkpoint, or fall back without one."""
     path = Path(model_path).expanduser().resolve()
@@ -589,7 +730,9 @@ def _local_model_loop(
             arguments=arguments,
             mode="scratch_model",
         )
-        result = execute_tool(value, arguments, root)
+        result = _policy_gate(value, arguments, policy, confirmed, gate_state)
+        if result is None:
+            result = execute_tool(value, arguments, root)
         log_event(
             request_id,
             "tool_result",
@@ -629,7 +772,13 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
 
 
 def _run_tool_call(
-    tool_call: dict[str, Any], root: Path, request_id: str
+    tool_call: dict[str, Any],
+    root: Path,
+    request_id: str,
+    *,
+    policy: str = "auto",
+    confirmed: bool = False,
+    gate_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     function = tool_call.get("function")
     if not isinstance(function, dict) or not isinstance(function.get("name"), str):
@@ -642,11 +791,13 @@ def _run_tool_call(
         tool=tool_name,
         arguments=arguments,
     )
-    result = execute_tool(
-        tool_name,
-        arguments,
-        root,
-    )
+    result = _policy_gate(tool_name, arguments, policy, confirmed, gate_state)
+    if result is None:
+        result = execute_tool(
+            tool_name,
+            arguments,
+            root,
+        )
     log_event(request_id, "tool_result", tool=tool_name, result=result)
     return {
         "role": "tool",
@@ -678,8 +829,18 @@ def _agent_loop(
     mode: str = "local",
     local_model_path: str | Path | None = None,
     history: list[dict[str, str]] | None = None,
+    policy: str = "auto",
+    confirmed: bool = False,
+    gate_state: dict[str, Any] | None = None,
+    provider: str = "auto",
 ) -> str:
-    """Run the selected model/tool loop and return the final assistant message."""
+    """Run the selected model/tool loop and return the final assistant message.
+
+    provider: "auto" (managed key, else OpenRouter — unchanged default),
+    or an explicit connector name from providers.PROVIDERS ("openai",
+    "anthropic", "gemini", "openrouter"). Its API key always comes from an
+    environment variable set on the user's own machine, never from the chat.
+    """
     if not isinstance(user_message, str) or not user_message.strip():
         raise AgentLoopError("Please provide a non-empty user request")
     if max_iterations < 1:
@@ -689,7 +850,8 @@ def _agent_loop(
         if _ollama_available():
             log_event(request_id, "provider_selected", provider="ollama", model=OLLAMA_MODEL)
             response = _ollama_agent_loop(
-                user_message, root, request_id, max_iterations, history
+                user_message, root, request_id, max_iterations, history,
+                policy=policy, confirmed=confirmed, gate_state=gate_state,
             )
             if print_final:
                 print(response)
@@ -711,12 +873,46 @@ def _agent_loop(
             local_path,
             max_iterations,
             history,
+            policy=policy,
+            confirmed=confirmed,
+            gate_state=gate_state,
         )
         if print_final:
             print(response)
         return response
     if mode != "cloud":
         raise AgentLoopError("mode must be either 'local' or 'cloud'")
+
+    if provider in ("anthropic", "gemini"):
+        native_key = providers.api_key_for(provider)
+        if not native_key:
+            cfg = providers.PROVIDERS[provider]
+            raise AgentLoopError(
+                f"لا يوجد مفتاح {provider}. عيّن متغيّر البيئة {cfg['env_key']} على "
+                "جهازك ثم أعد تشغيل التطبيق — Aali لا يطلب المفاتيح داخل المحادثة أبدًا."
+            )
+        native_model = model if model != DEFAULT_MODEL else providers.default_model_for(provider)
+        log_event(request_id, "provider_selected", provider=provider, model=native_model)
+        native_system_prompt = SYSTEM_PROMPT + _POLICY_PROMPTS.get(policy, "")
+
+        def _run_native_tool(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+            log_event(request_id, "tool_requested", tool=tool_name, arguments=args)
+            gate_result = _policy_gate(tool_name, args, policy, confirmed, gate_state)
+            tool_result = gate_result if gate_result is not None else execute_tool(tool_name, args, root)
+            log_event(request_id, "tool_result", tool=tool_name, result=tool_result)
+            return tool_result
+
+        native_loop = providers.anthropic_loop if provider == "anthropic" else providers.gemini_loop
+        try:
+            final = native_loop(
+                user_message, native_system_prompt, native_key, native_model,
+                get_tool_definitions(), _run_native_tool, max_iterations, history,
+            )
+        except providers.ProviderError as exc:
+            raise AgentLoopError(str(exc)) from exc
+        if print_final:
+            print(final)
+        return final
 
     managed_key = os.getenv("AI_INTEGRATIONS_OPENAI_API_KEY")
     managed_base_url = os.getenv("AI_INTEGRATIONS_OPENAI_BASE_URL")
@@ -728,6 +924,11 @@ def _agent_loop(
             model if model != DEFAULT_MODEL else os.getenv("AI_INTEGRATIONS_OPENAI_MODEL", "gpt-4o-mini")
         )
         provider = "replit_ai"
+    elif provider == "openai" and providers.api_key_for("openai"):
+        api_key = providers.api_key_for("openai")
+        endpoint = "https://api.openai.com/v1/chat/completions"
+        selected_model = model if model != DEFAULT_MODEL else providers.default_model_for("openai")
+        provider = "openai"
     elif openrouter_key:
         api_key = openrouter_key
         endpoint = OPENROUTER_URL
@@ -752,7 +953,9 @@ def _agent_loop(
         "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "http://localhost"),
         "X-Title": os.getenv("OPENROUTER_APP_NAME", "Local File Agent"),
     }
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT + _POLICY_PROMPTS.get(policy, "")}
+    ]
     for turn in history or []:
         role = turn.get("role")
         content = turn.get("content")
@@ -826,7 +1029,12 @@ def _agent_loop(
         for tool_call in tool_calls:
             if not isinstance(tool_call, dict):
                 raise AgentLoopError("The model returned an invalid tool call")
-            messages.append(_run_tool_call(tool_call, root, request_id))
+            messages.append(
+                _run_tool_call(
+                    tool_call, root, request_id,
+                    policy=policy, confirmed=confirmed, gate_state=gate_state,
+                )
+            )
 
     raise AgentLoopError(
         f"The agent reached its maximum of {max_iterations} iterations without a final response."
@@ -844,8 +1052,23 @@ def agent_loop(
     mode: str = "local",
     local_model_path: str | Path | None = None,
     history: list[dict[str, str]] | None = None,
+    policy: str = "auto",
+    confirmed: bool = False,
+    gate_state: dict[str, Any] | None = None,
+    provider: str = "auto",
 ) -> str:
-    """Run the agent and record the complete request lifecycle."""
+    """Run the agent and record the complete request lifecycle.
+
+    policy: "auto" (default), "aggressive", or "always_ask" — see
+    _POLICY_PROMPTS. confirmed: set True to bypass the always_ask gate for
+    this one call (the frontend does this after the user confirms). gate_state:
+    optional dict the caller can pass to learn whether a dangerous call was
+    blocked this turn (gate_state["blocked"] / ["tool"] / ["arguments"]).
+    provider: "auto" (default, unchanged managed/OpenRouter behaviour) or
+    one of providers.PROVIDERS ("openai", "anthropic", "gemini",
+    "openrouter") — only used when mode="cloud"; each connector's API key
+    comes from an environment variable set on the user's machine.
+    """
     request_id = new_request_id()
     started_at = datetime.now(timezone.utc)
     log_event(
@@ -868,6 +1091,10 @@ def agent_loop(
             mode=mode,
             local_model_path=local_model_path,
             history=history,
+            policy=policy,
+            confirmed=confirmed,
+            gate_state=gate_state,
+            provider=provider,
         )
     except Exception as exc:
         elapsed_ms = int(

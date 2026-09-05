@@ -511,6 +511,35 @@ def make_n8n_workflow(description: str, workspace_root: str | Path, *,
     }
 
 
+def list_skills(workspace_root: str | Path) -> dict[str, Any]:
+    """List the available skills (name + one-line description)."""
+    from file_agent import skills as _skills
+    return _skills.list_skills(workspace_root)
+
+
+def use_skill(name: str, workspace_root: str | Path) -> dict[str, Any]:
+    """Load a skill's full instructions by name (see list_skills)."""
+    from file_agent import skills as _skills
+    try:
+        return _skills.use_skill(name, workspace_root)
+    except FileNotFoundError as exc:
+        raise FileAgentError(str(exc)) from exc
+
+
+def fetch_url(url: str, workspace_root: str | Path, *,
+               max_chars: int = 20000) -> dict[str, Any]:
+    """Fetch a web page and return its readable text."""
+    from file_agent import web_tools as _web_tools
+    return _web_tools.fetch_url(url, workspace_root, max_chars=max_chars)
+
+
+def web_search(query: str, workspace_root: str | Path, *,
+               max_results: int = 6) -> dict[str, Any]:
+    """Keyless web search (DuckDuckGo HTML endpoint); no API key needed."""
+    from file_agent import web_tools as _web_tools
+    return _web_tools.web_search(query, workspace_root, max_results=max_results)
+
+
 ToolFunction = Callable[..., dict[str, Any]]
 _FUNCTIONS: dict[str, ToolFunction] = {
     "list_files": list_files,
@@ -527,6 +556,10 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "read_document": read_document,
     "analyze_video": analyze_video,
     "make_n8n_workflow": make_n8n_workflow,
+    "list_skills": list_skills,
+    "use_skill": use_skill,
+    "fetch_url": fetch_url,
+    "web_search": web_search,
 }
 
 
@@ -590,6 +623,14 @@ _DEFINITIONS = [
                  "max_frames": {"type": "integer", "default": 12}, "transcript": {"type": "boolean", "default": True}}, ["path"]),
     _definition("make_n8n_workflow", "Generate an importable n8n workflow JSON from an Arabic/English description (triggers: webhook/schedule/email; actions: Aali brain, HTTP, Telegram). Returns the file path plus import steps.",
                 {"description": {"type": "string"}, "filename": {"type": "string", "default": ""}}, ["description"]),
+    _definition("list_skills", "List available skills (playbooks) by name and one-line description. Call this first, then use_skill on the one that matches the task.",
+                {}, []),
+    _definition("use_skill", "Load a skill's full instructions by name (from list_skills) and follow them for the current task.",
+                {"name": {"type": "string"}}, ["name"]),
+    _definition("fetch_url", "Fetch a web page and return its readable text (HTML tags stripped). Use after web_search, or when the user gives a direct URL.",
+                {"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["url"]),
+    _definition("web_search", "Search the web (no API key needed) and return titles/URLs/snippets. Use when the user asks to look something up or you need current information; follow up with fetch_url on the best result.",
+                {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}}, ["query"]),
 ]
 
 

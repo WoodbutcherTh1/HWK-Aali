@@ -21,7 +21,7 @@ from pathlib import Path
 
 from flask import Flask, make_response, render_template_string, request, send_from_directory
 
-from agent_loop import AgentLoopError, agent_loop
+from agent_loop import AgentLoopError, agent_loop, compact_history
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
@@ -240,10 +240,21 @@ def api_ask():
         return make_response({"ok": False, "error": "message is required"}, 400)
     sid = str(payload.get("sid") or request.headers.get("X-Session-Id") or uuid.uuid4().hex)
     mode = str(payload.get("mode", "local"))
+    # Confirmation policy from the client: "auto" (default) / "aggressive" /
+    # "always_ask". "confirm" is set True when the caller resends a message
+    # the user just approved, bypassing the always_ask gate for this call.
+    policy = str(payload.get("policy", "auto"))
+    confirmed = bool(payload.get("confirm", False))
+    # Which connector to use in cloud mode: "auto" (managed/OpenRouter,
+    # unchanged default), or "openai"/"anthropic"/"gemini"/"openrouter" —
+    # each connector reads its API key from an env var on this machine, so
+    # picking one here never means sending a key through the chat.
+    provider = str(payload.get("provider", "auto"))
     record = _get_session(sid)
     if sid not in _sessions:
         _save_session(record)
     _append_turn(record, "user", message)
+    gate_state: dict[str, object] = {}
     try:
         reply = agent_loop(
             message,
@@ -251,6 +262,10 @@ def api_ask():
             mode=mode,
             print_final=False,
             history=_history(record),
+            policy=policy,
+            confirmed=confirmed,
+            gate_state=gate_state,
+            provider=provider,
         )
         ok = True
         status = 200
@@ -259,9 +274,53 @@ def api_ask():
         ok = False
         status = 500
     _append_turn(record, "assistant", reply)
-    response = make_response({"ok": ok, "reply": reply, "sid": sid}, status)
+    body = {"ok": ok, "reply": reply, "sid": sid}
+    if gate_state.get("blocked"):
+        # A dangerous tool call was refused under "always_ask" this turn;
+        # the client can show a confirm/cancel prompt and, on confirm,
+        # resend the same message with {"confirm": true}.
+        body["needs_confirm"] = True
+        body["pending_action"] = {
+            "tool": gate_state.get("tool"),
+            "arguments": gate_state.get("arguments"),
+        }
+    response = make_response(body, status)
     response.headers["Content-Type"] = "application/json; charset=utf-8"
     return response
+
+
+@app.route("/api/compact", methods=["POST"])
+def api_compact():
+    """Fold older turns of a session into one summary — the same idea as
+    Claude Code's own conversation-compacting step. The frontend calls this
+    from the "/compact" slash command; it can also be called any time a
+    session has grown long, to keep future requests small and fast.
+    """
+    payload = request.get_json(silent=True) or {}
+    sid = str(payload.get("sid") or request.headers.get("X-Session-Id") or "")
+    if not sid:
+        return make_response({"ok": False, "error": "sid is required"}, 400)
+    record = _get_session(sid)
+    new_history, summary = compact_history(_history(record))
+    if summary is None:
+        return {
+            "ok": True,
+            "compacted": False,
+            "message": "المحادثة قصيرة بما يكفي، لا حاجة للاختصار.",
+        }
+    now = time.time()
+    record["turns"] = [
+        {"role": turn["role"], "content": turn["content"], "ts": now}
+        for turn in new_history
+    ]
+    record["updated_at"] = now
+    _save_session(record)
+    return {
+        "ok": True,
+        "compacted": True,
+        "summary": summary,
+        "kept_turns": len(new_history),
+    }
 
 
 @app.route("/api/health", methods=["GET"])

@@ -8,6 +8,17 @@ Corpora (all into D:\\hwk-data\\raw\\<corpus>\\, capped, resume-safe):
   law     - pile-of-law/pile-of-law       (contracts + court opinions + constitutions)
   know    - wikimedia/wikipedia (20231101.simple; encyclopedic: history/geography/nature)
   mmlu    - cais/mmlu (auxiliary_train + all splits; QA covering history/geography/science/law/medicine)
+  instruct        - HuggingFaceH4/ultrachat_200k   (general English instruction/chat pairs)
+  arabic_instruct - arbml/CIDAR                    (Arabic instruction-following pairs, CC-BY)
+  math            - openai/gsm8k                   (grade-school math word problems + reasoning)
+  orca_math       - microsoft/orca-math-word-problems-200k (larger math word-problem set)
+  reasoning       - garage-bAInd/Open-Platypus      (curated reasoning/instruction set)
+
+The five new entries above use Hugging Face's auto-generated parquet mirror
+("data/train-*"/"data/train_sft-*"/"main/train-*" paths), the same convention
+the existing `code`/`codeinstruct` entries rely on. This machine has no network
+access to verify the exact file names ahead of time — if a filter matches
+nothing, rerun once with `--corpus <name>` and adjust the filter list here.
 
 Completed downloads are recorded in D:\\hwk-data\\downloads.jsonl so reruns
 skip existing files. Use --corpus to fetch a single corpus.
@@ -40,6 +51,14 @@ CORPORA: dict[str, tuple[str, list[str], float]] = {
     "mmlu": ("cais/mmlu", ["auxiliary_train/", "all/"], 1.0),
     # Middle-East languages: Hebrew + Farsi + Turkish Wikipedia (Arabic is in "arabic")
     "mideast": ("wikimedia/wikipedia", ["20231101.he/", "20231101.fa/", "20231101.tr/"], 4.0),
+    # --- General-purpose instruction/reasoning corpora (commonly used for
+    #     instruction-tuning a base model like Aali; all public, no auth token
+    #     needed beyond the same HfApi access already used above). ---
+    "instruct": ("HuggingFaceH4/ultrachat_200k", ["data/train_sft-"], 3.0),
+    "arabic_instruct": ("arbml/CIDAR", ["data/train-"], 0.2),
+    "math": ("openai/gsm8k", ["main/train-"], 0.1),
+    "orca_math": ("microsoft/orca-math-word-problems-200k", ["data/train-"], 0.5),
+    "reasoning": ("garage-bAInd/Open-Platypus", ["data/train-"], 0.5),
 }
 
 # Additional small medical QA corpora merged under the "medical" corpus.
