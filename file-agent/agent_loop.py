@@ -23,11 +23,23 @@ DEFAULT_WORKSPACE = Path(__file__).resolve().parent / "agent_workspace"
 DEFAULT_SCRATCH_CHECKPOINT = (
     Path(__file__).resolve().parent.parent / "model" / "scratch" / "final.pt"
 )
+# Conversational brain served locally via Ollama (used until the scratch model
+# finishes training; disable with AALI_OLLAMA=0).
+OLLAMA_URL = os.getenv("AALI_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_MODEL = os.getenv("AALI_OLLAMA_MODEL", "qwen2.5:7b-instruct")
 SYSTEM_PROMPT = """\
 You are a careful local file assistant. Use only the provided tools to inspect
 or modify files. All paths are relative to the configured workspace and must
 stay inside it. Never claim an operation succeeded when a tool reports an
 error. Explain the changes in your final response.
+
+Rules: plan small steps and verify each tool result before the next; keep edits
+minimal; answer in the user's language; if a request is ambiguous, ask instead
+of guessing; medical and legal answers are informational only; be honest about
+what you cannot do.
+القواعد: خطّط خطوات صغيرة وتحقق من نتيجة كل أداة قبل التالية؛ اجعل التعديلات
+أصغر ما يمكن؛ أجب بلغة المستخدم؛ إن كان الطلب غامضًا فاسأل بدل التخمين؛ إجابات
+الطب والقانون إفادة فقط؛ كن صادقًا بحدود قدرتك.
 """
 
 
@@ -93,6 +105,259 @@ def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
+def _ollama_available() -> bool:
+    if os.getenv("AALI_OLLAMA", "1") == "0":
+        return False
+    try:
+        return requests.get(f"{OLLAMA_URL}/api/tags", timeout=3).ok
+    except Exception:  # noqa: BLE001 - connection refused etc.
+        return False
+
+
+def _ollama_chat(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
+                 format_json: bool = False) -> dict[str, Any] | None:
+    """One Ollama /api/chat round; returns the raw message dict, or None on failure.
+
+    With `tools` supplied, Ollama runs its native tool-calling path. With
+    `format_json` the output is grammar-constrained to a single JSON object,
+    which the deterministic JSON protocol below relies on.
+    """
+    payload: dict[str, Any] = {"model": OLLAMA_MODEL, "messages": messages,
+                               "stream": False, "options": {"temperature": 0.2}}
+    if tools:
+        payload["tools"] = tools
+    if format_json:
+        payload["format"] = "json"
+    try:
+        response = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=600)
+        if not response.ok:
+            return None
+        message = response.json().get("message", {})
+        return message if isinstance(message, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _ollama_tool_catalogue() -> str:
+    lines = []
+    for definition in get_tool_definitions():
+        fn = definition.get("function", {})
+        lines.append(f"- {fn.get('name')}: {fn.get('description', '')}")
+    return "\n".join(lines)
+
+
+def _ollama_core_tools() -> list[dict[str, Any]]:
+    """Curated, Arabic-described tool schemas for the chat brain.
+
+    Qwen2.5 tool-choice degrades with a large English catalogue; a small
+    Arabic-described core keeps tool-calling sharp (verified by probe).
+    The full tool layer remains available to opencode/API users.
+    """
+    def tool(name: str, desc_ar: str, props: dict[str, Any], required: list[str]) -> dict[str, Any]:
+        return {"type": "function", "function": {
+            "name": name, "description": desc_ar,
+            "parameters": {"type": "object", "properties": props,
+                           "required": required, "additionalProperties": False},
+        }}
+
+    return [
+        tool("write_file", "إنشاء ملف جديد أو الكتابة فوقه بمحتوى نصي",
+             {"path": {"type": "string", "description": "مسار الملف داخل مجلد العمل"},
+              "content": {"type": "string", "description": "المحتوى الكامل للملف"}},
+             ["path", "content"]),
+        tool("append_file", "إضافة نص إلى نهاية ملف موجود",
+             {"path": {"type": "string"}, "content": {"type": "string", "description": "النص المراد إضافته"}},
+             ["path", "content"]),
+        tool("read_file", "قراءة محتوى ملف نصي",
+             {"path": {"type": "string"}}, ["path"]),
+        tool("list_files", "عرض الملفات والمجلدات في مجلد العمل",
+             {"path": {"type": "string", "description": "المجلد المطلوب عرضه، استخدم . للجذر"}},
+             ["path"]),
+        tool("search_files", "البحث عن نص أو نمط داخل ملفات المشروع",
+             {"pattern": {"type": "string", "description": "الكلمة أو النمط المطلوب البحث عنه"}},
+             ["pattern"]),
+        tool("make_directory", "إنشاء مجلد جديد",
+             {"path": {"type": "string"}}, ["path"]),
+        tool("move_file", "نقل ملف أو مجلد إلى مسار جديد",
+             {"source": {"type": "string"}, "destination": {"type": "string"}},
+             ["source", "destination"]),
+        tool("delete_file", "حذف ملف",
+             {"path": {"type": "string"}}, ["path"]),
+        tool("run_command", "تشغيل أمر برمجي مسموح (python/pytest/node/npm/git قراءة) داخل مجلد العمل",
+             {"command": {"type": "string", "description": "الأمر المطلوب تشغيله"}},
+             ["command"]),
+        tool("read_image", "استخراج النص المكتوب داخل صورة (OCR)",
+             {"path": {"type": "string", "description": "مسار الصورة"}}, ["path"]),
+        tool("read_document", "قراءة مستند PDF أو Word أو Excel وإرجاع نصه",
+             {"path": {"type": "string", "description": "مسار المستند"}}, ["path"]),
+        tool("analyze_video", "تحليل فيديو: قراءة النص الظاهر في الإطارات والتعليق الصوتي",
+             {"path": {"type": "string", "description": "مسار الفيديو"}}, ["path"]),
+        tool("make_n8n_workflow", "إنشاء سير عمل n8n جاهز للاستيراد من وصف بالعربية أو الإنجليزية",
+             {"description": {"type": "string", "description": "وصف السير المطلوب: ما الذي يشغّله وماذا يفعل"}},
+             ["description"]),
+    ]
+
+
+def _normalize_tool_args(tool_name: str, raw_args: dict[str, Any]) -> dict[str, Any]:
+    """Mechanical argument repair for small local models.
+
+    Qwen2.5 emits argument-name variants (file_path / text / body) and
+    sometimes forgets `content`; normalizing here prevents failed or
+    empty tool executions before the deterministic layer sees them.
+    """
+    args = dict(raw_args)
+    if not str(args.get("path", "")).strip():
+        for alt in ("file_path", "filepath", "filename", "file", "target"):
+            if alt in args:
+                args["path"] = args.pop(alt)
+                break
+    if tool_name in ("write_file", "append_file"):
+        if "content" not in args:
+            for alt in ("text", "body", "contents", "data", "المحتوى", "النص"):
+                if alt in args:
+                    args["content"] = args.pop(alt)
+                    break
+        if tool_name == "write_file":
+            args["create_parents"] = True
+    if tool_name == "move_file" and "destination" not in args:
+        for alt in ("dest", "to", "new_path", "destination_path"):
+            if alt in args:
+                args["destination"] = args.pop(alt)
+                break
+    return args
+
+
+_PLAN_MARKERS = (
+    "سأقوم", "سأنشئ", "سأكتب", "سأحاول", "جارٍ", "جاري", "انتظر", "لحظات",
+    "稍等", "我将", "我将尝试", "让我", "let me", "i will", "i'll", "attempting",
+    "please wait", "going to create",
+)
+_SUCCESS_MARKERS = ("تم", "نجاح", "أُنشئ", "أُنشئت", "✅", "created", "success", "done")
+
+
+def _looks_like_unexecuted_plan(reply: str) -> bool:
+    """Heuristic: the model narrated intent (in any language) without claiming done."""
+    lowered = reply.lower()
+    has_plan = any(marker in reply or marker in lowered for marker in _PLAN_MARKERS)
+    claims_done = any(marker in reply for marker in _SUCCESS_MARKERS)
+    return has_plan and not claims_done
+
+
+def _ollama_agent_loop(
+    message: str,
+    root: Path,
+    request_id: str,
+    max_iterations: int,
+    history: list[dict[str, str]] | None = None,
+) -> str:
+    """Conversational local brain using a DETERMINISTIC JSON protocol.
+
+    Native tool-calling proved unreliable on Qwen2.5-7B (Chinese drift,
+    permission-asking, missing arguments). Instead every turn is
+    grammar-constrained to one JSON object — either a tool call or a final
+    answer — parsed by _parse_local_model_response and executed locally.
+    """
+    system = (
+        "أنت آلي، مساعد ذكي يعمل على حاسوب المستخدم وينفّذ الطلبات فعلياً بالأدوات دون استئذان. "
+        "أجب في كل خطوة بكائن JSON واحد فقط دون أي نص خارج الكائن:\n"
+        "- لتنفيذ أداة: {\"tool\": \"اسم الأداة\", \"arguments\": {...}}\n"
+        "- للإجابة النهائية بعد إتمام العمل: {\"tool\": \"final\", \"content\": \"ردك الودود\"}\n"
+        "الأدوات: write_file (path, content) | append_file (path, content) | read_file (path) | "
+        "list_files (path) | search_files (pattern) | make_directory (path) | "
+        "move_file (source, destination) | delete_file (path) | run_command (command) | "
+        "read_image (path) | read_document (path) | analyze_video (path) | "
+        "make_n8n_workflow (description)\n"
+        "قواعد: اكتب المحتوى الكامل داخل حقل content دائماً، وأنجز كل خطوات الطلب قبل final، "
+        "وأجب داخل final بنفس لغة المستخدم (عربية للعربية، ولا الصينية أبداً)، "
+        "وإجابات الطب والقانون إفادة عامة فقط."
+    )
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    # Few-shot anchor in the JSON protocol itself — small models imitate
+    # structure far better than they follow rules.
+    messages.append({"role": "user", "content": "أنشئ ملفاً باسم مثال.txt واكتب فيه: أهلاً"})
+    messages.append({"role": "assistant", "content": json.dumps(
+        {"tool": "write_file", "arguments": {"path": "مثال.txt", "content": "أهلاً"}},
+        ensure_ascii=False)})
+    messages.append({"role": "user", "content": "نتيجة الأداة: " + json.dumps(
+        {"ok": True, "result": {"path": "مثال.txt", "created": True}},
+        ensure_ascii=False)})
+    messages.append({"role": "assistant", "content": json.dumps(
+        {"tool": "final", "content": "تم إنشاء الملف بنجاح ✅"}, ensure_ascii=False)})
+    messages.extend(
+        {"role": str(turn.get("role")), "content": str(turn.get("content"))}
+        for turn in (history or [])
+        if turn.get("role") in ("user", "assistant")
+    )
+    messages.append({"role": "user", "content": message})
+
+    tools_used = 0
+    plan_retries = 0
+    lang_retries = 0
+
+    for _ in range(max_iterations):
+        response_message = _ollama_chat(messages, format_json=True)
+        if response_message is None:
+            log_event(request_id, "ollama_error", model=OLLAMA_MODEL)
+            return _local_agent_loop(message, root, request_id,
+                                     fallback_reason="ollama unreachable")
+        content = str(response_message.get("content", "") or "").strip()
+        kind, value, arguments = _parse_local_model_response(content)
+        log_event(request_id, "ollama_turn", kind=kind, model=OLLAMA_MODEL)
+
+        if kind == "tool":
+            tool_name = str(value)
+            args = _normalize_tool_args(tool_name, arguments or {})
+            if tool_name in ("write_file", "append_file") and not str(args.get("content", "")).strip():
+                # Zero-byte write guard: reject and teach the model why.
+                result = {"ok": False, "error": {
+                    "type": "invalid_arguments",
+                    "message": "أرسل المحتوى الكامل داخل حقل content — بدون الملف يكون فارغاً."}}
+            else:
+                result = execute_tool(tool_name, args, root)
+            tools_used += 1
+            log_event(request_id, "tool_result", tool=tool_name,
+                      result=result, mode="local-ollama")
+            messages.append({"role": "assistant", "content": content})
+            messages.append({"role": "user", "content":
+                "نتيجة الأداة: " + json.dumps(result, ensure_ascii=False)[:6000]
+                + "\nإن بقيت خطوات في الطلب الأصلي فنفّذها الآن بكائن أداة، "
+                  "وإلا أجب بكائن final بالعربية (إن كان المستخدم قد كتب بالعربية)."})
+            continue
+
+        reply = (value if kind == "final" else content).strip()
+        if not reply:
+            return "(آلي لم ينتج رداً — حاول مرة أخرى.)"
+
+        # Guard: narrated intent without executing anything.
+        if tools_used == 0 and plan_retries < 2 and _looks_like_unexecuted_plan(reply):
+            plan_retries += 1
+            messages.append({"role": "assistant", "content": content})
+            messages.append({"role": "user", "content":
+                'الكلام وحده لا ينفّذ شيئاً. استخدم كائن أداة الآن لتنفيذ الطلب فعلياً '
+                '(مثال: {"tool": "write_file", "arguments": {...}})، ثم أجب بكائن final.'})
+            continue
+
+        # Guard: the reply must be in the user's language.
+        if lang_retries < 2 and _reply_language_mismatch(message, reply):
+            lang_retries += 1
+            messages.append({"role": "assistant", "content": content})
+            messages.append({"role": "user", "content":
+                "أعد الإجابة النهائية داخل كائن final وبنفس لغة رسالة المستخدم الأولى فقط "
+                "(العربية إن كانت عربية)، دون أي كلمات من لغة أخرى."})
+            continue
+
+        return reply
+    return "توقفت بعد عدة خطوات — حاول تبسيط الطلب."
+
+
+def _reply_language_mismatch(user_text: str, reply: str) -> bool:
+    """True when the user writes Arabic but the reply contains no Arabic."""
+    def _has_arabic(text: str) -> bool:
+        return any("\u0600" <= ch <= "\u06FF" for ch in text)
+
+    return _has_arabic(user_text) and not _has_arabic(reply)
+
+
 def _local_agent_loop(
     message: str,
     root: Path,
@@ -109,14 +374,15 @@ def _local_agent_loop(
     )
     if tool_call is None:
         response = (
-            f"{label}\n"
-            "الوضع المحلي يعمل بدون API key. استخدم أحد الأوامر الواضحة مثل:\n"
+            "أنا آلي 🌟\n"
+            "دماغي المحادثاتي ما زال يتدرّب على هذا الحاسوب — الوضع الحالي: "
+            "أوامر مباشرة فقط بدون نموذج لغوي.\n\n"
+            "جرّب مثلاً:\n"
             "• اعرض الملفات\n"
-            "• اقرأ notes/today.txt\n"
-            "• أنشئ ملف notes/test.txt واكتب بداخله مرحباً\n"
-            "• أضف سطر جديد إلى notes/test.txt\n"
-            "• انقل notes/test.txt إلى archive/test.txt\n"
-            "• احذف الملف archive/test.txt"
+            "• أنشئ ملف notes/today.txt واكتب بداخله أهلاً\n"
+            "• اقرأ notes/today.txt\n\n"
+            "ولتفعيل المحادثة الطبيعية الآن: شغّل Ollama على الحاسوب "
+            "(وسيعمل تلقائياً مع الجلسة القادمة)."
         )
         log_event(request_id, "local_mode_help", response=response)
         return response
@@ -210,6 +476,7 @@ def _local_model_loop(
     request_id: str,
     model_path: str | Path,
     max_iterations: int,
+    history: list[dict[str, str]] | None = None,
 ) -> str:
     """Use the from-scratch checkpoint, or fall back without one."""
     path = Path(model_path).expanduser().resolve()
@@ -245,10 +512,16 @@ def _local_model_loop(
             request_id,
             fallback_reason="scratch model dependencies are not installed",
         )
-
     try:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         scratch_model, checkpoint = load_checkpoint(path, device=device)
+        tokenizer_meta = checkpoint.get("tokenizer") or {}
+        if tokenizer_meta.get("type") == "bpe" and tokenizer_meta.get("model_path"):
+            from hwk_model import load_bpe
+
+            tokenizer = load_bpe(tokenizer_meta["model_path"])
+        else:
+            tokenizer = ByteTokenizer()
     except Exception as exc:
         log_event(
             request_id,
@@ -264,11 +537,13 @@ def _local_model_loop(
             fallback_reason=f"checkpoint could not be loaded: {exc}",
         )
 
-    transcript = (
-        f"System: {SYSTEM_PROMPT}\n"
-        f"Available tools: {_scratch_tool_summary()}\n"
-        f"User: {message.strip()}\n"
-    )
+    transcript = f"System: {SYSTEM_PROMPT}\nAvailable tools: {_scratch_tool_summary()}\n"
+    for turn in history or []:
+        role = turn.get("role")
+        content = turn.get("content")
+        if role in ("user", "assistant") and isinstance(content, str):
+            transcript += f"{role.capitalize()}: {content}\n"
+    transcript += f"User: {message.strip()}\n"
     for iteration in range(1, max_iterations + 1):
         prompt = _scratch_prompt(transcript)
         log_event(
@@ -281,7 +556,6 @@ def _local_model_loop(
             tool_choice="json_protocol",
         )
         try:
-            tokenizer = ByteTokenizer()
             output = generate_text(
                 scratch_model,
                 tokenizer,
@@ -403,6 +677,7 @@ def _agent_loop(
     request_id: str,
     mode: str = "local",
     local_model_path: str | Path | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> str:
     """Run the selected model/tool loop and return the final assistant message."""
     if not isinstance(user_message, str) or not user_message.strip():
@@ -411,6 +686,14 @@ def _agent_loop(
         raise AgentLoopError("max_iterations must be at least 1")
     root = _workspace_path(workspace_root)
     if mode == "local":
+        if _ollama_available():
+            log_event(request_id, "provider_selected", provider="ollama", model=OLLAMA_MODEL)
+            response = _ollama_agent_loop(
+                user_message, root, request_id, max_iterations, history
+            )
+            if print_final:
+                print(response)
+            return response
         local_path = local_model_path or os.getenv(
             "LOCAL_MODEL_PATH",
             DEFAULT_SCRATCH_CHECKPOINT,
@@ -427,6 +710,7 @@ def _agent_loop(
             request_id,
             local_path,
             max_iterations,
+            history,
         )
         if print_final:
             print(response)
@@ -468,10 +752,13 @@ def _agent_loop(
         "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "http://localhost"),
         "X-Title": os.getenv("OPENROUTER_APP_NAME", "Local File Agent"),
     }
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_message.strip()},
-    ]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for turn in history or []:
+        role = turn.get("role")
+        content = turn.get("content")
+        if role in ("user", "assistant") and isinstance(content, str):
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_message.strip()})
 
     for _ in range(max_iterations):
         iteration = _ + 1
@@ -556,6 +843,7 @@ def agent_loop(
     http_client: Any | None = None,
     mode: str = "local",
     local_model_path: str | Path | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> str:
     """Run the agent and record the complete request lifecycle."""
     request_id = new_request_id()
@@ -579,6 +867,7 @@ def agent_loop(
             request_id=request_id,
             mode=mode,
             local_model_path=local_model_path,
+            history=history,
         )
     except Exception as exc:
         elapsed_ms = int(

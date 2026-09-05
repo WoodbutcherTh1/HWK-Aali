@@ -7,3 +7,7 @@ scratch_training_log.csv
 training_log.csv
 D:/
 X:/
+node_modules/
+file-agent/logs/*.log
+file-agent/sessions.jsonl
+.pytest_cache/

@@ -1,0 +1,10 @@
+What is the difference between a function and a global variable in Python? Explain in three sentences.
+Write a Python function that checks whether a word is a palindrome, with a short usage example.
+Why do we use virtual environments in Python projects? Explain in three sentences.
+What is the difference between == and is in Python? Explain with a small example.
+How do you handle exceptions in Python? Write a short try/except example.
+What is the difference between a tuple and a list in Python? Explain in three sentences.
+Write a Python function that returns the largest number in a list without using max, with a small example.
+How do you sort a list of dictionaries by a specific key in Python? Write a short example.
+What is the difference between while and for loops in Python, and when should you use each? Explain in three sentences.
+How do you read a text file line by line in Python? Write an example that prints the number of lines.

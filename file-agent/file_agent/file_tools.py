@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import shutil
+import subprocess
+import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -17,6 +22,28 @@ class FileAgentError(Exception):
 
 DEFAULT_MAX_CHARS = 100_000
 DEFAULT_MAX_ENTRIES = 1_000
+
+# Directories never searched or listed recursively (build junk / VCS / deps).
+SKIP_DIRS = {
+    ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
+    "dist", "build", ".next", ".idea", ".vscode", "target", "bin", "obj",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+}
+# File extensions treated as binary (never opened by search_files).
+BINARY_SUFFIXES = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip",
+    ".gz", ".zst", ".xz", ".bin", ".pyc", ".woff", ".woff2", ".ttf",
+    ".exe", ".dll", ".so", ".dylib", ".o", ".a", ".jar", ".class",
+}
+# Commands the agent may run itself. Everything executes with the user's own
+# account permissions with cwd inside the workspace, and is written to the
+# agent log; treat this as a convenience guard, not a security boundary.
+ALLOWED_COMMANDS = {
+    "python", "python3", "py", "pip", "pip3", "pytest",
+    "node", "npm", "npx", "yarn", "pnpm",
+    "git", "dir", "ls", "echo", "pwd", "where", "which",
+    "gcc", "g++", "clang", "cargo", "go", "make", "cmake", "dotnet",
+}
 
 
 def _root(workspace_root: str | Path) -> Path:
@@ -123,6 +150,57 @@ def read_file(path: str, workspace_root: str | Path, *, encoding: str = "utf-8",
     }
 
 
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
+
+
+def read_image(path: str, workspace_root: str | Path, *, max_lines: int = 300) -> dict[str, Any]:
+    """Extract text from an image file with the Windows built-in OCR engine.
+
+    This is the text-only bridge for image input: the model cannot "see"
+    pixels yet, but it can read the text an image contains (signs, screenshots,
+    documents, photos of pages). True vision understanding is on the roadmap.
+    """
+    if max_lines < 1:
+        raise FileAgentError("max_lines must be at least 1")
+    root, target = _resolve(path, workspace_root, must_exist=True)
+    if not target.is_file():
+        raise FileAgentError(f"Path is not a file: {path}")
+    if target.suffix.lower() not in IMAGE_SUFFIXES:
+        raise FileAgentError(f"Not a supported image file: {path} (expected one of {sorted(IMAGE_SUFFIXES)})")
+    script = Path(__file__).resolve().parents[2] / "win_ocr.ps1"
+    if not script.is_file():
+        raise FileAgentError("OCR helper (win_ocr.ps1) not found next to the project")
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(script), str(target)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FileAgentError("OCR timed out") from exc
+    if proc.returncode != 0:
+        raise FileAgentError("OCR failed: " + (proc.stderr or proc.stdout or "")[-500:])
+    try:
+        items = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise FileAgentError("OCR returned unreadable output") from exc
+    if isinstance(items, dict):  # ConvertTo-Json unwraps single-element arrays
+        items = [items]
+    text_lines = [str(item.get("text", "")).strip() for item in items if item.get("text")]
+    if not text_lines:
+        return {
+            "path": _relative(root, target),
+            "text": "",
+            "note": "No readable text found in this image (blank, graphics-only, or OCR language unavailable).",
+        }
+    return {
+        "path": _relative(root, target),
+        "text": "\n".join(text_lines[:max_lines]),
+        "lines": len(text_lines),
+    }
+
+
 def write_file(path: str, content: str, workspace_root: str | Path, *,
                overwrite: bool = False, encoding: str = "utf-8") -> dict[str, Any]:
     if not isinstance(content, str):
@@ -187,6 +265,109 @@ def replace_in_file(path: str, old_text: str, new_text: str, workspace_root: str
     return {"path": _relative(root, target), "replacements": count}
 
 
+def search_files(pattern: str, workspace_root: str | Path, *, path: str = ".",
+                 ignore_case: bool = True, max_matches: int = 200) -> dict[str, Any]:
+    """Search text files inside the workspace for a regex, with line numbers."""
+    if not isinstance(pattern, str) or not pattern.strip():
+        raise FileAgentError("pattern must be a non-empty string")
+    root, target = _resolve(path, workspace_root, must_exist=True)
+    if not target.is_dir():
+        raise FileAgentError(f"Path is not a directory: {path}")
+    try:
+        expression = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
+    except re.error as exc:
+        raise FileAgentError(f"Invalid regular expression: {exc}") from exc
+    matches: list[dict[str, Any]] = []
+    scanned_files = 0
+    for entry in target.rglob("*"):
+        if not entry.is_file():
+            continue
+        if entry.suffix.lower() in BINARY_SUFFIXES:
+            continue
+        if any(part in SKIP_DIRS for part in entry.parts):
+            continue
+        if entry.stat().st_size > 2_000_000:
+            continue  # avoid scanning huge files
+        try:
+            text = entry.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        scanned_files += 1
+        for line_number, line in enumerate(text.splitlines(), 1):
+            if expression.search(line):
+                matches.append({
+                    "path": _relative(root, entry),
+                    "line": line_number,
+                    "text": line.strip()[:250],
+                })
+                if len(matches) >= max_matches:
+                    return {
+                        "pattern": pattern,
+                        "matches": matches,
+                        "truncated": True,
+                        "scanned_files": scanned_files,
+                    }
+    return {
+        "pattern": pattern,
+        "matches": matches,
+        "truncated": False,
+        "scanned_files": scanned_files,
+    }
+
+
+def run_command(command: str, workspace_root: str | Path, *,
+                timeout_seconds: int = 120, max_output_chars: int = 20000) -> dict[str, Any]:
+    """Run an allow-listed build/test/run command inside the workspace.
+
+    Disabled entirely unless the HWK_ALLOW_COMMANDS environment variable is
+    set to a value other than "0" (the app defaults it to "1"). Commands run
+    with the user's own permissions and are logged for review.
+    """
+    if os.getenv("HWK_ALLOW_COMMANDS", "1") == "0":
+        raise FileAgentError("run_command is disabled (HWK_ALLOW_COMMANDS=0)")
+    if not isinstance(command, str) or not command.strip():
+        raise FileAgentError("command must be a non-empty string")
+    parts = shlex.split(command, posix=True)
+    base = parts[0].lower()
+    if base not in ALLOWED_COMMANDS:
+        raise FileAgentError(f"Command '{base}' is not in the allow-list.")
+    if base == "git" and len(parts) > 1 and parts[1].lower() in {
+        "push", "reset", "clean", "rebase", "cherry-pick", "merge",
+    }:
+        raise FileAgentError("Destructive or remote git commands are not allowed.")
+    root = _root(workspace_root)
+    started = time.time()
+    try:
+        completed = subprocess.run(
+            parts,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+            check=False,
+        )
+        output = (completed.stdout or "") + (completed.stderr or "")
+    except subprocess.TimeoutExpired:
+        raise FileAgentError(f"Command timed out after {timeout_seconds}s.") from None
+    except OSError as exc:
+        raise FileAgentError(f"Could not start command: {exc}") from None
+    duration_ms = int((time.time() - started) * 1000)
+    if completed.returncode != 0:
+        raise FileAgentError(
+            f"Command exited with code {completed.returncode}. Output:\n{output[:4000]}"
+        )
+    return {
+        "command": command,
+        "exit_code": 0,
+        "duration_ms": duration_ms,
+        "output": output[:max_output_chars],
+        "output_truncated": len(output) > max_output_chars,
+        "cwd": _relative(root, root),
+    }
+
+
 def make_directory(path: str, workspace_root: str | Path, *, exist_ok: bool = False) -> dict[str, Any]:
     root, target = _resolve(path, workspace_root)
     if target.exists() and not target.is_dir():
@@ -235,6 +416,101 @@ def delete_file(path: str, workspace_root: str | Path, *, recursive: bool = Fals
     return {"path": _relative(root, target), "deleted": True}
 
 
+VIDEO_SUFFIXES = {".mp4", ".avi", ".mkv", ".mov", ".webm"}
+
+
+def analyze_video(path: str, workspace_root: str | Path, *, frame_interval: float = 5.0,
+                  max_frames: int = 12, transcript: bool = True) -> dict[str, Any]:
+    """Understand a video: OCR of sampled frames + Whisper transcript of audio.
+
+    Runs scripts/video_tools.py in a subprocess so heavy imports (cv2, whisper)
+    never bloat the agent process.
+    """
+    if frame_interval <= 0 or max_frames < 1:
+        raise FileAgentError("frame_interval must be > 0 and max_frames >= 1")
+    root, target = _resolve(path, workspace_root, must_exist=True)
+    if not target.is_file():
+        raise FileAgentError(f"Path is not a file: {path}")
+    if target.suffix.lower() not in VIDEO_SUFFIXES:
+        raise FileAgentError(f"Unsupported video type: {target.suffix} (expected one of {sorted(VIDEO_SUFFIXES)})")
+    script = Path(__file__).resolve().parents[2] / "scripts" / "video_tools.py"
+    if not script.is_file():
+        raise FileAgentError("video_tools.py not found")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-u", str(script), str(target),
+             "--interval", str(frame_interval), "--max-frames", str(max_frames),
+             "--no-transcript" if not transcript else "--transcript"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FileAgentError("Video analysis timed out") from exc
+    if proc.returncode != 0:
+        raise FileAgentError("Video analysis failed: " + (proc.stderr or proc.stdout or "")[-500:])
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise FileAgentError("Unreadable video analysis output") from exc
+
+DOC_SUFFIXES = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx"}
+
+
+def read_document(path: str, workspace_root: str | Path, *, max_chars: int = 60_000) -> dict[str, Any]:
+    """Read a PDF/DOCX/XLSX file from the workspace and return its text."""
+    if max_chars < 500:
+        raise FileAgentError("max_chars must be at least 500")
+    root, target = _resolve(path, workspace_root, must_exist=True)
+    if not target.is_file():
+        raise FileAgentError(f"Path is not a file: {path}")
+    suffix = target.suffix.lower()
+    if suffix not in DOC_SUFFIXES:
+        raise FileAgentError(f"Unsupported document type: {suffix} (expected one of {sorted(DOC_SUFFIXES)})")
+
+    from file_agent import doc_tools
+
+    kind = DOC_SUFFIXES[suffix]
+    if kind == "pdf":
+        result = doc_tools.read_pdf(target, max_chars=max_chars)
+    elif kind == "docx":
+        result = doc_tools.read_docx(target, max_chars=max_chars)
+    else:
+        result = doc_tools.read_xlsx(target, max_chars=max_chars)
+    result["path"] = _relative(root, target)
+    result["kind"] = kind
+    return result
+
+
+def make_n8n_workflow(description: str, workspace_root: str | Path, *,
+                      filename: str = "") -> dict[str, Any]:
+    """Generate an importable n8n workflow from a natural-language description."""
+    if not isinstance(description, str) or not description.strip():
+        raise FileAgentError("description must be a non-empty string")
+    from file_agent import n8n_gen
+
+    workflow = n8n_gen.generate_workflow(description)
+    root, base = _resolve("n8n_workflows", workspace_root)
+    base.mkdir(parents=True, exist_ok=True)
+    name = filename.strip() or n8n_gen.safe_filename(description)
+    if not name.endswith(".json"):
+        name += ".json"
+    target = base / name
+    target.write_text(json.dumps(workflow, ensure_ascii=False, indent=1), encoding="utf-8")
+    node_names = [node.get("name", "") for node in workflow.get("nodes", [])]
+    return {
+        "path": _relative(root, target),
+        "workflow_name": workflow["name"],
+        "nodes": node_names,
+        "import_steps": (
+            "افتح n8n (http://localhost:5678) → Workflows → Import from File → "
+            "اختر الملف من D:\\hwk-projects\\n8n_workflows ثم فعّل ToggleActive"
+        ),
+        "webhook_note": (
+            "لو بدأ السير بعقدة Webhook فسيكون الرابط: "
+            "http://localhost:5678/webhook/<path-from-node> (يظهر في عقدة الويبهوك بعد الاستيراد)"
+        ),
+    }
+
+
 ToolFunction = Callable[..., dict[str, Any]]
 _FUNCTIONS: dict[str, ToolFunction] = {
     "list_files": list_files,
@@ -245,6 +521,12 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "make_directory": make_directory,
     "move_file": move_file,
     "delete_file": delete_file,
+    "search_files": search_files,
+    "run_command": run_command,
+    "read_image": read_image,
+    "read_document": read_document,
+    "analyze_video": analyze_video,
+    "make_n8n_workflow": make_n8n_workflow,
 }
 
 
@@ -292,6 +574,22 @@ _DEFINITIONS = [
     _definition("delete_file", "Delete a file; directory deletion requires recursive=true.",
                 {"path": {"type": "string"}, "recursive": {"type": "boolean", "default": False},
                  "missing_ok": {"type": "boolean", "default": False}}, ["path"]),
+    _definition("search_files", "Search text files in the workspace for a regex pattern; returns file/line matches.",
+                {"pattern": {"type": "string"}, "path": {"type": "string", "default": "."},
+                 "ignore_case": {"type": "boolean", "default": True},
+                 "max_matches": {"type": "integer", "default": 200}}, ["pattern"]),
+    _definition("run_command", "Run an allow-listed build/test/run command (python, pip, pytest, node, npm, git, compilers) with cwd inside the workspace; never use for destructive or system-wide operations.",
+                {"command": {"type": "string"}, "timeout_seconds": {"type": "integer", "default": 120},
+                 "max_output_chars": {"type": "integer", "default": 20000}}, ["command"]),
+    _definition("read_image", "Extract (OCR) the text inside an image file: screenshots, documents, signs, photos of pages. The model reads the text, not the pixels.",
+                {"path": {"type": "string"}, "max_lines": {"type": "integer", "default": 300}}, ["path"]),
+    _definition("read_document", "Read a document file (.pdf, .docx, .xlsx) and return its text content.",
+                {"path": {"type": "string"}, "max_chars": {"type": "integer", "default": 60000}}, ["path"]),
+    _definition("analyze_video", "Understand a video file (.mp4/.avi/.mkv/.mov): read on-screen text from sampled frames (OCR) and transcribe the audio (Whisper).",
+                {"path": {"type": "string"}, "frame_interval": {"type": "number", "default": 5.0},
+                 "max_frames": {"type": "integer", "default": 12}, "transcript": {"type": "boolean", "default": True}}, ["path"]),
+    _definition("make_n8n_workflow", "Generate an importable n8n workflow JSON from an Arabic/English description (triggers: webhook/schedule/email; actions: Aali brain, HTTP, Telegram). Returns the file path plus import steps.",
+                {"description": {"type": "string"}, "filename": {"type": "string", "default": ""}}, ["description"]),
 ]
 
 

@@ -1,191 +1,177 @@
-# مشروع آلي (HWK)
+# مشروع آلي (HWK-Aali)
 
-مشروع تجريبي لبناء مساعد ذكاء اصطناعي محلي يستطيع فهم طلبات الملفات
-وتنفيذها بأمان، مع مسار اختياري لنموذج سحابي. المشروع مناسب للتطوير على
-Replit ثم نقله لاحقًا إلى جهاز مزود بـ RTX 3070.
+مساعد ذكاء اصطناعي **محلي** يُبنى من الصفر (أوزان عشوائية، بدون نموذج
+مدرَّب مسبقًا، بدون API key) على جهاز RTX 3070، ثنائي اللغة (عربية +
+إنجليزية)، بهدف: محادثة طويلة، بناء وتعديل المشاريع البرمجية داخل مجلد
+العمل، إدارة ملفات، ومعلومات طبية وقانونية أولية.
 
-## ما يعمل الآن
+> **الاتجاه الوحيد المدعوم هو التدريب من الصفر.** سكربتات Qwen /
+> Transformers القديمة أُزيلت إلى `legacy/` للرجوع إليها فقط.
 
-- أدوات آمنة لقراءة وكتابة وتعديل ونقل وحذف الملفات داخل مجلد عمل محدد.
-- وضع محلي بلا API key للأوامر الواضحة، ويعمل حتى قبل تنزيل نموذج.
-- دعم اختياري لـ Replit AI المُدار أو OpenRouter في `agent_loop.py`.
-- واجهة Flask عربية متوافقة مع الهاتف في `file-agent/app.py`.
-- سجل JSONL كامل في `file-agent/logs/agent.log`.
-- تنزيل وتنظيف أول 10 أجزاء من The Pile بصيغة Parquet.
-- سكربت تدريب وتقييم لنموذج Transformers صغير.
+## المزايا
 
-## التشغيل السريع على Replit
+- **ذاكرة محادثة طويلة**: حتى 100 دور لكل جلسة، تُحفظ 30 يومًا (مقارنة
+  بـ20 دورًا / 48 ساعة سابقًا).
+- **نافذة سياق قابلة للتمديد**: الترميز الموضعي RoPE بدل المواضع المكتسبة،
+  والتدريب على سياق 1024 حاليًا مع إمكانية رفعه لاحقًا دون تغيير البنية.
+- **أدوات بناء تطبيقات (بأسلوب Cursor)**: قراءة/كتابة/استبدال/بحث في
+  الملفات + أمر `search_files` (بحث regex مع رقم السطر) + أمر `run_command`
+  (قائمة مسموحات: python/pip/pytest/node/npm/git للقراءة والمترجمات) يعمل
+  داخل مجلد المشروع فقط، وكل أمر يُسجَّل. إيقاف التنفيذ كليًا:
+  `HWK_ALLOW_COMMANDS=0`.
+- **التعديل على جهازك**: يشغّل التطبيق على أي مجلد تختاره (الافتراضي
+  `D:\hwk-projects` عبر `scripts/start_app.bat`)؛ كل عمليات الملفات
+  محصورة داخل هذا المجلد.
+- **سحابي اختياري لاحقًا**: الوضع السحابي (OpenRouter) جاهز في
+  `file-agent/agent_loop.py` إن أضفت مفتاحًا يومًا ما — لا شيء يتطلب ذلك الآن.
 
-```bash
-uv sync
-python file-agent/app.py
-```
+## ترتيب القرص
 
-افتح تبويب **Preview**. اختر **نموذج محلي / وضع بلا مفتاح**، ثم جرّب:
+| المسار | المحتوى |
+|---|---|
+| `D:\hwk-data\raw` | التنزيلات الخام (pile، عربية، كود، قانوني، طبي، codeinstruct) |
+| `D:\hwk-data\tokens` | شرائح الرموز (uint16) بعد الترميز — مجلد لكل متن |
+| `D:\hwk-data\tokenizer` | نموذج BPE المدرب من الصفر (32k) |
+| `D:\hwk-models` | نقاط الحفظ أثناء التدريب |
+| `X:\hwk-backups` | نسخ احتياطي لنقاط الحفظ |
+| `D:\hwk-projects` | مجلد عمل التطبيق (المشاريع التي يبنيها/يعدّلها) |
 
-```text
-أنشئ ملف test.txt واكتب بداخله مرحباً
-```
+تُضبط المسارات في `hwk_paths.py` ويمكن تغييرها بمتغيرات بيئة.
 
-```text
-اقرأ test.txt
-```
-
-```text
-احذف الملف test.txt
-```
-
-لتشغيل اختبار الطرفية:
-
-```bash
-PYTHONPATH=file-agent python test_agent.py
-```
-
-## تجهيز البيانات
-
-لا يستخدم `prepare_data.py` دالة `load_dataset("EleutherAI/pile")` القديمة.
-ينزل ملفات Parquet مباشرة من Hugging Face ويحفظ النسخ الخام مؤقتًا داخل
-`processed_data/raw/`.
+## التثبيت
 
 ```bash
-uv run python prepare_data.py --parts 10
+python -m venv .venv
+.venv/Scripts/pip install -r requirements.txt
+.venv/Scripts/pip install torch --index-url https://download.pytorch.org/whl/cu126
+.venv/Scripts/python check_env.py
 ```
 
-لتحميل الأجزاء الثلاثين، استخدم الأمر صراحةً لأن البيانات كبيرة:
+## سير العمل الكامل (من الصفر)
 
-```bash
-uv run python prepare_data.py --all
-```
-
-الناتج:
-
-- `processed_data/cleaned_pile.parquet`
-- `cleaned_pile.parquet`
-
-## التدريب والتقييم
-
-الفكرة الافتراضية تبدأ بـ `distilgpt2` لأنه صغير نسبيًا. على RTX 3070 يمكن
-تجربة:
-
-```bash
-uv run python train.py \
-  --data processed_data/cleaned_pile.parquet \
-  --model-name distilgpt2 \
-  --gradient-accumulation 8 \
-  --save-steps 500
-```
-
-للتدريب بتكميم 4-bit وLoRA:
-
-```bash
-uv run python train.py --use-4bit
-```
-
-لا تشغّل التدريب قبل تجهيز البيانات والتأكد من CUDA:
-
-```bash
-uv run python check_env.py
-```
-
-بعد التدريب:
-
-```bash
-uv run python evaluate.py --model model --data processed_data/cleaned_pile.parquet
-```
-
-يُحفظ سجل الخسارة في `training_log.csv` والنموذج في `model/`.
-
-## ربط النموذج المحلي بالوكيل
-
-عندما يوجد نموذج مدرّب داخل `model/`، يحاول الوضع المحلي استخدام
-`transformers.pipeline`. إذا كان المجلد غير موجود أو كانت مكتبات التدريب
-غير مثبتة، يعود الوكيل تلقائيًا إلى الوضع المحلي المحدد للأوامر بدل عرض خطأ
-غامض أو طلب مفتاح.
-
-يمكن تغيير المسار:
-
-```bash
-LOCAL_MODEL_PATH=model/agent python file-agent/app.py
-```
-
-## تدريب وكيل الملفات بالعربية
-
-تدريب The Pile العام لا يكفي لتعليم استدعاء الأدوات، لذلك يوجد مسار منفصل
-لبيانات تعليمات عربية قصيرة:
-
-```bash
-uv run python create_training_data.py
-```
-
-ينتج الأمر `data/agent_instructions.jsonl`، وتحتوي كل عينة على رسالة عربية
-واستدعاء JSON مطابق لأسماء ومعاملات الأدوات الموجودة فعليًا.
-
-للتدريب على نموذج صغير مناسب كبداية:
-
-```bash
-uv run python train_agent.py \
-  --data data/agent_instructions.jsonl \
-  --model-name Qwen/Qwen2.5-0.5B-Instruct \
-  --output-dir model/agent \
-  --epochs 3
-```
-
-على RTX 3070 يمكن إضافة `--use-4bit` لتقليل استهلاك الذاكرة. هذه العينة
-التوضيحية صغيرة وليست كافية لإنتاج نموذج نهائي؛ زِد عدد أمثلة الاستخدام
-والأخطاء والتأكيدات قبل الاعتماد الإنتاجي.
-
-## سجل العمليات
-
-كل طلب يسجل رقم تتبع واحدًا في:
-
-```text
-file-agent/logs/agent.log
-```
-
-الفحص:
-
-```bash
-tail -f file-agent/logs/agent.log
-```
-
-السجل يوثق الطلب، مزود الذكاء المستخدم، الأداة المطلوبة، المدخلات، النتيجة،
-الرد الظاهر للمستخدم، والأخطاء. لا يسجل مفاتيح API.
-
-## النقل إلى Windows أو macOS
-
-1. ثبّت Python 3.10 أو أحدث.
-2. أنشئ بيئة افتراضية:
+1. **توليد بيانات التعليمات** (ألف+ مثال: محادثة، أدوات ملفات، تأكيدات،
+   أخطاء، أسئلة برمجة/طبية/قانونية):
 
    ```bash
-   python -m venv .venv
+   .venv/Scripts/python create_training_data.py
    ```
 
-3. فعّلها:
+2. **تنزيل المتون** (خلفية، قابلة للاستئناف — الموجة الأولى والثانية):
 
    ```bash
-   # macOS/Linux
-   source .venv/bin/activate
-
-   # Windows PowerShell
-   .venv\Scripts\Activate.ps1
+   .venv/Scripts/python download_corpora.py
    ```
 
-4. ثبّت الاعتماديات:
+3. **تدريب الترميز BPE** على عينة من المتون:
 
    ```bash
-   python -m pip install -r requirements.txt
+   .venv/Scripts/python train_bpe.py
    ```
 
-على جهاز RTX، ثبّت إصدار PyTorch المتوافق مع إصدار CUDA الموجود لديك من
-صفحة PyTorch الرسمية قبل تشغيل التدريب. لا تستخدم `--break-system-packages`
-كحل دائم؛ البيئة الافتراضية أو `uv` أكثر أمانًا.
+4. **ترميز المتون إلى شرائح** — لكل متن مجلد داخل `tokens`:
 
-## تصدير نسخة احتياطية
+   ```bash
+   .venv/Scripts/python tokenize_corpus.py --corpus pile --corpus arabic --tokenizer D:/hwk-data/tokenizer/hwk_spm.model
+   ```
+
+5. **التدريب من الصفر** — المرحلة أ (عامة: إنجليزي + عربي):
+
+   ```bash
+   .venv/Scripts/python train_scratch.py \
+     --data D:/hwk-data/tokens \
+     --corpora pile,arabic \
+     --tokenizer D:/hwk-data/tokenizer/hwk_spm.model \
+     --output-dir D:/hwk-models/scratch \
+     --mirror-dir X:/hwk-backups/scratch \
+     --context 1024 --d-model 768 --heads 12 --layers 12 \
+     --batch-size 4 --gradient-accumulation 8 \
+     --max-steps 90000 --save-steps 2500 --log-steps 25
+   ```
+
+   - الملاءمة الفعلية ~32k رمزًا/خطوة عند ~23k رمزًا/ثانية، أي نحو
+     2–3 مليارات رمز خلال يوم–يومين.
+   - استئناف بعد إيقاف: أضف `--resume` (أو استخدم `scripts/resume_training.bat`).
+   - نسخ احتياطي تلقائي إلى `X:\hwk-backups\scratch`.
+   - `--corpora` تختار المتنات (مثل `pile,arabic` للمرحلة أ ثم
+     `code,law,medical,codeinstruct` لاحقًا)؛ وتُدمج شرائح التقييم تلقائيًا.
+
+6. **المرحلتان ب و ج** (بعد اكتمال أ): تدريب استمراري على متون التخصص
+   (كود/قانون/طبي + CodeAlpaca) في مجلد مخرجات جديد، ثم ضبط تعليمي (SFT)
+   على `data/agent_instructions.jsonl` — نفس السكربت بوضع jsonl.
+
+7. **التقييم**:
+
+   ```bash
+   .venv/Scripts/python evaluate_scratch.py --checkpoint D:/hwk-models/scratch/final.pt
+   .venv/Scripts/python probe_model.py --checkpoint D:/hwk-models/scratch/final.pt
+   ```
+
+8. **تشغيل التطبيق** (محادثة + بناء مشاريع + أوامر داخل المجلد):
+
+   ```bash
+   scripts\start_app.bat
+   ```
+
+   ثم افتح `http://127.0.0.1:5000`. التطبيق يستخدم مجلد
+   `D:\hwk-projects` ويستطيع: قراءة الملفات وكتابتها والبحث فيها، وتشغيل
+   أوامر البناء/الاختبار المسموحة هناك.
+
+## المعلم — التعلم من Claude وDeepSeek
+
+أدوات تفتح نموذجًا آخر على جهازك وتسأله، ثم تحفظ الإجابات أمثلة تدريبية
+(تُحوَّل لاحقًا إلى بيانات SFT للنموذج المحلي):
 
 ```bash
-chmod +x export_project.sh
-./export_project.sh
+# Claude Desktop (مثبَّت على الجهاز — افتحه وسجّل الدخول مرة واحدة)
+.venv/Scripts/python claude_teach.py "سؤالك هنا"
+
+# DeepSeek عبر نافذة ويب مدمجة (chat.deepseek.com) — بدون تطبيق سطح مكتب رسمي
+.venv/Scripts/python deepseek_teacher.py "سؤالك هنا"
+
+# أسئلة متعددة من ملف، ثم تحويل كل التسجيلات إلى بيانات تعليمية
+.venv/Scripts/python teacher_to_sft.py
 ```
 
-ينتج الملف `project_backup.tar.gz` مع استثناء البيئات الافتراضية وملفات
-`__pycache__` و`.git`.
+تُحفظ الردود في `D:\hwk-data\teacher\` وتُدمج في
+`data\teacher_sft.jsonl`. ملاحظات صادقة: أتمتة واجهات الطرف الثالث قد تنكسر
+عند تحديث التطبيقات؛ وDeepSeek المجهول له حد يومي للرسائل؛ والإجابات لأغراض
+الدراسة الشخصية.
+
+## اختبار سريع
+
+```bash
+PYTHONIOENCODING=utf-8 PYTHONPATH=file-agent .venv/Scripts/python test_agent.py
+```
+
+بدون نقطة حفظ يشتغل الوضع المحلي المحدد (fallback) بلا مفتاح.
+
+## أحدث الإضافات (Latest additions)
+
+- **قراءة الصور**: أداة الوكيل `read_image` تستخرج نص الصور عبر OCR ويندوز
+  المدمج (صور الشاشات والمستندات واللافتات).
+- **توليد وتعديل الصور**: `scripts\run_image_tools.bat gen "وصف" --out ...`
+  و `edit "تعليمات" --image in.png --out out.png` — Stable Diffusion في بيئة
+  منفصلة (`D:\hwk-tools\sd-venv`) بدون المساس ببيئة التدريب. النتائج في
+  `D:\hwk-projects\images\`.
+- **بيانات التاريخ/الجغرافيا/الطبيعة**: مجاميع `know` (ويكيبيديا الإنجليزية
+  البسيطة) و `mmlu` (أسئلة تغطي التاريخ والجغرافيا والعلوم والقانون والطب +
+  مجموعة تقييم مستقبلية).
+- **n8n**: مثبّت محليًا (`D:\hwk-tools`). واجهة المحرر على
+  http://localhost:5678 — فعّل سير العمل "HWK Aali - Local Agent Ask"
+  بضغطة واحدة بعد إنشاء حساب المالك، ثم
+  `POST /webhook/<workflow-id>/webhook/hwk-ask` بـ `{"message": ...}`.
+  (البديل المباشر بدون n8n: `POST http://127.0.0.1:5055/api/ask`).
+- **اختبار قدرات الحاسوب**: `scripts/pc_tour_test.py` يشغّل كل أدوات الملفات
+  الحقيقية داخل المساحة الآمنة + فحص قراءة عبر C: و D: و X:، والتقرير في
+  `D:\hwk-data\pc_tour_report.txt`.
+- **معلم Arena (تجريبي)**: `arena_teach.py` لسؤال نماذج عبر arena.ai — فشلت
+  أتمتة الالتقاط لأن المحادثة لا تُفتح تلقائيًا؛ الأفضل استخدام
+  `claude_teach.py` و `deepseek_teacher.py`.
+
+## توقعات صادقة
+
+نموذج ~125M مدرب من الصفر لأيام على هذا الجهاز سيتقن أساسيات المحادثة
+والأدوات، ويقدم إجابات أولية في البرمجة/الطب/القانون. لن يكون بديلًا عن
+طبيب أو محامٍ أو نموذج ضخم مثل Claude/Deepseek — وهذه الميزات تُبنى
+**كإطار برمجي** (أدوات، ذاكرة، بحث) يتحسن جودته مع نمو النموذج نفسه.
+انظر `FREEBUFF_HANDOFF.md` للخلفية الكاملة.

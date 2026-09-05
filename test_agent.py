@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -25,4 +25,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     main()

@@ -1,0 +1,82 @@
+{
+  "name": "HWK Aali - Local Agent Ask",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hwk-ask",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "hwk-webhook-0001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5055/api/ask",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: ($json.body || $json).message, sid: ($json.body || $json).sid || 'n8n', mode: ($json.body || $json).mode || 'local' }) }}",
+        "options": {}
+      },
+      "id": "hwk-http-0002",
+      "name": "HWK Agent API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "hwk-respond-0003",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HWK Agent API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HWK Agent API": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "id": "94f49ea338f14252acf6ff95b5b27776"
+}
