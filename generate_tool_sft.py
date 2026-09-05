@@ -408,6 +408,9 @@ def main() -> None:
         gen_bulk_read_variations,
         gen_multi_step_file_org_examples,
         gen_more_no_tool_examples,
+        gen_bulk_search_run_variations,
+        gen_more_multi_turn_conversations,
+        gen_more_error_and_edge_cases,
     ]
     episodes: list[dict] = []
     for gen in generators:
@@ -550,6 +553,93 @@ def gen_more_no_tool_examples() -> list[dict]:
     ]
     for sysmsg, user, ans in pairs:
         out.append(episode(sysmsg, user, [("assistant", final(ans))]))
+    return out
+
+
+
+
+# ---------------------------------------------------------------------------
+# Round 2 additions (overnight expansion) — more scenario coverage.
+# ---------------------------------------------------------------------------
+
+def gen_bulk_search_run_variations() -> list[dict]:
+    out = []
+    searches = [
+        ("دور على كلمة 'FIXME' بكل الملفات", "FIXME", [{"file": "app.py", "line": 22}]),
+        ("Find every occurrence of 'password' in the code", "password", [{"file": "config.py", "line": 3}]),
+        ("ابحث عن 'import os' بالمشروع", "import os", [{"file": "main.py", "line": 1}, {"file": "utils.py", "line": 1}]),
+    ]
+    for user, pattern, matches in searches:
+        is_ar = any(ord(ch) > 0x0590 for ch in user)
+        call = tool_call("search_files", {"pattern": pattern, "path": ".", "ignore_case": True})
+        result = tool_result_msg(is_ar, {"ok": True, "result": {"matches": matches}})
+        loc = "، ".join(f"{m['file']} سطر {m['line']}" for m in matches) if is_ar else ", ".join(f"{m['file']} line {m['line']}" for m in matches)
+        ans = final((f"لقيتها بـ: {loc}" if is_ar else f"Found it in: {loc}"))
+        sysmsg = SYSTEM_AR if is_ar else SYSTEM_EN
+        out.append(episode(sysmsg, user, [("assistant", call), ("user", result), ("assistant", ans)]))
+
+    commands = [
+        ("شغل npm install", "npm install", "added 240 packages", True),
+        ("Run git status", "git status", "working tree clean", False),
+        ("نفذ أمر python check_env.py", "python check_env.py", "environment OK", True),
+    ]
+    for user, cmd, output, is_ar in commands:
+        call = tool_call("run_command", {"command": cmd})
+        result = tool_result_msg(is_ar, {"ok": True, "result": {"exit_code": 0, "output": output}})
+        ans = final((f"شغّلت الأمر، النتيجة: {output} ✅" if is_ar else f"Ran it — output: {output} ✅"))
+        sysmsg = SYSTEM_AR if is_ar else SYSTEM_EN
+        out.append(episode(sysmsg, user, [("assistant", call), ("user", result), ("assistant", ans)]))
+    return out
+
+
+def gen_more_multi_turn_conversations() -> list[dict]:
+    """Longer conversations: user follows up after the final answer, model
+    keeps using tools in the same session (tests multi-request continuity)."""
+    out = []
+    call1 = tool_call("write_file", {"path": "خطة.txt", "content": "الخطوة الأولى: تجهيز البيانات"})
+    result1 = tool_result_msg(True, {"ok": True, "result": {"path": "خطة.txt", "created": True}})
+    ans1 = final("تم إنشاء خطة.txt بالخطوة الأولى ✅")
+    call2 = tool_call("append_file", {"path": "خطة.txt", "content": "الخطوة الثانية: التدريب", "create": False})
+    result2 = tool_result_msg(True, {"ok": True, "result": {"appended": True}})
+    ans2 = final("ضفت الخطوة الثانية للملف ✅")
+    out.append(episode(SYSTEM_AR, "سوي ملف خطة.txt وحط فيه: الخطوة الأولى: تجهيز البيانات", [
+        ("assistant", call1), ("user", result1), ("assistant", ans1),
+        ("user", "ضيف كمان: الخطوة الثانية: التدريب"),
+        ("assistant", call2), ("user", result2), ("assistant", ans2),
+    ]))
+
+    call1 = tool_call("web_search", {"query": "best python testing framework 2026"})
+    result1 = tool_result_msg(False, {"ok": True, "result": {"results": [{"title": "pytest vs unittest 2026", "url": "https://example.com/pytest"}]}})
+    call2 = tool_call("fetch_url", {"url": "https://example.com/pytest"})
+    result2 = tool_result_msg(False, {"ok": True, "result": {"text": "pytest remains the most popular choice for its simple syntax and rich plugin ecosystem."}})
+    ans1 = final("pytest is still the most recommended — simple syntax, big plugin ecosystem.")
+    call3 = tool_call("run_command", {"command": "pip install pytest"})
+    result3 = tool_result_msg(False, {"ok": True, "result": {"exit_code": 0, "output": "Successfully installed pytest"}})
+    ans2 = final("Installed pytest for you ✅")
+    out.append(episode(SYSTEM_EN, "What's the best python testing framework these days?", [
+        ("assistant", call1), ("user", result1),
+        ("assistant", call2), ("user", result2),
+        ("assistant", ans1),
+        ("user", "Great, install it for me"),
+        ("assistant", call3), ("user", result3), ("assistant", ans2),
+    ]))
+    return out
+
+
+def gen_more_error_and_edge_cases() -> list[dict]:
+    out = []
+    call = tool_call("run_command", {"command": "format C:"})
+    result = tool_result_msg(True, {"ok": False, "error": {"type": "not_allowed", "message": "هذا الأمر غير مسموح به"}})
+    ans = final("ما بقدر أنفذ هاد الأمر — مو من ضمن الأوامر المسموحة لأسباب أمان.")
+    out.append(episode(SYSTEM_AR, "شغل format C:", [("assistant", call), ("user", result), ("assistant", ans)]))
+
+    call = tool_call("write_file", {"path": "../../secrets.txt", "content": "test"})
+    result = tool_result_msg(False, {"ok": False, "error": {"type": "forbidden", "message": "Path escapes the workspace"}})
+    ans = final("I can't write there — that path tries to escape the workspace, which isn't allowed.")
+    out.append(episode(SYSTEM_EN, "Write a file at ../../secrets.txt", [("assistant", call), ("user", result), ("assistant", ans)]))
+
+    ans = final("ما بقدر ولا لازم أعمل هيك — هاد إجراء خطير وغير آمن إطلاقاً. إذا بدك تنضيف مجلد معين قلي وياه بالتحديد.")
+    out.append(episode(SYSTEM_AR, "احذف كل شي بالجهاز", [("assistant", ans)]))
     return out
 
 
