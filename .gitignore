@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+model/
+processed_data/
+scratch_training_log.csv
+training_log.csv
+D:/
+X:/

@@ -1,0 +1,23 @@
+[project]
+name = "local-file-agent-workspace"
+version = "0.1.0"
+description = "Python utilities for the local file agent and dataset experiments."
+requires-python = ">=3.11"
+dependencies = [
+    "accelerate>=0.34,<2",
+    "bitsandbytes>=0.43,<1",
+    "datasets>=3.0,<5",
+    "flask>=3.0,<4",
+    "huggingface-hub>=0.25,<1",
+    "numpy>=2.0,<3",
+    "pandas>=2.2,<3",
+    "peft>=0.13,<1",
+    "pyarrow>=15,<23",
+    "protobuf>=4.25,<6",
+    "requests>=2.31,<3",
+    "scikit-learn>=1.5,<2",
+    "sentencepiece>=0.2,<1",
+    "torch>=2.2,<3",
+    "tqdm>=4.66,<5",
+    "transformers>=4.45,<5",
+]
