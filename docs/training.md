@@ -108,3 +108,21 @@ scripts\queue_sft.bat
 ## 6. ما بعد التدريب (القديم)
 
 بعد أن ينتج Phase A أول checkpoint فعلي، الخطوات المنطقية التالية (Stage B / Stage C حسب README.md) هي: تقييم النموذج، ثم SFT على `data/agent_instructions.jsonl` وأي بيانات تعليمات إضافية، ثم دمجه في واجهة الوكيل (`file-agent/agent_loop.py`) كموفر محلي بديل عن Ollama إن رغبت.
+
+## 7. تشغيل SFT فوراً (بدون انتظار Phase A) + امتحان الأدوات
+
+إذا ما بدك تنتظر Phase A، شغّل:
+
+```
+scripts\sft_now.bat
+```
+
+بينسخ آخر checkpoint من Phase A (بأي خطوة كانت الآن) لمجلد منفصل `D:\hwk-models\sft-now`، ويسوي SFT عليه مباشرة بـ context=1024 (بدون تمديد سياق بعد) على `data/sft_mix.jsonl`. بيشتغل بالتوازي مع Phase A (نفس الكرت، فبطبيعة الحال الاثنين رح يصيروا أبطأ)، ومحفوظ بمجلد ولوق منفصلين — ما بيلمس Phase A ولا خط الأنابيب الآلي (`queue_sft.bat`) الشغال بالخلفية.
+
+بعد ما يمشي كم مية خطوة (شوف `D:\hwk-data\sft_now_training.log`)، اختبر الموديل فعلياً بامتحان آلي:
+
+```
+scripts\.venv\Scripts\python.exe scripts\exam_tool_calling.py --checkpoint D:/hwk-models/sft-now/checkpoint.pt
+```
+
+الامتحان بـ `data/exam_tool_calling.jsonl` (12 حالة، صياغة مختلفة كلياً عن أمثلة التدريب — يعني يقيس التعميم مش الحفظ): طلبات صور، طلبات فيديو "بجودة إعلان" (لازم يرفض بصراحة ويعرض نسخة محلية بسيطة بدلها)، حالات تحكم (سؤال عادي بدون أداة، قراءة ملف). النتيجة تنكتب بـ `D:\hwk-data\exam_report.txt` (مقروء) و`exam_report.json` (تفصيلي).
