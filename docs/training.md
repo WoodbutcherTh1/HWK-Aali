@@ -73,23 +73,37 @@ scripts\status.bat
 
 الخطوات: افتح الدفتر في colab.research.google.com، فعّل `Runtime -> Change runtime type -> T4 GPU`، ثم شغّل الخلايا بالترتيب (ستُطلب منك رفع `hwk_colab_bundle.zip` في الخلية الثانية).
 
-## 5. Stage B: SFT تلقائي بعد انتهاء Phase A
+## 5. تمديد نافذة السياق (context) + SFT تلقائي بعد انتهاء Phase A
 
-جهّزت مجموعة بيانات SFT موحّدة `data/sft_mix.jsonl` (12,084 سجل: 84 حلقة استدعاء أدوات + ~12,000 مثال تعليمات عامة من alpaca/alpaca_gpt4/code_alpaca، كلها ملفوفة بنفس بروتوكول `{"tool": ...}`) وسكريبتين جديدين:
+الموديل يستخدم RoPE (rotary position embeddings) مش جداول مواضع ثابتة (`file-agent/hwk_model/model.py`) — يعني طول نافذة السياق (context) خيار وقت التدريب، مش شي محفور بشكل الأوزان. هذا خلّاني أقدر أبني خط أنابيب (pipeline) كامل يشتغل تلقائياً بعد بعضه بدون ما تحتاج تراقبه:
+
+```
+Phase A (context=1024، شغالة حالياً)
+  -> scripts\extend_context.bat   (تكملة تدريب بنفس الأوزان عند context=4096)
+  -> scripts\sft_training.bat     (SFT لاستدعاء الأدوات + تعليمات عامة، فوق الموديل بـ 4096)
+```
+
+شغّل هذا بنافذة منفصلة عن `resume_training.bat` (لا يستهلك GPU إطلاقاً، فقط يراقب ملفات الـ log):
 
 ```
 scripts\queue_sft.bat
 ```
 
-شغّله بنافذة منفصلة عن `resume_training.bat` (لا يستهلك GPU، فقط يراقب `training.log`). ينتظر لحد ما Phase A يوصل للخطوة المستهدفة (90000) أو يتوقف (تُغلق نافذته)، وبعدها يشغّل تلقائياً:
+بيراقب `training.log`، وبمجرد ما Phase A توصل لخطوتها المستهدفة (90000) أو تتوقف، بيشغّل تلقائياً `extend_context.bat` (ينسخ checkpoint فيز A لمجلد منفصل `D:\hwk-models\context-4k` ويكمل التدريب فيه عند context=4096 مع `--grad-checkpoint` لتوفير الذاكرة على الـ 8GB). لما هاي توصل لخطوتها (100000) أو تتوقف، بيشغّل تلقائياً `sft_training.bat` (ينسخ checkpoint الـ context-4k لمجلد `D:\hwk-models\sft-v1` ويعمل SFT عليه بـ `data/sft_mix.jsonl`، 12,084 سجل: 84 حلقة استدعاء أدوات + ~12,000 مثال تعليمات عامة، كلها بنفس بروتوكول `{"tool": ...}`).
 
-```
-scripts\sft_training.bat
-```
+كل مرحلة إلها مجلد output ولوق منفصل — لا شي بيلمس مخرجات Phase A الأصلية:
 
-هذا السكريبت ينسخ آخر checkpoint من Phase A (`D:\hwk-models\scratch`) لمجلد منفصل `D:\hwk-models\sft-v1` (بدون ما يلمس Phase A نفسه)، ويكمل التدريب عليه بـ learning rate منخفض (5e-5) لـ 3000 خطوة إضافية على `data/sft_mix.jsonl`. النتيجة واللوق بمجلد/ملف منفصلين (`sft-v1`, `D:\hwk-data\sft_training.log`).
+| المرحلة | context | output-dir | log |
+|---|---|---|---|
+| Phase A | 1024 | `D:\hwk-models\scratch` | `D:\hwk-data\training.log` |
+| تمديد السياق | 4096 | `D:\hwk-models\context-4k` | `D:\hwk-data\context_training.log` |
+| SFT | 4096 | `D:\hwk-models\sft-v1` | `D:\hwk-data\sft_training.log` |
 
-لإعادة بناء/تحديث `data/sft_mix.jsonl` لاحقاً (مثلاً بعد إضافة أمثلة جديدة لـ `tool_calling_sft.jsonl`)، أعد تشغيل نفس منطق `prepare_sft_mix` (اطلب مني ذلك أو استخدم النسخة المحفوظة بمحادثتنا).
+ملاحظة صادقة: 4096 مش 800K. هذا رفع حقيقي (4x) عن الـ 1024 الحالية وممكن نزيده أكتر تدريجياً (8192 مثلاً) لاحقاً بنفس الطريقة، بس الأرقام الضخمة متل 800K محتاجة عتاد مختلف كلياً (راجع نقاش سابق حول حجم KV cache).
+
+لإعادة بناء/تحديث `data/sft_mix.jsonl` لاحقاً، استخدم `scripts/prepare_sft_mix.py` (يقرأ `data/tool_calling_sft.jsonl` + بيانات alpaca الخام من `D:\hwk-data\raw`).
+
+## 6. ما بعد التدريب (القديم)
 
 ## 6. ما بعد التدريب (القديم)
 

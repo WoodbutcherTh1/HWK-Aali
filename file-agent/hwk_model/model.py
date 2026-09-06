@@ -16,6 +16,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint as _grad_checkpoint
 
 from .tokenizer import VOCAB_SIZE
 
@@ -122,6 +123,13 @@ class TinyCausalLM(nn.Module):
         self.final_norm = nn.LayerNorm(self.config.d_model)
         self.lm_head = nn.Linear(self.config.d_model, self.config.vocab_size, bias=False)
         self.lm_head.weight = self.token_embedding.weight
+        # Trades compute for memory: recomputes each block's activations on
+        # the backward pass instead of keeping them all resident. Roughly
+        # halves peak activation memory (grows ~sqrt(n_layers) instead of
+        # ~n_layers), which is what makes a longer --context fit on a small
+        # GPU. Off by default so existing runs are unaffected; enable with
+        # --grad-checkpoint in train_scratch.py.
+        self.gradient_checkpointing = False
 
     def forward(self, input_ids: Tensor, labels: Tensor | None = None) -> Tensor | tuple[Tensor, Tensor]:
         _, sequence_length = input_ids.shape
@@ -132,7 +140,10 @@ class TinyCausalLM(nn.Module):
             )
         x = self.token_embedding(input_ids)
         for block in self.blocks:
-            x = block(x)
+            if self.gradient_checkpointing and self.training:
+                x = _grad_checkpoint(block, x, use_reentrant=False)
+            else:
+                x = block(x)
         logits = self.lm_head(self.final_norm(x))
         if labels is None:
             return logits

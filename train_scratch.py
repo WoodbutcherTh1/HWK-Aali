@@ -25,6 +25,7 @@ import random
 import shutil
 import sys
 import time
+from dataclasses import replace as _dc_replace
 from pathlib import Path
 from typing import Iterable, Iterator
 
@@ -410,9 +411,20 @@ def train(args: argparse.Namespace) -> None:
         if checkpoint.exists() and state_path.exists():
             payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
             saved_config = ModelConfig(**payload["config"])
-            if saved_config != config:
+            # context_size is exempt: the model uses RoPE (see hwk_model/model.py),
+            # not learned position embeddings, so no weight tensor's shape depends
+            # on it. Changing it is a training-time choice (longer sequences =
+            # more positions the rotary embedding is evaluated at), not an
+            # architecture change, so a checkpoint trained at one context can be
+            # resumed/continued at a different (typically larger) one.
+            if _dc_replace(saved_config, context_size=config.context_size) != config:
                 raise SystemExit(
                     f"Resume config mismatch: {saved_config} != {config}. Use a fresh output dir for new hyperparameters."
+                )
+            if saved_config.context_size != config.context_size:
+                print(
+                    f"context extension: {saved_config.context_size} -> {config.context_size} "
+                    "(RoPE-based model, no architecture change)"
                 )
             model.load_state_dict(payload["model"])
             state = torch.load(state_path, map_location="cpu", weights_only=False)
@@ -422,6 +434,7 @@ def train(args: argparse.Namespace) -> None:
             resume_epoch = int(state.get("epoch", 0))
             print(f"resumed from step={resume_step} tokens={resume_tokens:,}")
 
+    model.gradient_checkpointing = args.grad_checkpoint
     model.to(device)
     for opt_state in optimizer.state.values():
         for key, value in opt_state.items():
@@ -596,6 +609,10 @@ def main() -> None:
     parser.add_argument("--log-steps", type=int, default=25)
     parser.add_argument("--dtype", choices=["fp16", "bf16", "fp32"], default="fp16")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--grad-checkpoint", action="store_true",
+        help="Trade compute for memory (recompute activations on backward) to fit a larger --context in less VRAM.",
+    )
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", default="auto")
     args = parser.parse_args()
