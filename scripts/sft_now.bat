@@ -17,7 +17,13 @@ if not exist "D:\hwk-models\sft-now\checkpoint.pt" copy /Y "D:\hwk-models\scratc
 if not exist "D:\hwk-models\sft-now\trainer-state.pt" copy /Y "D:\hwk-models\scratch\trainer-state.pt" "D:\hwk-models\sft-now\trainer-state.pt"
 
 set MAXSTEPS=0
-for /f %%i in ('".venv\Scripts\python.exe" scripts\_read_step.py "D:\hwk-models\sft-now\trainer-state.pt" 3000') do set MAXSTEPS=%%i
+".venv\Scripts\python.exe" scripts\_read_step.py "D:\hwk-models\sft-now\trainer-state.pt" 3000 > "%TEMP%\hwk_maxsteps.txt" 2>&1
+set /p MAXSTEPS=<"%TEMP%\hwk_maxsteps.txt"
+
+echo ===== sft_now.bat: computed MAXSTEPS=%MAXSTEPS% ===== > D:\hwk-data\sft_now_training.log
+echo (raw _read_step.py output below; if this is not a plain number, --max-steps will fail below and the reason will be in this file) >> D:\hwk-data\sft_now_training.log
+type "%TEMP%\hwk_maxsteps.txt" >> D:\hwk-data\sft_now_training.log
+echo ===================================================== >> D:\hwk-data\sft_now_training.log
 
 echo Current Phase A step captured. Training sft-now up to step %MAXSTEPS% (+3000 SFT steps).
 
@@ -30,5 +36,5 @@ echo Current Phase A step captured. Training sft-now up to step %MAXSTEPS% (+300
   --batch-size 2 --gradient-accumulation 16 ^
   --max-steps %MAXSTEPS% --save-steps 250 --log-steps 25 ^
   --learning-rate 5e-5 --warmup-steps 100 --dtype fp16 ^
-  --resume > D:\hwk-data\sft_now_training.log 2>&1
+  --resume >> D:\hwk-data\sft_now_training.log 2>&1
 pause
