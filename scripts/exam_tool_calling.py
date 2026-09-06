@@ -100,8 +100,10 @@ def main() -> None:
     args = parser.parse_args()
 
     device = torch.device("cuda" if args.device == "auto" and torch.cuda.is_available() else args.device)
+    print(f"loading checkpoint {args.checkpoint} on {device}...", flush=True)
     model, payload = load_checkpoint(args.checkpoint, device=device)
     model.eval()
+    print(f"loaded (step {payload.get('step', 0)}), running {args.exam}...", flush=True)
 
     tokenizer_meta = payload.get("tokenizer") or {}
     if tokenizer_meta.get("type") == "bpe" and tokenizer_meta.get("model_path"):
@@ -113,10 +115,13 @@ def main() -> None:
         cases = [json.loads(line) for line in f if line.strip()]
 
     results = []
-    for case in cases:
+    for i, case in enumerate(cases, start=1):
+        print(f"[{i}/{len(cases)}] running {case['id']}...", flush=True)
         prompt = _message_text_prefix(case["system"], case["turns"])
         raw = generate_text(model, tokenizer, prompt, max_new_tokens=args.max_new_tokens, temperature=0.0)
-        results.append(grade_case(case, raw))
+        graded = grade_case(case, raw)
+        results.append(graded)
+        print(f"    -> {'PASS' if graded['pass'] else 'FAIL'} (tool={graded.get('tool_seen')!r})", flush=True)
 
     passed = sum(1 for r in results if r["pass"])
     total = len(results)
