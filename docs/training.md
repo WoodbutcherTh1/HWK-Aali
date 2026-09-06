@@ -73,6 +73,24 @@ scripts\status.bat
 
 الخطوات: افتح الدفتر في colab.research.google.com، فعّل `Runtime -> Change runtime type -> T4 GPU`، ثم شغّل الخلايا بالترتيب (ستُطلب منك رفع `hwk_colab_bundle.zip` في الخلية الثانية).
 
-## 5. ما بعد التدريب
+## 5. Stage B: SFT تلقائي بعد انتهاء Phase A
+
+جهّزت مجموعة بيانات SFT موحّدة `data/sft_mix.jsonl` (12,084 سجل: 84 حلقة استدعاء أدوات + ~12,000 مثال تعليمات عامة من alpaca/alpaca_gpt4/code_alpaca، كلها ملفوفة بنفس بروتوكول `{"tool": ...}`) وسكريبتين جديدين:
+
+```
+scripts\queue_sft.bat
+```
+
+شغّله بنافذة منفصلة عن `resume_training.bat` (لا يستهلك GPU، فقط يراقب `training.log`). ينتظر لحد ما Phase A يوصل للخطوة المستهدفة (90000) أو يتوقف (تُغلق نافذته)، وبعدها يشغّل تلقائياً:
+
+```
+scripts\sft_training.bat
+```
+
+هذا السكريبت ينسخ آخر checkpoint من Phase A (`D:\hwk-models\scratch`) لمجلد منفصل `D:\hwk-models\sft-v1` (بدون ما يلمس Phase A نفسه)، ويكمل التدريب عليه بـ learning rate منخفض (5e-5) لـ 3000 خطوة إضافية على `data/sft_mix.jsonl`. النتيجة واللوق بمجلد/ملف منفصلين (`sft-v1`, `D:\hwk-data\sft_training.log`).
+
+لإعادة بناء/تحديث `data/sft_mix.jsonl` لاحقاً (مثلاً بعد إضافة أمثلة جديدة لـ `tool_calling_sft.jsonl`)، أعد تشغيل نفس منطق `prepare_sft_mix` (اطلب مني ذلك أو استخدم النسخة المحفوظة بمحادثتنا).
+
+## 6. ما بعد التدريب (القديم)
 
 بعد أن ينتج Phase A أول checkpoint فعلي، الخطوات المنطقية التالية (Stage B / Stage C حسب README.md) هي: تقييم النموذج، ثم SFT على `data/agent_instructions.jsonl` وأي بيانات تعليمات إضافية، ثم دمجه في واجهة الوكيل (`file-agent/agent_loop.py`) كموفر محلي بديل عن Ollama إن رغبت.
