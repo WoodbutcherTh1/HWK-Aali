@@ -43,3 +43,22 @@ training window first, generate images, then reopen `resume_training.bat`.
 license. Images you generate are yours to use; if you ever redistribute the
 model weights themselves, read the license first:
 https://huggingface.co/spaces/CompVis/stable-diffusion-license
+
+## Video (`generate_video`)
+
+Same pattern, one tier down in ambition: `scripts/video_gen_tool.py` runs a
+small open text-to-video model (`damo-vilab/text-to-video-ms-1.7b`,
+~1.7B params) fully locally. State this plainly every time it comes up:
+this is **not** Sora/Veo/Runway-class output. It produces short (a couple
+of seconds), low-resolution (256x256 by default), sometimes rough clips -
+real and fully local, just small. `enable_model_cpu_offload()` is used
+(swaps unused submodules to system RAM) to make a 1.7B video model fit
+alongside Aali's own training on the same 8GB card at all; if it still hits
+`out of memory`, the tool raises a clear message asking you to close
+`resume_training.bat` first rather than silently taking forever on CPU.
+
+Both `generate_image` and `generate_video`'s tool *descriptions* explicitly
+tell the model to disclose these limitations rather than oversell the
+output - and `data/tool_calling_sft.jsonl` now has worked examples (Arabic
+and English) of Aali doing exactly that when a user asks for something like
+a "professional ad video."

@@ -503,6 +503,60 @@ def generate_image(prompt: str, path: str, workspace_root: str | Path, *,
     return result
 
 
+def generate_video(prompt: str, path: str, workspace_root: str | Path, *,
+                   negative_prompt: str = "", num_frames: int = 16, steps: int = 25,
+                   guidance_scale: float = 9.0, width: int = 256, height: int = 256,
+                   fps: int = 8, seed: int | None = None) -> dict[str, Any]:
+    """Generate a SHORT, LOW-RESOLUTION video clip from a text prompt with a
+    local text-to-video model. Honest limitation, not a bug: this is a small
+    open model on one consumer GPU, not a commercial video generator - expect
+    a couple of seconds at low resolution, sometimes rough. Always mention
+    this limitation to the user rather than presenting it as ad-quality video.
+
+    Runs scripts/video_gen_tool.py in a subprocess (torch + diffusers stay
+    out of the main agent process), same pattern as generate_image/analyze_video.
+    """
+    if not prompt or not prompt.strip():
+        raise FileAgentError("prompt must be non-empty")
+    if num_frames < 1 or steps < 1:
+        raise FileAgentError("num_frames and steps must be at least 1")
+    if width < 64 or height < 64:
+        raise FileAgentError("width/height must be at least 64")
+    root, target = _resolve(path, workspace_root)
+    if target.suffix.lower() != ".mp4":
+        raise FileAgentError("path must end in .mp4")
+    if target.exists():
+        raise FileAgentError(f"File already exists: {_relative(root, target)}; choose a different path")
+    script = Path(__file__).resolve().parents[2] / "scripts" / "video_gen_tool.py"
+    if not script.is_file():
+        raise FileAgentError("video_gen_tool.py not found")
+    command = [
+        sys.executable, "-u", str(script), prompt,
+        "--output", str(target), "--negative-prompt", negative_prompt,
+        "--num-frames", str(num_frames), "--steps", str(steps),
+        "--guidance", str(guidance_scale), "--width", str(width),
+        "--height", str(height), "--fps", str(fps),
+    ]
+    if seed is not None:
+        command += ["--seed", str(seed)]
+    try:
+        proc = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=1800,  # first run downloads the model; generation itself is much slower than images
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FileAgentError("Video generation timed out (first run downloads the model, and this is much slower than image generation - try again once it's cached)") from exc
+    try:
+        result = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.stdout.strip() else {}
+    except (json.JSONDecodeError, IndexError):
+        result = {}
+    if proc.returncode != 0 or "error" in result:
+        message = result.get("message") if result else None
+        raise FileAgentError(message or "Video generation failed: " + (proc.stderr or proc.stdout or "")[-500:])
+    result["path"] = _relative(root, target)
+    return result
+
+
 DOC_SUFFIXES = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx"}
 
 
@@ -612,6 +666,7 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "fetch_url": fetch_url,
     "web_search": web_search,
     "generate_image": generate_image,
+    "generate_video": generate_video,
 }
 
 
@@ -673,6 +728,14 @@ _DEFINITIONS = [
                  "negative_prompt": {"type": "string", "default": ""},
                  "steps": {"type": "integer", "minimum": 1, "default": 25},
                  "width": {"type": "integer", "default": 512}, "height": {"type": "integer", "default": 512},
+                 "seed": {"type": "integer"}}, ["prompt", "path"]),
+    _definition("generate_video", "Generate a SHORT (a few seconds), LOW-RESOLUTION video clip from a text prompt using a small local text-to-video model. This is NOT comparable to commercial video generators (Sora/Veo/Runway) - always tell the user it is a rough local clip, never present it as ad-quality. Shares the GPU with any running Aali training.",
+                {"prompt": {"type": "string"}, "path": {"type": "string"},
+                 "negative_prompt": {"type": "string", "default": ""},
+                 "num_frames": {"type": "integer", "minimum": 1, "default": 16},
+                 "steps": {"type": "integer", "minimum": 1, "default": 25},
+                 "width": {"type": "integer", "default": 256}, "height": {"type": "integer", "default": 256},
+                 "fps": {"type": "integer", "default": 8},
                  "seed": {"type": "integer"}}, ["prompt", "path"]),
     _definition("read_document", "Read a document file (.pdf, .docx, .xlsx) and return its text content.",
                 {"path": {"type": "string"}, "max_chars": {"type": "integer", "default": 60000}}, ["path"]),
