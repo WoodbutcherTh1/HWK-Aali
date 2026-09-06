@@ -167,7 +167,24 @@ def iter_shard_blocks(shard_paths: list[Path], context: int, seed: int) -> Itera
 
 def iter_eval_blocks(eval_path: Path, context: int, max_blocks: int) -> Iterator[tuple[Tensor, Tensor]]:
     array = np.fromfile(eval_path, dtype=np.uint16)
-    for pos in range(0, min(len(array) - context - 1, max_blocks * context), context):
+    total_positions = len(array) - context - 1
+    if total_positions <= 0:
+        return
+    # _tokens_from_dir() concatenates each selected corpus's own eval.bin, in
+    # alphabetical order, into one combined_eval.bin. Sampling sequentially
+    # from position 0 (the old behaviour) only ever reaches into the FIRST
+    # corpus in that order and only the start of it - e.g. with corpora
+    # "arabic,pile", combined_eval.bin is [arabic tail | pile tail], and the
+    # old code's block window never got past the first ~64k tokens of
+    # "arabic", so eval loss silently measured 100% Arabic, 0% English, no
+    # matter what --corpora was trained on. Spreading start positions evenly
+    # across the whole file gives every source proportional coverage.
+    n_blocks = min(max_blocks, total_positions // context + 1)
+    if n_blocks <= 0:
+        return
+    stride = total_positions / n_blocks
+    for i in range(n_blocks):
+        pos = int(i * stride)
         inputs = torch.tensor(array[pos : pos + context], dtype=torch.long)
         targets = torch.tensor(array[pos + 1 : pos + context + 1], dtype=torch.long)
         yield inputs, targets
