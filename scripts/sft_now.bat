@@ -17,7 +17,7 @@ if not exist "D:\hwk-models\sft-now\checkpoint.pt" copy /Y "D:\hwk-models\scratc
 if not exist "D:\hwk-models\sft-now\trainer-state.pt" copy /Y "D:\hwk-models\scratch\trainer-state.pt" "D:\hwk-models\sft-now\trainer-state.pt"
 
 set MAXSTEPS=0
-for /f %%i in ('".venv\Scripts\python.exe" -c "import torch; s=torch.load(r'D:\hwk-models\sft-now\trainer-state.pt', map_location='cpu', weights_only=False); print(int(s.get('step',0))+3000)"') do set MAXSTEPS=%%i
+for /f %%i in ('".venv\Scripts\python.exe" scripts\_read_step.py "D:\hwk-models\sft-now\trainer-state.pt" 3000') do set MAXSTEPS=%%i
 
 echo Current Phase A step captured. Training sft-now up to step %MAXSTEPS% (+3000 SFT steps).
 
