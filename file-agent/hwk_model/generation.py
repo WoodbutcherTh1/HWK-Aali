@@ -19,7 +19,14 @@ def generate_text(
     top_k: int = 40,
 ) -> str:
     device = next(model.parameters()).device
-    tokens = tokenizer.encode(prompt)
+    # add_special_tokens=False + manual BOS: tokenizer.encode(..., add_special_tokens=True)
+    # (the default) appends an EOS right after the prompt, which made every
+    # continuation start from a context that already looked "finished" to the
+    # model and collapsed generation to an immediate EOS (empty output). We
+    # want BOS at the start (matching how training sequences begin) but no
+    # EOS in the middle - the model should produce EOS itself once it is
+    # actually done generating.
+    tokens = [tokenizer.bos_id, *tokenizer.encode(prompt, add_special_tokens=False)]
     context_size = model.config.context_size
     generated = list(tokens)
     for _ in range(max_new_tokens):
