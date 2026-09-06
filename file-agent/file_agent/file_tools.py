@@ -452,6 +452,57 @@ def analyze_video(path: str, workspace_root: str | Path, *, frame_interval: floa
     except json.JSONDecodeError as exc:
         raise FileAgentError("Unreadable video analysis output") from exc
 
+def generate_image(prompt: str, path: str, workspace_root: str | Path, *,
+                   negative_prompt: str = "", steps: int = 25, guidance_scale: float = 7.5,
+                   width: int = 512, height: int = 512, seed: int | None = None) -> dict[str, Any]:
+    """Generate an image from a text prompt with a local Stable Diffusion model.
+
+    Runs scripts/image_gen_tool.py in a subprocess (torch + diffusers stay out
+    of the main agent process, same reasoning as analyze_video). The model
+    weights (~2GB) download once on first use and are cached afterward.
+    Note: this shares the GPU with any active Aali training run - expect it
+    to be slower, or to fall back to CPU, while training is going.
+    """
+    if not prompt or not prompt.strip():
+        raise FileAgentError("prompt must be non-empty")
+    if steps < 1:
+        raise FileAgentError("steps must be at least 1")
+    if width < 64 or height < 64:
+        raise FileAgentError("width/height must be at least 64")
+    root, target = _resolve(path, workspace_root)
+    if target.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+        raise FileAgentError("path must end in .png, .jpg, or .jpeg")
+    if target.exists():
+        raise FileAgentError(f"File already exists: {_relative(root, target)}; choose a different path")
+    script = Path(__file__).resolve().parents[2] / "scripts" / "image_gen_tool.py"
+    if not script.is_file():
+        raise FileAgentError("image_gen_tool.py not found")
+    command = [
+        sys.executable, "-u", str(script), prompt,
+        "--output", str(target), "--negative-prompt", negative_prompt,
+        "--steps", str(steps), "--guidance", str(guidance_scale),
+        "--width", str(width), "--height", str(height),
+    ]
+    if seed is not None:
+        command += ["--seed", str(seed)]
+    try:
+        proc = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=600,  # first run downloads the model; generation itself is much faster
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FileAgentError("Image generation timed out (first run downloads the model - try again once it's cached)") from exc
+    try:
+        result = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.stdout.strip() else {}
+    except (json.JSONDecodeError, IndexError):
+        result = {}
+    if proc.returncode != 0 or "error" in result:
+        message = result.get("message") if result else None
+        raise FileAgentError(message or "Image generation failed: " + (proc.stderr or proc.stdout or "")[-500:])
+    result["path"] = _relative(root, target)
+    return result
+
+
 DOC_SUFFIXES = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx"}
 
 
@@ -560,6 +611,7 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "use_skill": use_skill,
     "fetch_url": fetch_url,
     "web_search": web_search,
+    "generate_image": generate_image,
 }
 
 
@@ -616,6 +668,12 @@ _DEFINITIONS = [
                  "max_output_chars": {"type": "integer", "default": 20000}}, ["command"]),
     _definition("read_image", "Extract (OCR) the text inside an image file: screenshots, documents, signs, photos of pages. The model reads the text, not the pixels.",
                 {"path": {"type": "string"}, "max_lines": {"type": "integer", "default": 300}}, ["path"]),
+    _definition("generate_image", "Generate a new image from a text description using a local Stable Diffusion model, and save it to the workspace. Shares the GPU with any running Aali training - may be slow or fall back to CPU while training is active.",
+                {"prompt": {"type": "string"}, "path": {"type": "string"},
+                 "negative_prompt": {"type": "string", "default": ""},
+                 "steps": {"type": "integer", "minimum": 1, "default": 25},
+                 "width": {"type": "integer", "default": 512}, "height": {"type": "integer", "default": 512},
+                 "seed": {"type": "integer"}}, ["prompt", "path"]),
     _definition("read_document", "Read a document file (.pdf, .docx, .xlsx) and return its text content.",
                 {"path": {"type": "string"}, "max_chars": {"type": "integer", "default": 60000}}, ["path"]),
     _definition("analyze_video", "Understand a video file (.mp4/.avi/.mkv/.mov): read on-screen text from sampled frames (OCR) and transcribe the audio (Whisper).",
