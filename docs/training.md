@@ -122,7 +122,7 @@ scripts\sft_now.bat
 بعد ما يمشي كم مية خطوة (شوف `D:\hwk-data\sft_now_training.log`)، اختبر الموديل فعلياً بامتحان آلي:
 
 ```
-scripts\.venv\Scripts\python.exe scripts\exam_tool_calling.py --checkpoint D:/hwk-models/sft-now/checkpoint.pt
+.venv\Scripts\python.exe scripts\exam_tool_calling.py --checkpoint D:/hwk-models/sft-now/checkpoint.pt
 ```
 
 الامتحان بـ `data/exam_tool_calling.jsonl` (12 حالة، صياغة مختلفة كلياً عن أمثلة التدريب — يعني يقيس التعميم مش الحفظ): طلبات صور، طلبات فيديو "بجودة إعلان" (لازم يرفض بصراحة ويعرض نسخة محلية بسيطة بدلها)، حالات تحكم (سؤال عادي بدون أداة، قراءة ملف). النتيجة تنكتب بـ `D:\hwk-data\exam_report.txt` (مقروء) و`exam_report.json` (تفصيلي).
