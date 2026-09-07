@@ -83,6 +83,20 @@ def err(text: str) -> None:
         print(text, file=sys.stderr)
 
 
+def _print_suggestions(suggestions: list) -> None:
+    """Numbered follow-up chips; typing the number sends that suggestion."""
+    if not suggestions:
+        return
+    if console is not None:
+        console.print("[gold3]اقتراحات — اكتب رقمًا لتنفيذه:[/gold3]")
+        for index, suggestion in enumerate(suggestions, 1):
+            console.print(f"[gold3]  {index}. {suggestion}[/gold3]")
+    else:
+        print("اقتراحات — اكتب رقمًا لتنفيذه:")
+        for index, suggestion in enumerate(suggestions, 1):
+            print(f"  {index}. {suggestion}")
+
+
 def one_shot(server: str, message: str) -> int:
     try:
         data = _post(server, API_PATH_ASK, {"message": message, "sid": _load_sid() or None})
@@ -92,6 +106,7 @@ def one_shot(server: str, message: str) -> int:
     if data.get("sid"):
         _save_sid(str(data["sid"]))
     say(str(data.get("reply") or data.get("error") or ""))
+    _print_suggestions(list(data.get("suggestions") or []))
     return 0 if data.get("ok") else 1
 
 
@@ -103,6 +118,7 @@ def repl(server: str) -> int:
         console.print("[bold gold3]آلي[/] — مساعدك في الطرفية. اكتب سؤالك، أو /new لمحادثة جديدة، /quit للخروج.")
     else:
         print("آلي — اكتب سؤالك، /new لمحادثة جديدة، /quit للخروج")
+    pending: dict[str, list] = {"list": []}
     while True:
         try:
             line = input("\nأنت> ").strip()
@@ -111,6 +127,10 @@ def repl(server: str) -> int:
             return 0
         if not line:
             continue
+        if line in {"1", "2", "3"} and pending["list"]:
+            index = int(line) - 1
+            if index < len(pending["list"]):
+                line = str(pending["list"][index])
         if line in ("/quit", "/exit", "/q"):
             return 0
         if line == "/new":
@@ -128,6 +148,9 @@ def repl(server: str) -> int:
         if data.get("sid"):
             _save_sid(str(data["sid"]))
         say(str(data.get("reply") or data.get("error") or ""))
+        suggestions = list(data.get("suggestions") or [])
+        _print_suggestions(suggestions)
+        pending["list"] = suggestions
 
 
 def main() -> None:

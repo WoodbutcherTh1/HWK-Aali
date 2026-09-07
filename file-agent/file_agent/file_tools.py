@@ -315,6 +315,22 @@ def search_files(pattern: str, workspace_root: str | Path, *, path: str = ".",
     }
 
 
+_EXFIL_PATTERNS = (
+    re.compile(r"os\.environ|environ\s*\[|environ\.copy|environ\.items", re.IGNORECASE),
+    re.compile(r"process\.env", re.IGNORECASE),
+    re.compile(r"\bprintenv\b", re.IGNORECASE),
+    re.compile(r"\bgetenv\b", re.IGNORECASE),
+    re.compile(r"\bsecrets\b\.", re.IGNORECASE),
+    re.compile(r"\.env\b", re.IGNORECASE),
+    re.compile(r"\$[A-Z][A-Z0-9_]{2,}"),
+)
+
+
+def _looks_like_secret_exfiltration(command: str) -> bool:
+    """True for commands whose purpose is dumping env vars/credentials."""
+    return any(pattern.search(command) for pattern in _EXFIL_PATTERNS)
+
+
 def run_command(command: str, workspace_root: str | Path, *,
                 timeout_seconds: int = 120, max_output_chars: int = 20000) -> dict[str, Any]:
     """Run an allow-listed build/test/run command inside the workspace.
@@ -335,6 +351,15 @@ def run_command(command: str, workspace_root: str | Path, *,
         "push", "reset", "clean", "rebase", "cherry-pick", "merge",
     }:
         raise FileAgentError("Destructive or remote git commands are not allowed.")
+    if _looks_like_secret_exfiltration(command):
+        # Lesson (nx/npm 2025, Samsung 2023): commands that dump environment
+        # variables or config files are how API keys leave a machine. Aali
+        # never executes them, even "for debugging".
+        raise FileAgentError(
+            "This command would expose environment variables or credentials "
+            "(os.environ / process.env / config dumps are blocked). If you need "
+            "a specific setting, ask the user for the name of the value instead."
+        )
     root = _root(workspace_root)
     started = time.time()
     try:
@@ -358,6 +383,8 @@ def run_command(command: str, workspace_root: str | Path, *,
         raise FileAgentError(
             f"Command exited with code {completed.returncode}. Output:\n{output[:4000]}"
         )
+    from file_agent import memory as _memory
+    output = _memory.redact_secrets(output)  # defense in depth: nothing that looks like a credential leaves the sandbox
     return {
         "command": command,
         "exit_code": 0,
@@ -557,6 +584,140 @@ def generate_video(prompt: str, path: str, workspace_root: str | Path, *,
     return result
 
 
+EDIT_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "media_edit.py"
+MACHINE_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "machine_ops.py"
+
+
+def _run_tool_script(script: Path, args: list[str], timeout: int) -> dict[str, Any]:
+    """Run one of the scripts/* tool CLIs and parse its final JSON line."""
+    if not script.is_file():
+        raise FileAgentError(f"{script.name} not found")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-u", str(script), *args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FileAgentError(f"{script.name} timed out after {timeout}s") from exc
+    try:
+        result = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.stdout.strip() else {}
+    except (json.JSONDecodeError, IndexError):
+        result = {}
+    if proc.returncode != 0 or "error" in result:
+        message = result.get("error") if result else None
+        raise FileAgentError(message or f"{script.name} failed: " + (proc.stderr or proc.stdout or "")[-400:])
+    return result
+
+
+def edit_image(path: str, output: str, workspace_root: str | Path, *, op: str,
+               width: int = 0, height: int = 0, left: int = 0, top: int = 0,
+               deg: int = 0, factor: float = 1.0, radius: float = 2.0,
+               text: str = "") -> dict[str, Any]:
+    """Fast image edit with Pillow (resize, crop, rotate, flip, mirror, grayscale,
+    brightness, contrast, saturation, blur, sharpen, border, watermark_text,
+    thumbnail). Refuses to overwrite; write to a NEW output path."""
+    if not op:
+        raise FileAgentError("op is required")
+    root, source = _resolve(path, workspace_root, must_exist=True)
+    root, target = _resolve(output, workspace_root)
+    if source.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+        raise FileAgentError("image input must be .png/.jpg/.jpeg")
+    if target.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+        raise FileAgentError("output must end in .png, .jpg, or .jpeg")
+    result = _run_tool_script(EDIT_SCRIPT, [
+        "image", "--op", op, "--input", str(source), "--output", str(target),
+        "--width", str(width), "--height", str(height), "--left", str(left),
+        "--top", str(top), "--deg", str(deg), "--factor", str(factor),
+        "--radius", str(radius), "--text", text,
+    ], timeout=300)
+    result["output"] = _relative(root, target)
+    result["input"] = _relative(root, source)
+    return result
+
+
+def edit_video(path: str, output: str, workspace_root: str | Path, *, op: str,
+               start: float = 0.0, end: float | None = None, duration: float | None = None,
+               factor: float = 1.0, width: int = 0, height: int = 0,
+               left: int = 0, top: int = 0, deg: int = 0,
+               input2: str = "", position: str = "bottom_right") -> dict[str, Any]:
+    """Fast video edit with ffmpeg (cut, trim, concat, gif, extract_audio,
+    extract_frame, speed, volume, resize, crop, rotate, flip, mirror, fade,
+    watermark_image). input2 is the second clip (concat) or overlay image
+    (watermark_image). Refuses to overwrite; write to a NEW output path."""
+    if not op:
+        raise FileAgentError("op is required")
+    root, source = _resolve(path, workspace_root, must_exist=True)
+    root, target = _resolve(output, workspace_root)
+    args = [
+        "video", "--op", op, "--input", str(source), "--output", str(target),
+        "--start", str(start), "--factor", str(factor), "--width", str(width),
+        "--height", str(height), "--left", str(left), "--top", str(top),
+        "--deg", str(deg), "--position", position,
+    ]
+    if end is not None:
+        args += ["--end", str(end)]
+    if duration is not None:
+        args += ["--duration", str(duration)]
+    if input2:
+        root2, second = _resolve(input2, workspace_root, must_exist=True)
+        args += ["--input2", str(second)]
+    result = _run_tool_script(EDIT_SCRIPT, args, timeout=900)
+    result["output"] = _relative(root, target)
+    result["input"] = _relative(root, source)
+    return result
+
+
+def machine_ops(action: str, workspace_root: str | Path, *, target: str = "",
+                engine: str = "auto", force: bool = False, name: str = "",
+                pid: int | None = None, max_results: int = 30) -> dict[str, Any]:
+    """Operate the owner's Windows machine: open apps/files/URLs, install or
+    uninstall software (winget/npm), list and stop processes, read system
+    stats. install/uninstall/kill_process are IRREVERSIBLE: they require
+    force=true here AND explicit user confirmation (always_ask policy gates
+    them server-side). Aali's own training runtimes (python/node) are
+    protected from kill by name."""
+    allowed = {"open", "install", "uninstall", "search_software",
+               "list_processes", "kill_process", "system_info"}
+    if action not in allowed:
+        raise FileAgentError(f"action must be one of {sorted(allowed)}")
+    if action in {"install", "uninstall"} and not force:
+        raise FileAgentError(
+            f"{action} changes the system permanently: set force=true only AFTER the "
+            "user explicitly confirms in chat, and say what you are about to install first"
+        )
+    if action == "kill_process" and not force:
+        raise FileAgentError(
+            "kill_process is irreversible: set force=true only AFTER the user confirms "
+            "the exact program to stop"
+        )
+    args = [action]
+    timeout = 120
+    if action in {"open", "install", "uninstall", "search_software"}:
+        if not target.strip():
+            raise FileAgentError(f"{action} needs a target")
+        args += ["--target", target]
+    if action in {"install", "uninstall"}:
+        args += ["--engine", engine if engine in {"winget", "npm"} else "auto", "--force"]
+        timeout = 900
+    if action == "search_software" and engine in {"winget", "npm"}:
+        args += ["--engine", engine]
+    if action == "list_processes":
+        if name:
+            args += ["--name", name]
+        args += ["--max-results", str(max_results)]
+    if action == "kill_process":
+        if not name and pid is None:
+            raise FileAgentError("kill_process needs name or pid")
+        if name:
+            args += ["--name", name]
+        if pid is not None:
+            args += ["--pid", str(pid)]
+        args += ["--force"]
+    result = _run_tool_script(MACHINE_SCRIPT, args, timeout=timeout)
+    result["action"] = action
+    return result
+
+
 DOC_SUFFIXES = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx"}
 
 
@@ -645,6 +806,66 @@ def web_search(query: str, workspace_root: str | Path, *,
     return _web_tools.web_search(query, workspace_root, max_results=max_results)
 
 
+def generate_emoji(prompt: str, path: str, workspace_root: str | Path, *,
+                   emotion: str = "happy", palette: str = "yellow",
+                   size: int = 256, accessory: str = "", text: str = "") -> dict[str, Any]:
+    """Draw a custom emoji FROM SCRATCH (Pillow, CPU - instant even while
+    the GPU trains). Emotion-driven faces with palettes and accessories,
+    saved as a transparent PNG. `prompt` carries the user's description.
+    """
+    del prompt  # the structured args carry the design; prompt is for the log
+    import subprocess
+    import sys as _sys
+    script = Path(__file__).resolve().parents[2] / "scripts" / "generate_emoji.py"
+    out = str((workspace_root / path) if not Path(path).is_absolute() else path)
+    completed = subprocess.run(
+        [_sys.executable, str(script), "--out", out,
+         "--emotion", emotion, "--palette", palette,
+         "--size", str(size), "--accessory", accessory, "--text", text],
+        capture_output=True, text=True, timeout=120,
+    )
+    if completed.returncode != 0:
+        raise FileAgentError(f"emoji generation failed: {completed.stderr[-400:]}")
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+def memory(action: str, workspace_root: str | Path, *,
+           text: str = "", kind: str = "fact", topic: str = "",
+           query: str = "", entry_id: str = "", match_text: str = "",
+           limit: int = 50) -> dict[str, Any]:
+    """Persistent long-term memory about the user (survives restarts).
+
+    action=save    : store a user statement (decision/preference/fact/instruction)
+    action=recall  : search what the user said before (newest first)
+    action=forget  : remove entries (gated by the always_ask policy)
+    action=summary : counts + latest entries
+
+    Secrets pasted by the user are redacted automatically before storage.
+    """
+    from file_agent import memory as _memory
+    valid_kinds = ("decision", "preference", "fact", "instruction")
+    try:
+        if action == "save":
+            if not str(text).strip():
+                raise _memory.MemoryError("save يحتاج نصًا: memory(action='save', text='...')")
+            if kind not in valid_kinds:
+                raise _memory.MemoryError(f"kind must be one of {valid_kinds}, got {kind!r}")
+            return _memory.remember(str(text), kind=kind,
+                                    topic=(topic or None), source="user")["result"]
+        if action == "recall":
+            return _memory.recall(query=query, topic=(topic or None), limit=limit)["result"]
+        if action == "forget":
+            kind_filter = kind if kind in valid_kinds else ""
+            return _memory.forget(entry_id=entry_id, match_text=match_text,
+                                  topic=(topic or None), kind=kind_filter)["result"]
+        if action == "summary":
+            return _memory.summary()["result"]
+        raise _memory.MemoryError(
+            f"action must be save/recall/forget/summary, got {action!r}")
+    except _memory.MemoryError as exc:
+        raise FileAgentError(str(exc)) from exc
+
+
 ToolFunction = Callable[..., dict[str, Any]]
 _FUNCTIONS: dict[str, ToolFunction] = {
     "list_files": list_files,
@@ -667,6 +888,11 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "web_search": web_search,
     "generate_image": generate_image,
     "generate_video": generate_video,
+    "edit_image": edit_image,
+    "edit_video": edit_video,
+    "machine_ops": machine_ops,
+    "memory": memory,
+    "generate_emoji": generate_emoji,
 }
 
 
@@ -737,6 +963,41 @@ _DEFINITIONS = [
                  "width": {"type": "integer", "default": 256}, "height": {"type": "integer", "default": 256},
                  "fps": {"type": "integer", "default": 8},
                  "seed": {"type": "integer"}}, ["prompt", "path"]),
+    _definition("edit_image", "Edit an existing image quickly (no AI model): resize, crop, rotate, flip, mirror, grayscale, brightness, contrast, saturation, blur, sharpen, border, watermark_text, thumbnail. Write to a NEW output path - overwriting is refused.",
+                {"path": {"type": "string"}, "output": {"type": "string"}, "op": {"type": "string", "enum": ["resize", "crop", "rotate", "flip", "mirror", "grayscale", "brightness", "contrast", "saturation", "blur", "sharpen", "border", "watermark_text", "thumbnail"]},
+                 "width": {"type": "integer", "default": 0}, "height": {"type": "integer", "default": 0},
+                 "left": {"type": "integer", "default": 0}, "top": {"type": "integer", "default": 0},
+                 "deg": {"type": "integer", "default": 0}, "factor": {"type": "number", "default": 1.0},
+                 "radius": {"type": "number", "default": 2.0}, "text": {"type": "string", "default": ""}}, ["path", "output", "op"]),
+    _definition("edit_video", "Edit an existing video quickly with ffmpeg: cut, trim, concat, gif, extract_audio, extract_frame, speed, volume, resize, crop, rotate, flip, mirror, fade, watermark_image. input2 = second clip (concat) or overlay PNG (watermark_image). Write to a NEW output path.",
+                {"path": {"type": "string"}, "output": {"type": "string"}, "op": {"type": "string", "enum": ["cut", "trim", "concat", "gif", "extract_audio", "extract_frame", "speed", "volume", "resize", "crop", "rotate", "flip", "mirror", "fade", "watermark_image"]},
+                 "start": {"type": "number", "default": 0.0}, "end": {"type": "number"}, "duration": {"type": "number"},
+                 "factor": {"type": "number", "default": 1.0}, "width": {"type": "integer", "default": 0},
+                 "height": {"type": "integer", "default": 0}, "left": {"type": "integer", "default": 0},
+                 "top": {"type": "integer", "default": 0}, "deg": {"type": "integer", "default": 0},
+                 "input2": {"type": "string", "default": ""}, "position": {"type": "string", "enum": ["top_left", "top_right", "bottom_left", "bottom_right"], "default": "bottom_right"}}, ["path", "output", "op"]),
+    _definition("machine_ops", "Operate the owner's Windows PC: open apps/files/URLs (open), install/uninstall software via winget or npm (install/uninstall - IRREVERSIBLE: requires force=true AND explicit user confirmation in chat before use), search package names (search_software), list processes (list_processes), stop a program (kill_process - IRREVERSIBLE, needs force=true; Aali's own python/node runtimes are protected), or read system stats (system_info: GPU/RAM/disks/CPU).",
+                {"action": {"type": "string", "enum": ["open", "install", "uninstall", "search_software", "list_processes", "kill_process", "system_info"]},
+                 "target": {"type": "string", "default": ""}, "engine": {"type": "string", "enum": ["auto", "winget", "npm"], "default": "auto"},
+                 "force": {"type": "boolean", "default": False}, "name": {"type": "string", "default": ""},
+                 "pid": {"type": "integer"}, "max_results": {"type": "integer", "default": 30}}, ["action"]),
+    _definition("memory", "Persistent long-term memory about THIS user that survives restarts and new conversations. save: store a durable user statement (kind: decision/preference/fact/instruction, optional topic) - use it whenever the user says 'from now on', 'always', 'never', 'remember that'. recall: search what the user told you before BEFORE saying you don't know. forget: remove entries (needs explicit user confirmation). summary: counts and latest entries. If a newer instruction contradicts an older one, follow the newest and tell the user what changed.",
+                {"action": {"type": "string", "enum": ["save", "recall", "forget", "summary"]},
+                 "text": {"type": "string", "default": ""},
+                 "kind": {"type": "string", "enum": ["decision", "preference", "fact", "instruction"], "default": "fact"},
+                 "topic": {"type": "string", "default": ""},
+                 "query": {"type": "string", "default": ""},
+                 "entry_id": {"type": "string", "default": ""},
+                 "match_text": {"type": "string", "default": ""},
+                 "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}, ["action"]),
+    _definition("generate_emoji", "Generate a CUSTOM emoji from scratch (drawn with Pillow on CPU - instant, works even while the GPU trains): emotion-driven faces (happy/joy/love/sad/angry/surprised/wink/cool/sleepy/laughing), color palettes, accessories (party/crown/graduation), optional caption text. Saves a transparent PNG sticker.",
+                {"prompt": {"type": "string", "description": "the user's description of the emoji"},
+                 "path": {"type": "string"},
+                 "emotion": {"type": "string", "enum": ["happy", "joy", "love", "sad", "angry", "surprised", "wink", "cool", "sleepy", "laughing"], "default": "happy"},
+                 "palette": {"type": "string", "enum": ["yellow", "orange", "red", "green", "blue", "purple", "pink"], "default": "yellow"},
+                 "size": {"type": "integer", "default": 256},
+                 "accessory": {"type": "string", "enum": ["", "party", "crown", "graduation"], "default": ""},
+                 "text": {"type": "string", "default": ""}}, ["prompt", "path"]),
     _definition("read_document", "Read a document file (.pdf, .docx, .xlsx) and return its text content.",
                 {"path": {"type": "string"}, "max_chars": {"type": "integer", "default": 60000}}, ["path"]),
     _definition("analyze_video", "Understand a video file (.mp4/.avi/.mkv/.mov): read on-screen text from sampled frames (OCR) and transcribe the audio (Whisper).",

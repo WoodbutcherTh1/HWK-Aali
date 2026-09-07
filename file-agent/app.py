@@ -275,6 +275,8 @@ def api_ask():
         status = 500
     _append_turn(record, "assistant", reply)
     body = {"ok": ok, "reply": reply, "sid": sid}
+    from file_agent import suggestions
+    body["suggestions"] = suggestions.suggest(reply, message)
     if gate_state.get("blocked"):
         # A dangerous tool call was refused under "always_ask" this turn;
         # the client can show a confirm/cancel prompt and, on confirm,

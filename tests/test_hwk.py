@@ -6,6 +6,7 @@ Run from the project root:
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import tempfile
@@ -212,6 +213,353 @@ def test_run_command_disabled_switch(tmp_path, monkeypatch):
     monkeypatch.setenv("HWK_ALLOW_COMMANDS", "0")
     result = _tool("run_command", {"command": 'python -c "pass"'}, tmp_path)
     assert not result["ok"]
+
+
+def test_run_command_blocks_env_exfiltration(tmp_path, monkeypatch):
+    """Security: commands that dump environment variables/credentials must
+    never execute (nx/npm 2025 lesson - this is how keys leave machines)."""
+    monkeypatch.setenv("HWK_ALLOW_COMMANDS", "1")
+    for command in (
+        'python -c "import os; print(os.environ)"',
+        'node -e "console.log(process.env)"',
+        "echo $SECRET_TOKEN",
+        'python -c "print(open(\'.env\').read())"',
+    ):
+        result = _tool("run_command", {"command": command}, tmp_path)
+        assert not result["ok"], command
+
+
+def test_run_command_output_redacts_secrets(tmp_path, monkeypatch):
+    monkeypatch.setenv("HWK_ALLOW_COMMANDS", "1")
+    result = _tool("run_command", {
+        "command": 'python -c "print(\'key = sk-abc123DEF456ghi789\')"',
+    }, tmp_path)
+    assert result["ok"]
+    assert "sk-abc123DEF456ghi789" not in result["result"]["output"]
+
+
+# ---------------------------------------------------------------------------
+# Long-term memory (file_agent/memory.py)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def mem_dir(tmp_path, monkeypatch):
+    """Isolated memory store per test (env var wins over ~/.aali)."""
+    monkeypatch.setenv("AALI_MEMORY_DIR", str(tmp_path / "aali-mem"))
+    return tmp_path / "aali-mem"
+
+
+def test_memory_remember_recall_roundtrip(mem_dir):
+    from file_agent import memory
+
+    memory.remember("لا تحذف مجلد المشروع أبدًا", kind="instruction", topic="deletion")
+    memory.remember("always answer in Arabic", kind="preference")
+    result = memory.recall(query="حذف مجلد")
+    assert result["ok"] and result["result"]["count"] == 1
+    entry = result["result"]["entries"][0]
+    assert entry["kind"] == "instruction" and "لا تحذف" in entry["text"]
+    assert entry["topic"] == "deletion" and entry["created"]
+
+
+def test_memory_reaffirm_bumps_confirmation(mem_dir):
+    from file_agent import memory
+
+    first = memory.remember("always use bf16", kind="preference")
+    second = memory.remember("always use bf16", kind="preference")
+    assert second["result"]["action"] == "reaffirmed"
+    assert second["result"]["entry"]["confirmations"] == 2
+    assert second["result"]["entry"]["id"] == first["result"]["entry"]["id"]
+
+
+def test_memory_contradiction_surfaced(mem_dir):
+    from file_agent import memory
+
+    memory.remember("never push to GitHub", kind="decision", topic="git")
+    second = memory.remember("push to GitHub daily", kind="decision", topic="git")
+    contradiction = second["result"]["contradiction"]
+    assert contradiction is not None
+    assert "never push" in contradiction["text"]
+    # Both remain stored; newest-first rendering puts the new one on top.
+    rendered = memory.render_block()
+    assert "push to GitHub daily" in rendered.splitlines()[4]
+
+
+def test_memory_rejects_agent_beliefs_and_bad_kind(mem_dir):
+    from file_agent import memory
+
+    with pytest.raises(memory.MemoryError):
+        memory.remember("the user's password is horse", source="agent")
+    with pytest.raises(memory.MemoryError):
+        memory.remember("anything", kind="rumor")
+    with pytest.raises(memory.MemoryError):
+        memory.remember("   ")
+
+
+def test_memory_redacts_secrets(mem_dir):
+    from file_agent import memory
+
+    saved = memory.remember("my api_key = sk-abc123DEF456ghi789 keep it safe")
+    text = saved["result"]["entry"]["text"]
+    assert "sk-abc123DEF456ghi789" not in text
+    assert memory._SECRET_MARKER in text
+    # The memory block sent to providers must never contain the raw secret.
+    assert "sk-abc123DEF456ghi789" not in memory.render_block()
+
+
+def test_memory_forget_requires_criteria_and_gates(mem_dir):
+    from file_agent import memory
+
+    memory.remember("old preference", kind="preference")
+    with pytest.raises(memory.MemoryError):
+        memory.forget()  # no criteria -> refuse
+    result = memory.forget(kind="preference")
+    assert result["result"]["count"] == 1
+    assert memory.recall()["result"]["total"] == 0
+
+
+def test_memory_empty_recall_is_honest(mem_dir):
+    from file_agent import memory
+
+    result = memory.recall(query="anything at all")
+    assert result["ok"] and result["result"]["count"] == 0
+
+
+def test_record_turn_auto_captures_directives_and_logs_all(mem_dir):
+    from file_agent import memory
+
+    memory.record_turn("user", "من الآن لا تستخدم fp16 في التدريب أبدًا")
+    memory.record_turn("assistant", "تم يا صديقي")
+    log = (mem_dir / memory.CONVERSATION_LOG_NAME).read_text(encoding="utf-8").strip().splitlines()
+    assert len(log) == 2  # raw turns kept for mentor-SFT
+    saved = memory.recall(kind="decision")
+    assert saved["result"]["count"] == 1  # directive auto-captured
+    # Ordinary chat is NOT auto-captured.
+    memory.record_turn("user", "مرحبا كيف حالك اليوم")
+    assert memory.recall(kind="decision")["result"]["count"] == 1
+
+
+def test_memory_tool_via_execute_tool(mem_dir, tmp_path):
+    from file_agent.file_tools import execute_tool
+
+    ok = execute_tool("memory", {"action": "save", "text": "prefer Arabic replies",
+                                 "kind": "preference"}, tmp_path)
+    assert ok["ok"]
+    found = execute_tool("memory", {"action": "recall", "query": "Arabic"}, tmp_path)
+    assert found["ok"] and found["result"]["count"] == 1
+    bad_kind = execute_tool("memory", {"action": "save", "text": "x", "kind": "nope"}, tmp_path)
+    assert not bad_kind["ok"]
+
+
+def test_agent_loop_records_conversation_turns(tmp_path, monkeypatch, mem_dir):
+    from agent_loop import agent_loop
+    from file_agent import memory
+
+    monkeypatch.delenv("LOCAL_MODEL_PATH", raising=False)
+    monkeypatch.setenv("AALI_OLLAMA", "0")
+    agent_loop("أنشئ ملف mem_test.txt واكتب بداخله تم", tmp_path, mode="local", print_final=False)
+    log = (mem_dir / memory.CONVERSATION_LOG_NAME).read_text(encoding="utf-8").strip().splitlines()
+    assert len(log) >= 2
+    assert any("mem_test.txt" in line for line in log)
+
+
+def test_memory_block_included_in_scratch_transcript(tmp_path, monkeypatch, mem_dir):
+    from file_agent import memory
+    import agent_loop
+
+    memory.remember("owner name is Hmam", kind="fact")
+    monkeypatch.setenv("AALI_OLLAMA", "0")  # force the scratch-model path
+    fake_ckpt = tmp_path / "final.pt"
+    fake_ckpt.write_bytes(b"x")  # exists-check passes; loader is patched below
+    monkeypatch.setenv("LOCAL_MODEL_PATH", str(fake_ckpt))
+
+    captured = {}
+
+    def fake_load_checkpoint(path, device=None):
+        return object(), {"tokenizer": {}}
+
+    def fake_generate(model, tokenizer, prompt, **kwargs):
+        captured["prompt"] = prompt
+        return '{"tool": "final", "content": "ok"}'
+
+    monkeypatch.setattr("hwk_model.load_checkpoint", fake_load_checkpoint)
+    monkeypatch.setattr("hwk_model.generation.generate_text", fake_generate)
+    reply = agent_loop.agent_loop("hi", tmp_path, mode="local", print_final=False)
+    assert reply == "ok"
+    assert "owner name is Hmam" in captured["prompt"]
+    assert "System:" in captured["prompt"] and "Available tools:" in captured["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# Suggestions (the "what next?" chips)
+# ---------------------------------------------------------------------------
+
+def test_suggestions_match_language_and_cap():
+    from file_agent.suggestions import suggest
+
+    arabic = suggest("تم إنشاء الملف بنجاح في مجلد العمل", "أنشئ لي ملف")
+    assert 1 <= len(arabic) <= 3
+    assert all(any("\u0600" <= ch <= "\u06FF" for ch in s) for s in arabic)
+    english = suggest("Created the file successfully", "create a file")
+    assert all(not any("\u0600" <= ch <= "\u06FF" for ch in s) for s in english)
+
+
+def test_suggestions_never_suggest_destructive():
+    from file_agent.suggestions import suggest
+
+    for reply in ("deleted the folder", "installed the package", "killed process 42"):
+        for text in suggest(reply, reply):
+            lowered = text.lower()
+            assert not any(word in lowered for word in ("delete", "احذف", "uninstall", "kill"))
+
+
+# ---------------------------------------------------------------------------
+# Emoji intelligence
+# ---------------------------------------------------------------------------
+
+def test_emoji_analyze_reads_emotion_and_language():
+    from file_agent import emoji
+
+    ar = emoji.analyze("نجحت بالامتحان 🎉🎉")
+    assert ar["emotion"] == "celebration" and ar["user_is_arabic"]
+    assert "مبروك" in ar["reaction"]
+    en = emoji.analyze("my files got deleted 😭")
+    assert en["emotion"] == "sadness"
+    none = emoji.analyze("plain text no emoji")
+    assert none["emotion"] == "none" and none["reaction"] == ""
+
+
+def test_emoji_decorate_rules():
+    from file_agent import emoji
+
+    # Success earns exactly one fitting emoji.
+    done = emoji.decorate("تم إنشاء الملف بنجاح", "شكرا 😄")
+    assert len(emoji._EMOJI.findall(done)) == 1
+    # Refusals and errors are never decorated.
+    assert emoji.decorate("I can't print environment variables", "please 🎉") == \
+        "I can't print environment variables"
+    assert emoji.decorate("تعذر الحذف: المجلد غير موجود", "احذفه 🙏") == \
+        "تعذر الحذف: المجلد غير موجود"
+    # Never piles on when a reply already has one.
+    assert emoji.decorate("تم ✅", "أحسنت 😄") == "تم ✅"
+    # Serious topics stay sober.
+    assert emoji.decorate("Never store the password in the file", "كلمة السر 🔑") == \
+        "Never store the password in the file"
+
+
+def test_generate_emoji_tool(tmp_path):
+    from file_agent.file_tools import execute_tool
+
+    result = execute_tool("generate_emoji", {
+        "prompt": "a cool blue emoji", "path": "emoji/cool.png",
+        "emotion": "cool", "palette": "blue",
+    }, tmp_path)
+    assert result["ok"] and result["result"]["emotion"] == "cool"
+    assert (tmp_path / "emoji" / "cool.png").exists()
+
+
+def test_autocorrect_basic_and_protection():
+    from file_agent import autocorrect
+
+    fixed = autocorrect.correct("hai dode can u help me")
+    assert fixed.corrected == "hi dude can you help me"
+    assert fixed.n_changes == 3
+    hint = autocorrect.hint_phrase(fixed, arabic=False)
+    assert "hi dude" in hint
+    # Paths/code survive untouched.
+    path_case = autocorrect.correct("read D:/hwk-data/training.log and `x = os.environ`")
+    assert "D:/hwk-data/training.log" in path_case.corrected
+    assert "os.environ" in path_case.corrected
+    # Arabic normalization.
+    ar = autocorrect.correct("لاكن انا سعيد")
+    assert ar.corrected.startswith("لكن أنا")
+    # Already-clean text changes nothing.
+    clean = autocorrect.correct("please open the training folder")
+    assert clean.n_changes == 0
+
+
+# ---------------------------------------------------------------------------
+# Memory: edit/get + semantic recall
+# ---------------------------------------------------------------------------
+
+def test_memory_edit_and_get(mem_dir):
+    from file_agent import memory
+
+    entry = memory.remember("likes tea", kind="preference")["result"]["entry"]
+    fetched = memory.get(entry["id"])["result"]["entry"]
+    assert fetched["text"] == "likes tea"
+    edited = memory.edit(entry["id"], text="likes coffee", topic="drinks")["result"]
+    assert edited["entry"]["text"] == "likes coffee" and edited["entry"]["topic"] == "drinks"
+    with pytest.raises(memory.MemoryError):
+        memory.get("no-such-id")
+    with pytest.raises(memory.MemoryError):
+        memory.edit("no-such-id", text="x")
+
+
+def test_memory_edit_merges_duplicate(mem_dir):
+    from file_agent import memory
+
+    first = memory.remember("likes tea", kind="preference")["result"]["entry"]
+    second = memory.remember("prefers tea in the morning", kind="preference")["result"]["entry"]
+    result = memory.edit(second["id"], text="Likes Tea")["result"]
+    assert result["action"] == "merged"
+    assert result["merged_into"] == first["id"]
+    assert memory.recall()["result"]["total"] == 1
+
+
+def test_recall_keyword_mode_without_embedder(mem_dir, monkeypatch):
+    from file_agent import memory
+
+    monkeypatch.setenv("AALI_EMBEDDINGS", "0")
+    memory.remember("never push to GitHub without asking", kind="decision", topic="git")
+    result = memory.recall(query="deployment rules")
+    assert result["result"]["mode"] == "keyword"
+    assert result["result"]["count"] == 0  # no shared words -> honest empty
+
+
+def test_recall_hybrid_mode_finds_related_entry(mem_dir, monkeypatch):
+    """Semantic: 'deployment rules' must find the GitHub push rule even with
+    zero shared keywords (fake embedder: same vector for related topics)."""
+    from file_agent import memory
+
+    fake_vectors = {"deploy": [1.0, 0.0], "unrelated": [0.0, 1.0]}
+
+    def fake_embed(texts):
+        out = []
+        for text in texts:
+            lowered = text.lower()
+            if any(w in lowered for w in ("deploy", "push", "github", "git")):
+                out.append(list(fake_vectors["deploy"]))
+            else:
+                out.append(list(fake_vectors["unrelated"]))
+        return out
+
+    monkeypatch.setattr(memory, "_ollama_embed", fake_embed)
+    memory.remember("never push to GitHub without asking", kind="decision", topic="git")
+    result = memory.recall(query="deployment rules")
+    assert result["result"]["mode"] == "hybrid"
+    assert result["result"]["count"] == 1
+    assert "GitHub" in result["result"]["entries"][0]["text"]
+    # Sidecar cached the vector for the entry.
+    sidecar = memory._load_sidecar()
+    assert memory._EMBED_MODEL in str(sidecar)
+
+
+# ---------------------------------------------------------------------------
+# SFT v2 builder: exam-leak gate
+# ---------------------------------------------------------------------------
+
+def test_sft_v2_exam_leak_gate(tmp_path):
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import build_aali_sft_v2 as builder
+
+    exam_case = {"id": "t", "turns": [["user", "SECRET-EXAM-PROMPT-123"], ["assistant", "x"]]}
+    exam_path = tmp_path / "exam.jsonl"
+    exam_path.write_text(json.dumps(exam_case), encoding="utf-8")
+    hashes = builder.load_exam_prompts(exam_path)
+    assert builder._hash_pair("SECRET-EXAM-PROMPT-123", "") in hashes
+    assert builder._hash_pair("harmless prompt", "") not in hashes
 
 
 def test_agent_workspace_and_instructions(tmp_path, monkeypatch):
