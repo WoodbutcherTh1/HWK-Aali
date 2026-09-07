@@ -35,6 +35,6 @@ echo Current Phase A step captured. Training sft-now up to step %MAXSTEPS% (+300
   --context 1024 --d-model 768 --heads 12 --layers 12 ^
   --batch-size 2 --gradient-accumulation 16 ^
   --max-steps %MAXSTEPS% --save-steps 250 --log-steps 25 ^
-  --learning-rate 5e-5 --warmup-steps 100 --dtype fp16 ^
+  --learning-rate 5e-5 --warmup-steps 100 --dtype bf16 ^
   --resume >> D:\hwk-data\sft_now_training.log 2>&1
 pause

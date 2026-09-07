@@ -21,6 +21,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import random
 import shutil
 import sys
@@ -29,12 +30,24 @@ from dataclasses import replace as _dc_replace
 from pathlib import Path
 from typing import Iterable, Iterator
 
+# Must be set before torch allocates any CUDA memory: with several processes
+# sharing the 8GB card (training + SD/whisper + desktop apps), the caching
+# allocator fragments reserved memory and OOMs happen long before VRAM is
+# truly exhausted. Expandable segments let a block grow instead of forcing a
+# contiguous re-reservation.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 PROJECT_PACKAGE = Path(__file__).resolve().parent / "file-agent"
 if str(PROJECT_PACKAGE) not in sys.path:
     sys.path.insert(0, str(PROJECT_PACKAGE))
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np
 import torch
+
+from hwk_paths import TOKENIZER_DIR
 from torch import Tensor
 from torch.utils.data import DataLoader
 
@@ -353,8 +366,8 @@ def load_tokenizer_from_state(state: dict[str, object], fallback: str | None) ->
 # ---------------------------------------------------------------------------
 
 def _collate(blocks: list[tuple[np.ndarray, np.ndarray]]) -> tuple[Tensor, Tensor]:
-    inputs = torch.stack([torch.tensor(x, dtype=torch.long) for x, _ in blocks])
-    targets = torch.stack([torch.tensor(y, dtype=torch.long) for _, y in blocks])
+    inputs = torch.stack([torch.as_tensor(x, dtype=torch.long) for x, _ in blocks])
+    targets = torch.stack([torch.as_tensor(y, dtype=torch.long) for _, y in blocks])
     return inputs, targets
 
 
@@ -383,7 +396,6 @@ def train(args: argparse.Namespace) -> None:
             rng.shuffle(records)
             eval_records = records[:eval_count]
             train_records = records[eval_count:]
-            train_records = records[eval_count:]
             print(f"SFT: {len(train_records)} train / {len(eval_records)} eval records")
         else:
             train_records = eval_records = None
@@ -392,14 +404,21 @@ def train(args: argparse.Namespace) -> None:
         eval_path = None
 
     # Tokenizer
+    # The byte tokenizer (vocab 259) is only correct for checkpoints trained
+    # with it. Every serious run uses the project BPE; defaulting SFT/text
+    # mode to it (when the model file exists) prevents a silent
+    # byte-vs-BPE mismatch that would corrupt resume checks and eval loss.
+    if args.tokenizer is None and mode != "pretrain":
+        default_bpe = TOKENIZER_DIR / "hwk_spm.model"
+        if default_bpe.exists():
+            args.tokenizer = str(default_bpe)
+
     tokenizer: ByteTokenizer | BpeTokenizer
     if mode == "pretrain":
         if args.tokenizer:
             tokenizer = load_bpe(args.tokenizer)
         else:
             tokenizer = ByteTokenizer()
-    elif mode == "sft":
-        tokenizer = load_bpe(args.tokenizer) if args.tokenizer else ByteTokenizer()
     else:
         tokenizer = load_bpe(args.tokenizer) if args.tokenizer else ByteTokenizer()
     print(f"tokenizer: {type(tokenizer).__name__} vocab={tokenizer.vocab_size}")
@@ -435,8 +454,12 @@ def train(args: argparse.Namespace) -> None:
             # architecture change, so a checkpoint trained at one context can be
             # resumed/continued at a different (typically larger) one.
             if _dc_replace(saved_config, context_size=config.context_size) != config:
+                hint = ""
+                if saved_config.vocab_size != config.vocab_size:
+                    hint = " (vocab_size differs - are you passing the same --tokenizer the checkpoint was trained with?)"
                 raise SystemExit(
-                    f"Resume config mismatch: {saved_config} != {config}. Use a fresh output dir for new hyperparameters."
+                    f"Resume config mismatch: {saved_config} != {config}.{hint} "
+                    "Use a fresh output dir for new hyperparameters."
                 )
             if saved_config.context_size != config.context_size:
                 print(
@@ -464,12 +487,16 @@ def train(args: argparse.Namespace) -> None:
     scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
 
     # Data iterators
+    # Eval batch scales down at longer contexts: 8 blocks x 4096 tokens is a
+    # much bigger inference batch than the training batch itself, and was the
+    # OOM that killed the first 1024->4096 attempt (sft_training.log).
+    eval_batch_size = max(1, min(8, 8192 // max(1, args.context)))
     if mode == "pretrain":
         block_iter = iter_shard_blocks(shard_paths, args.context, args.seed)
         eval_blocks = list(iter_eval_blocks(eval_path, args.context, max_blocks=64)) if eval_path else []
         eval_loader = [
-            _collate(eval_blocks[start : start + 8])
-            for start in range(0, len(eval_blocks), 8)
+            _collate(eval_blocks[start : start + eval_batch_size])
+            for start in range(0, len(eval_blocks), eval_batch_size)
         ] if eval_blocks else []
         if not eval_loader:
             print("warning: no eval.bin found; eval loss will be skipped")
@@ -477,11 +504,11 @@ def train(args: argparse.Namespace) -> None:
         if train_records is not None:
             dataset = SftDataset(train_records, tokenizer, args.context, args.seed)
             eval_sft = SftDataset(eval_records, tokenizer, args.context, args.seed)
-            eval_loader = [next(eval_sft.batches(8, tokenizer.pad_id))]
+            eval_loader = [next(eval_sft.batches(eval_batch_size, tokenizer.pad_id))]
         else:
             tokens = tokenizer.encode(load_text(data_path))
             train_data, eval_data = split_tokens(tokens, args.context)
-            eval_loader = [next(iter(DataLoader(eval_data, batch_size=8)))]
+            eval_loader = [next(iter(DataLoader(eval_data, batch_size=eval_batch_size)))]
             dataset = None
 
     log_path = output_dir / "training_log.csv"
@@ -507,11 +534,19 @@ def train(args: argparse.Namespace) -> None:
         model.eval()
         with torch.no_grad():
             for inputs, targets in eval_loader:
-                with torch.autocast("cuda", dtype=autocast_dtype, enabled=device.type == "cuda"):
-                    _, loss = model(inputs.to(device), targets.to(device))
+                try:
+                    with torch.autocast("cuda", dtype=autocast_dtype, enabled=device.type == "cuda"):
+                        _, loss = model(inputs.to(device), targets.to(device))
+                except torch.OutOfMemoryError:
+                    # A transient co-tenant spike must not kill a 12-hour run
+                    # over one eval batch: drop the cached blocks, skip this
+                    # batch, and continue with the rest.
+                    torch.cuda.empty_cache()
+                    print("warning: eval batch OOM - skipped", flush=True)
+                    continue
                 losses.append(float(loss.item()))
         model.train()
-        return sum(losses) / len(losses)
+        return sum(losses) / max(1, len(losses)) if losses else float("nan")
 
     def make_block_stream() -> Iterator[tuple[Tensor, Tensor]]:
         while True:
@@ -535,10 +570,37 @@ def train(args: argparse.Namespace) -> None:
         for _ in range(args.gradient_accumulation):
             inputs, targets = next(block_stream)
             inputs, targets = inputs.to(device), targets.to(device)
-            with torch.autocast("cuda", dtype=autocast_dtype, enabled=device.type == "cuda"):
-                _, loss = model(inputs, targets)
-                scaled = loss / args.gradient_accumulation
-            scaler.scale(scaled).backward()
+            try:
+                with torch.autocast("cuda", dtype=autocast_dtype, enabled=device.type == "cuda"):
+                    _, loss = model(inputs, targets)
+                    scaled = loss / args.gradient_accumulation
+                scaler.scale(scaled).backward()
+            except torch.OutOfMemoryError:
+                # Kill the half-built gradients cleanly, free the cached
+                # blocks, and retry this micro-batch once. This is what saved
+                # runs from desktop apps / browser tabs grabbing a few hundred
+                # MB mid-run (the exact crash at step 27,100 on 2026-09-06).
+                optimizer.zero_grad(set_to_none=True)
+                torch.cuda.empty_cache()
+                print("warning: training micro-batch OOM - retrying once", flush=True)
+                time.sleep(5.0)
+                try:
+                    with torch.autocast("cuda", dtype=autocast_dtype, enabled=device.type == "cuda"):
+                        _, loss = model(inputs, targets)
+                        scaled = loss / args.gradient_accumulation
+                    scaler.scale(scaled).backward()
+                except torch.OutOfMemoryError:
+                    optimizer.zero_grad(set_to_none=True)
+                    torch.cuda.empty_cache()
+                    save_trainer_state(
+                        output_dir, model, optimizer, scheduler,
+                        step=global_step, epoch=epoch, tokens=tokens_seen, tokenizer=tokenizer, seed=args.seed,
+                    )
+                    raise SystemExit(
+                        f"CUDA OOM twice at step {global_step} even after emptying the cache. "
+                        "Close other GPU apps or reduce --batch-size; checkpoint was saved, so "
+                        "this run resumes cleanly with --resume."
+                    ) from None
             loss_accum += float(loss.item())
             micro_batches += 1
         scaler.unscale_(optimizer)

@@ -28,5 +28,5 @@ if not exist "D:\hwk-models\context-4k\trainer-state.pt" copy /Y "D:\hwk-models\
   --context 4096 --d-model 768 --heads 12 --layers 12 ^
   --batch-size 1 --gradient-accumulation 8 --grad-checkpoint ^
   --max-steps 100000 --save-steps 500 --log-steps 25 ^
-  --learning-rate 1e-4 --warmup-steps 200 --dtype fp16 ^
+  --learning-rate 1e-4 --warmup-steps 200 --dtype bf16 ^
   --resume > D:\hwk-data\context_training.log 2>&1

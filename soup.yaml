@@ -1,0 +1,34 @@
+# Soup config for HWK-Aali (owner's machine: RTX 3070 8GB)
+# Purpose: local teacher + comparison model for Aali's tool-calling exam.
+#
+# Phase 1 (now): base = Qwen2.5-1.5B-Instruct - small enough to train/serve on
+#   the 8GB card; download is ~3GB onto D:. soup profile/doctor validate before
+#   any training run.
+# Phase 2 (after Phase A finishes): optionally raise `base` to a 7B/8B instruct
+#   model for a stronger teacher, and re-export data from the REBALANCED mix
+#   (>=1000 Arabic, >=200/tool; see docs/freebuff_recovery_report_2026-09-06.md).
+#
+# ALWAYS run `soup profile --config soup.yaml` before `soup train` - if it
+# reports a VRAM plan above ~7GB, reduce max_length or lora.r first. Phase A
+# pretraining uses the GPU; pause it (close the training window) before
+# serving/training anything here.
+base: Qwen/Qwen2.5-1.5B-Instruct
+task: sft
+
+data:
+  train: D:/hwk-data/soup/sft_v2.jsonl
+  format: alpaca
+  val_split: 0.05
+  max_length: 1024
+
+training:
+  epochs: 3
+  lr: 2e-5
+  batch_size: auto
+  lora:
+    r: 32
+    alpha: 16
+    target_modules: auto
+  quantization: 4bit
+
+output: D:/hwk-models/soup-teacher

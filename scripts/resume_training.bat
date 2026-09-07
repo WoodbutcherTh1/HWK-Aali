@@ -17,6 +17,6 @@ set PYTHONIOENCODING=utf-8
   --context 1024 --d-model 768 --heads 12 --layers 12 ^
   --batch-size 4 --gradient-accumulation 8 ^
   --max-steps 90000 --save-steps 2500 --log-steps 25 ^
-  --warmup-steps 500 --dtype fp16 ^
+  --warmup-steps 500 --dtype bf16 ^
   --resume > D:\hwk-data\training.log 2>&1
 pause
