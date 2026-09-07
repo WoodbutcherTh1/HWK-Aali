@@ -101,6 +101,7 @@ export async function askStream(
     signal?: AbortSignal;
   }
 ): Promise<AskResult> {
+  let sawFrame = false;
   try {
     const res = await fetch(`${apiBase}/api/ask/stream`, {
       method: "POST",
@@ -135,6 +136,7 @@ export async function askStream(
           else if (line.startsWith("data:")) dataLines.push(line.slice(5));
         }
         if (!dataLines.length) continue;
+        sawFrame = true;
         let payload: unknown;
         try {
           payload = JSON.parse(dataLines.join("\n"));
@@ -155,7 +157,10 @@ export async function askStream(
     throw new Error("stream ended without a done event");
   } catch (err) {
     if (opts?.signal?.aborted) throw err;
-    // graceful fallback for older backends
+    // Fallback to the plain endpoint ONLY if the stream never delivered a
+    // frame — otherwise a mid-stream hiccup would run the agent a SECOND time
+    // and duplicate the reply (seen live 2026-09-07).
+    if (sawFrame) throw err;
     return ask(message, opts);
   }
 }
@@ -216,7 +221,7 @@ export async function compactSession(): Promise<CompactResult> {
 
 export async function health(): Promise<boolean> {
   try {
-    const res = await fetch(`${apiBase}/api/health`);
+    const res = await fetch(`${apiBase}/api/health`, { headers: authHeaders() });
     return res.ok;
   } catch {
     return false;

@@ -144,18 +144,39 @@ def _model_for_adapter() -> str:
     return BASE_MODEL
 
 
+LOCAL_TEACHER = Path("D:/hwk-models/Qwen2.5-1.5B-Instruct")
+
+
+def resolve_teacher_model() -> str:
+    """Soup expects a LOCAL model directory — it does not fetch from the hub.
+    Use the pre-downloaded copy; download it if missing (scripts/download_teacher.py
+    does the same thing standalone)."""
+    if not LOCAL_TEACHER.exists():
+        log(f"teacher model not found at {LOCAL_TEACHER} - downloading (~3GB)…")
+        from huggingface_hub import snapshot_download
+
+        snapshot_download(BASE_MODEL, local_dir=str(LOCAL_TEACHER))
+        log("teacher model downloaded")
+    return str(LOCAL_TEACHER)
+
+
 def serve_teacher() -> subprocess.Popen | None:
-    log(f"starting Soup server on port {PORT} ({BASE_MODEL})")
+    try:
+        model_ref = resolve_teacher_model()
+    except Exception as exc:  # noqa: BLE001
+        log(f"failed to obtain the teacher model: {exc}")
+        return None
+    log(f"starting Soup server on port {PORT} ({model_ref})")
     try:
         process = subprocess.Popen(
-            [str(SOUP_EXE), "serve", "--model", BASE_MODEL, "--port", str(PORT)],
+            [str(SOUP_EXE), "serve", "--model", model_ref, "--port", str(PORT)],
             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
         )
     except OSError as exc:
         log(f"failed to start soup serve: {exc}")
         return None
     import urllib.request
-    for _ in range(60):  # up to 10 min for first model download
+    for _ in range(90):  # up to 15 min for the server to load the local model
         time.sleep(10)
         try:
             with urllib.request.urlopen(
@@ -166,7 +187,7 @@ def serve_teacher() -> subprocess.Popen | None:
                     return process
         except Exception:  # noqa: BLE001 - not up yet
             continue
-    log("server did not become ready in 10 minutes")
+    log("server did not become ready in 15 minutes")
     process.terminate()
     return None
 
@@ -303,8 +324,11 @@ def main() -> int:
 
     done_marker = REPORTS / "resft_pipeline_report.md"
     if done_marker.exists():
-        log("pipeline already completed (verdict exists) - nothing to do")
-        return 0
+        # A failed run also writes a verdict; only a real completion blocks a retry.
+        if "INCOMPLETE" not in done_marker.read_text(encoding="utf-8"):
+            log("pipeline already completed (verdict exists) - nothing to do")
+            return 0
+        log("previous run ended INCOMPLETE - retrying")
     log("=== soup pipeline start ===")
     if not _acquire_lock():
         log("another pipeline instance already holds the lock - exiting")

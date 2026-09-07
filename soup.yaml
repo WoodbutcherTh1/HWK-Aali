@@ -12,7 +12,7 @@
 # reports a VRAM plan above ~7GB, reduce max_length or lora.r first. Phase A
 # pretraining uses the GPU; pause it (close the training window) before
 # serving/training anything here.
-base: Qwen/Qwen2.5-1.5B-Instruct
+base: D:/hwk-models/Qwen2.5-1.5B-Instruct
 task: sft
 
 data:

@@ -588,6 +588,16 @@ def _ollama_agent_loop(
             return _local_agent_loop(message, root, request_id,
                                      fallback_reason="ollama unreachable")
         content = str(response_message.get("content", "") or "").strip()
+        # Protocol-leak guard: when the model wraps a plain answer in the JSON
+        # protocol ({"content": "..."}), unwrap it — the user must never see
+        # raw protocol JSON. (Owner hit this live, 2026-09-07.)
+        if content.startswith("{"):
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict) and isinstance(parsed.get("content"), str) and parsed["content"].strip():
+                    content = parsed["content"].strip()
+            except json.JSONDecodeError:
+                pass
         kind, value, arguments = _parse_local_model_response(content)
         log_event(request_id, "ollama_turn", kind=kind, model=OLLAMA_MODEL)
 
@@ -604,13 +614,25 @@ def _ollama_agent_loop(
                 if result is None:
                     result = execute_tool(tool_name, args, root)
             tools_used += 1
+            # Repeat-guard: small models loop on the same tool call. After two
+            # identical (tool, args) calls in a row, forbid the tool and force
+            # a direct final answer from what is already known.
+            fingerprint = json.dumps([tool_name, args], ensure_ascii=False, sort_keys=True)
+            if fingerprint == getattr(_ollama_agent_loop, "_last_fp", None):
+                _ollama_agent_loop._repeat_n = getattr(_ollama_agent_loop, "_repeat_n", 0) + 1
+            else:
+                _ollama_agent_loop._last_fp = fingerprint
+                _ollama_agent_loop._repeat_n = 0
             log_event(request_id, "tool_result", tool=tool_name,
                       result=result, mode="local-ollama")
             messages.append({"role": "assistant", "content": content})
-            messages.append({"role": "user", "content":
-                "نتيجة الأداة: " + json.dumps(result, ensure_ascii=False)[:6000]
+            followup = ("نتيجة الأداة: " + json.dumps(result, ensure_ascii=False)[:6000]
                 + "\nإن بقيت خطوات في الطلب الأصلي فنفّذها الآن بكائن أداة، "
-                  "وإلا أجب بكائن final بالعربية (إن كان المستخدم قد كتب بالعربية)."})
+                  "وإلا أجب بكائن final بالعربية (إن كان المستخدم قد كتب بالعربية).")
+            if _ollama_agent_loop._repeat_n >= 1:
+                followup += ("\n⚠️ كرّرت نفس الأداة بنفس المعاملات — الخطوة نفّذت فعلاً. "
+                             "ممنوع إعادة الأداة: أجب الآن بكائن final مباشرة من المعروف عندك.")
+            messages.append({"role": "user", "content": followup})
             continue
 
         reply = (value if kind == "final" else content).strip()
