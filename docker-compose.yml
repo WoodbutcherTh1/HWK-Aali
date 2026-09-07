@@ -1,0 +1,23 @@
+services:
+  aali:
+    build: .
+    ports:
+      - "5055:5055"
+    environment:
+      # Set a key to enable multi-user mode: every client (web/CLI) must send
+      # it as X-API-Key, and each key gets its own isolated sessions.
+      - AALI_API_KEY=${AALI_API_KEY:-}
+      # Cloud brains (any one is enough for cloud mode):
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Scratch-model fallback (point at a shared volume if you have one):
+      - LOCAL_MODEL_PATH=${LOCAL_MODEL_PATH:-}
+    volumes:
+      - aali_workspace:/app/file-agent/agent_workspace
+      - aali_sessions:/app/file-agent/data
+    restart: unless-stopped
+
+volumes:
+  aali_workspace:
+  aali_sessions:

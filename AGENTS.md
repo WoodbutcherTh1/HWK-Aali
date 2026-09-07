@@ -143,9 +143,18 @@ in parallel:
   audits+prunes lab episodes (scripts/audit_mentor_lab.py: runs every build,
   keeps only verified-working ones), rebuilds sft_v2, launches the soup
   pipeline, chains the 4096 extension, and writes D:/hwk-data/MORNING_REPORT.md.
+- **Aali as a product (2026-09-07)**: one server, every client — the vision is
+  Aali on servers with users on web/desktop/CLI/terminal. Shipped: SSE
+  streaming (`/api/ask/stream` with live tool-activity events via the
+  agent_log bus), sessions sidebar API (`/api/sessions`, GET/DELETE
+  `/api/session/<sid>`), multi-user mode (`AALI_API_KEY` → X-API-Key gate +
+  per-user session isolation), desktop web app rebuilt (streaming, markdown,
+  suggestion chips, sessions sidebar, voice input, stop/copy buttons —
+  `web/src` now builds; dist served at `/ui/`), Dockerfile + compose for
+  deployment, mock API for GPU-free UI testing (scripts/mock_aali_api.py).
+  Docs: docs/desktop_app.md. Tests 46/46.
 - **Known gaps**: n8n webhook needs one manual activation click in the editor;
   ffmpeg installed but PATH needs refresh in new shells; arena.ai capture
-  experimental; sft_v2 Arabic share ~1.4% — ≥1,000-Arabic-records drive
-  still pending.
+  experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 
-— Last updated: 2026-09-06 (late evening — memory + security upgrade: persistent long-term memory live across all four brains with contradiction surfacing and secret redaction; security lessons from real incidents enforced in prompts, tools, and exam (24 cases); after_phaseA.bat automates the 4096 context extension once Phase A ends; earlier today: Phase A restarted bf16 + watchdog, OmniRoute + Soup installed, edit_image/edit_video + machine_ops added, mentor learning loop capturing senior-agent failures into D:/hwk-data/mentor/episodes.jsonl; sft-now remains condemned — re-SFT with rebalanced Arabic+tools mix + mentor episodes at ≤3 epochs, promote only on the 24-case exam)
+— Last updated: 2026-09-07 (Aali-as-a-product: server + streaming + multi-user + desktop app; earlier: memory + security upgrade, Phase A restart bf16 + watchdog, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
