@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,23 @@ from typing import Any
 
 DEFAULT_LOG_FILE = Path(__file__).resolve().parent / "logs" / "agent.log"
 MAX_LOGGED_STRING = 4_000
+
+# Live-event bus: SSE clients subscribe by request_id and receive every
+# log_event for that request as it happens (tool_requested, tool_result, ...).
+# One dict, GIL-atomic operations, unbounded queues — the agent writes a
+# handful of events per request, so there is no backpressure risk.
+_subscribers: dict[str, "queue.Queue[dict[str, Any]]"] = {}
+
+
+def subscribe(request_id: str) -> "queue.Queue[dict[str, Any]]":
+    """Start receiving live events for a request (see app.py /api/ask/stream)."""
+    q: "queue.Queue[dict[str, Any]]" = queue.Queue()
+    _subscribers[request_id] = q
+    return q
+
+
+def unsubscribe(request_id: str) -> None:
+    _subscribers.pop(request_id, None)
 
 
 def log_file_path() -> Path:
@@ -55,4 +73,11 @@ def log_event(request_id: str, event: str, **data: Any) -> None:
     except OSError:
         # The user's requested operation should still receive the real error
         # even if the filesystem is unable to create the audit log.
-        return
+        pass
+    # Live delivery to streaming clients — best effort, never breaks the agent.
+    try:
+        subscriber = _subscribers.get(request_id)
+        if subscriber is not None:
+            subscriber.put_nowait(entry)
+    except Exception:  # noqa: BLE001
+        pass

@@ -1212,6 +1212,7 @@ def agent_loop(
     confirmed: bool = False,
     gate_state: dict[str, Any] | None = None,
     provider: str = "auto",
+    request_id: str | None = None,
 ) -> str:
     """Run the agent and record the complete request lifecycle.
 
@@ -1224,8 +1225,11 @@ def agent_loop(
     one of providers.PROVIDERS ("openai", "anthropic", "gemini",
     "openrouter") — only used when mode="cloud"; each connector's API key
     comes from an environment variable set on the user's machine.
+    request_id: optional pre-generated id — callers that subscribe to the
+    agent_log live-event bus pass one in so they can receive events from the
+    very first moment of the run; by default a fresh id is generated.
     """
-    request_id = new_request_id()
+    request_id = request_id or new_request_id()
     started_at = datetime.now(timezone.utc)
     log_event(
         request_id,

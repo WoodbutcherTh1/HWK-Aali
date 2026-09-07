@@ -50,11 +50,15 @@ def _save_sid(sid: str) -> None:
 
 
 def _post(server: str, path: str, payload: dict) -> dict:
+    headers = {"Content-Type": "application/json; charset=utf-8",
+               "X-Session-Id": _load_sid()}
+    token = os.getenv("AALI_API_KEY", "").strip()
+    if token:
+        headers["X-API-Key"] = token
     request = urllib.request.Request(
         server.rstrip("/") + path,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json; charset=utf-8",
-                 "X-Session-Id": _load_sid()},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=300) as response:
@@ -63,7 +67,12 @@ def _post(server: str, path: str, payload: dict) -> dict:
 
 def _health(server: str) -> bool:
     try:
-        with urllib.request.urlopen(server.rstrip("/") + API_PATH_HEALTH, timeout=5) as response:
+        headers = {}
+        token = os.getenv("AALI_API_KEY", "").strip()
+        if token:
+            headers["X-API-Key"] = token
+        request = urllib.request.Request(server.rstrip("/") + API_PATH_HEALTH, headers=headers)
+        with urllib.request.urlopen(request, timeout=5) as response:
             return response.status == 200
     except Exception:  # noqa: BLE001
         return False

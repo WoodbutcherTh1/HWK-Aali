@@ -576,3 +576,90 @@ def test_agent_workspace_and_instructions(tmp_path, monkeypatch):
     )
     assert (tmp_path / "build_test.txt").exists()
     assert "نجاح" in response or "نجاح" in (tmp_path / "build_test.txt").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Live-event bus + streaming server (desktop app)
+# ---------------------------------------------------------------------------
+
+def test_agent_log_bus_delivers_events_to_subscriber():
+    import agent_log
+
+    request_id = "test-bus-123"
+    queue = agent_log.subscribe(request_id)
+    try:
+        agent_log.log_event(request_id, "tool_requested", tool="write_file", arguments={"path": "a.txt"})
+        event = queue.get(timeout=2)
+        assert event["event"] == "tool_requested"
+        assert event["tool"] == "write_file"
+        # other requests never leak into this queue
+        agent_log.log_event("other-request", "tool_requested", tool="read_file")
+        assert queue.empty()
+    finally:
+        agent_log.unsubscribe(request_id)
+    agent_log.log_event(request_id, "tool_result")
+    assert queue.empty()  # unsubscribed → no delivery
+
+
+def test_agent_loop_request_id_passthrough(tmp_path, monkeypatch):
+    import agent_log
+    from agent_loop import agent_loop
+
+    monkeypatch.setenv("AALI_OLLAMA", "0")
+    monkeypatch.delenv("LOCAL_MODEL_PATH", raising=False)
+    rid = "fixed-rid-42"
+    queue = agent_log.subscribe(rid)
+    try:
+        agent_loop("اكتب ملف rid_test.txt", tmp_path, mode="local", print_final=False, request_id=rid)
+        first = queue.get(timeout=5)
+        assert first["request_id"] == rid
+        assert first["event"] == "request_started"
+    finally:
+        agent_log.unsubscribe(rid)
+
+
+def test_sessions_api_list_get_delete(tmp_path, monkeypatch):
+    """The sidebar endpoints over an isolated session store."""
+    import importlib
+
+    monkeypatch.setenv("AGENT_WORKSPACE", str(tmp_path))
+    monkeypatch.setattr("app.SESSIONS_FILE", tmp_path / "sessions_test.jsonl")
+    import app as app_mod
+
+    importlib.reload(app_mod)
+    client = app_mod.app.test_client()
+    app_mod._sessions.clear()
+    app_mod._sessions_loaded = True
+    # a session is created by /api/ask… but that would call the brain; seed directly
+    rec = app_mod._get_session("sess-abc")
+    app_mod._append_turn(rec, "user", "مرحبا يا آلي")
+    app_mod._append_turn(rec, "assistant", "أهلا بك")
+
+    rows = client.get("/api/sessions").get_json()
+    assert rows["ok"] and len(rows["sessions"]) == 1
+    assert rows["sessions"][0]["sid"] == "sess-abc"
+    assert "مرحبا" in rows["sessions"][0]["title"]
+
+    got = client.get("/api/session/sess-abc").get_json()
+    assert got["ok"] and len(got["turns"]) == 2
+    assert client.get("/api/session/missing").status_code == 404
+
+    assert client.delete("/api/session/sess-abc").get_json()["ok"]
+    assert client.get("/api/session/sess-abc").status_code == 404
+    app_mod._sessions.clear()
+
+
+def test_api_key_gate_blocks_unauthorized(monkeypatch, tmp_path):
+    """Multi-user mode: no/wrong X-API-Key → 401 on /api/*."""
+    monkeypatch.setenv("AGENT_WORKSPACE", str(tmp_path))
+    import importlib
+
+    import app as app_mod
+
+    monkeypatch.setattr(app_mod, "API_KEY", "secret-key-1")
+    client = app_mod.app.test_client()
+    assert client.get("/api/health").status_code == 401
+    assert client.get("/api/health", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert client.get("/api/health", headers={"X-API-Key": "secret-key-1"}).status_code == 200
+    # non-API routes (the UI) stay open
+    assert client.get("/ui/").status_code in (200, 404)

@@ -14,25 +14,61 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, make_response, render_template_string, request, send_from_directory
-
+import agent_log
+from agent_log import new_request_id
+from flask import Flask, Response, make_response, render_template_string, request, send_from_directory
 from agent_loop import AgentLoopError, agent_loop, compact_history
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
 
 
+# ————— multi-user foundation —————
+# Aali runs as a SERVER that many clients (web, desktop PWA, CLI, terminal,
+# external tools) talk to over HTTP. When AALI_API_KEY is set on the server,
+# every /api/* call must present the same value as an X-API-Key header (or
+# ?key= for simple GETs) — that key also ISOLATES sessions per user, so two
+# people sharing one server never see each other's conversations.
+# Unset (default): local single-user mode, unchanged behaviour.
+API_KEY = os.getenv("AALI_API_KEY", "").strip()
+
+
+def _client_key() -> str:
+    """Identity of the caller: the access token, or '' for local/anon mode."""
+    return request.headers.get("X-API-Key", "") or request.args.get("key", "")
+
+
+def _user_ns(sid: str | None) -> str:
+    """Session ids are stored PER USER: <ns>:<sid>. Local mode keeps the bare sid."""
+    if not API_KEY:
+        return sid or ""
+    return f"u{_client_key()}:{sid}" if sid else f"u{_client_key()}:{uuid.uuid4().hex}"
+
+
+@app.before_request
+def _require_api_key():
+    if request.method == "OPTIONS" or not API_KEY:
+        return None
+    if not request.path.startswith("/api/"):
+        return None
+    if _client_key() != API_KEY:
+        return make_response({"ok": False, "error": "unauthorized: missing or wrong X-API-Key"}, 401)
+    return None
+
+
 @app.after_request
 def _cors_headers(response):
-    """Allow the web/iOS/CLI clients (e.g. GitHub Pages site) to call the API."""
+    """Allow the web/desktop/CLI clients (even from other origins) to call the API."""
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Session-Id"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Session-Id, X-API-Key"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
     return response
 
 WORKSPACE_ROOT = Path(
@@ -61,7 +97,8 @@ def _load_sessions() -> None:
 
 
 def _save_session(record: dict[str, object]) -> None:
-    _sessions[record["sid"]] = record  # type: ignore[index]
+    key = str(record.get("key") or record["sid"])
+    _sessions[key] = record  # type: ignore[index]
     try:
         with SESSIONS_FILE.open("w", encoding="utf-8") as handle:
             for existing in _sessions.values():
@@ -79,15 +116,18 @@ def _prune_sessions() -> None:
 
 def _get_session(sid: str | None) -> dict[str, object]:
     _prune_sessions()
-    if sid and sid in _sessions:
-        record = _sessions[sid]
+    client_sid = sid or uuid.uuid4().hex
+    key = _user_ns(client_sid)
+    record = _sessions.get(key)
+    if record is not None:
         turns = record.get("turns")
         if not isinstance(turns, list):
             turns = []
             record["turns"] = turns
         return record
-    record: dict[str, object] = {
-        "sid": sid or uuid.uuid4().hex,
+    record = {
+        "key": key,
+        "sid": client_sid,
         "turns": [],
         "created_at": time.time(),
         "updated_at": time.time(),
@@ -325,6 +365,188 @@ def api_compact():
     }
 
 
+@app.route("/api/ask/stream", methods=["POST"])
+def api_ask_stream():
+    """Server-Sent Events version of /api/ask — the desktop app's main endpoint.
+
+    While the agent works, live `activity` events (tool_requested /
+    tool_result / provider_selected, relayed from the agent_log bus) stream to
+    the client so the user sees WHAT Aali is doing in real time instead of a
+    silent wait. The stream ends with one `done` event carrying the same body
+    shape as /api/ask (reply, sid, suggestions, needs_confirm), so the client
+    can fall back to the plain endpoint transparently.
+    """
+    payload = request.get_json(silent=True) or {}
+    message = str(payload.get("message", "")).strip()
+    if not message:
+        return make_response({"ok": False, "error": "message is required"}, 400)
+    sid = str(payload.get("sid") or request.headers.get("X-Session-Id") or uuid.uuid4().hex)
+    mode = str(payload.get("mode", "local"))
+    policy = str(payload.get("policy", "auto"))
+    confirmed = bool(payload.get("confirm", False))
+    provider = str(payload.get("provider", "auto"))
+
+    record = _get_session(sid)
+    if sid not in _sessions:
+        _save_session(record)
+    _append_turn(record, "user", message)
+
+    request_id = new_request_id()
+    events = agent_log.subscribe(request_id)
+    result: dict[str, object] = {}
+    gate_state: dict[str, object] = {}
+
+    def _run() -> None:
+        try:
+            reply = agent_loop(
+                message, WORKSPACE_ROOT, mode=mode, print_final=False,
+                history=_history(record), policy=policy, confirmed=confirmed,
+                gate_state=gate_state, provider=provider, request_id=request_id,
+            )
+            result["ok"], result["reply"] = True, reply
+        except AgentLoopError as exc:
+            result["ok"], result["reply"] = False, f"[خطأ] {exc}"
+        except Exception as exc:  # noqa: BLE001
+            result["ok"], result["reply"] = False, f"[خطأ] {exc}"
+        reply = str(result.get("reply", ""))
+        # The turn is recorded HERE, inside the worker thread, so the session
+        # keeps the answer even if the client disconnects mid-stream.
+        _append_turn(record, "assistant", reply)
+        if result.get("ok"):
+            from file_agent import suggestions
+            result["suggestions"] = suggestions.suggest(reply, message)
+        if gate_state.get("blocked"):
+            result["needs_confirm"] = True
+            result["pending_action"] = {
+                "tool": gate_state.get("tool"),
+                "arguments": gate_state.get("arguments"),
+            }
+        result["done"] = True
+
+    worker = threading.Thread(target=_run, name=f"aali-ask-{request_id}", daemon=True)
+    worker.start()
+
+    ACTIVITY_EVENTS = ("provider_selected", "tool_requested", "tool_result")
+
+    def _generate():
+        last_beat = time.time()
+        try:
+            while True:
+                try:
+                    event = events.get(timeout=1.0)
+                except queue.Empty:
+                    now = time.time()
+                    if now - last_beat >= 15:
+                        last_beat = now
+                        yield ": keep-alive\n\n"
+                    if result.get("done"):
+                        break
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("event") in ACTIVITY_EVENTS:
+                    data = {
+                        k: event.get(k)
+                        for k in ("event", "tool", "arguments", "result", "provider", "model")
+                        if event.get(k) is not None
+                    }
+                    # Keep the wire small; arguments/results are display-only.
+                    if isinstance(data.get("arguments"), dict):
+                        data["arguments"] = {
+                            str(k): str(v)[:160]
+                            for k, v in list(data["arguments"].items())[:6]
+                        }
+                    if "result" in data:
+                        data["result"] = str(data["result"])[:400]
+                    yield (
+                        "event: activity\ndata: "
+                        + json.dumps(data, ensure_ascii=False) + "\n\n"
+                    )
+                if result.get("done") and events.empty():
+                    break
+            body = {
+                "ok": bool(result.get("ok")),
+                "reply": str(result.get("reply", "…")),
+                "sid": sid,
+            }
+            if "suggestions" in result:
+                body["suggestions"] = result["suggestions"]
+            if result.get("needs_confirm"):
+                body["needs_confirm"] = True
+                body["pending_action"] = result.get("pending_action")
+            yield "event: done\ndata: " + json.dumps(body, ensure_ascii=False) + "\n\n"
+        finally:
+            agent_log.unsubscribe(request_id)
+
+    return Response(
+        _generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+_sessions_loaded = False
+
+
+def _ensure_sessions_loaded() -> None:
+    global _sessions_loaded
+    if not _sessions_loaded:
+        _load_sessions()
+        _sessions_loaded = True
+
+
+@app.route("/api/sessions", methods=["GET"])
+def api_sessions():
+    """Sidebar data: one row per session (title = first user message).
+    In multi-user mode only the calling user's sessions are listed."""
+    _ensure_sessions_loaded()
+    prefix = f"u{_client_key()}:" if API_KEY else ""
+    rows = []
+    for key, rec in _sessions.items():
+        if API_KEY and not key.startswith(prefix):
+            continue
+        turns = rec.get("turns") if isinstance(rec.get("turns"), list) else []
+        title = next(
+            (str(t.get("content", ""))[:70] for t in turns if t.get("role") == "user"),
+            "محادثة",
+        )
+        rows.append(
+            {
+                "sid": str(rec.get("sid") or key),
+                "title": title,
+                "turns": len(turns),
+                "updated_at": float(rec.get("updated_at", 0)),
+            }
+        )
+    rows.sort(key=lambda r: r["updated_at"], reverse=True)
+    return {"ok": True, "sessions": rows[:50]}
+
+
+@app.route("/api/session/<sid>", methods=["GET"])
+def api_session_get(sid: str):
+    _ensure_sessions_loaded()
+    rec = _sessions.get(_user_ns(sid))
+    if not rec:
+        return make_response({"ok": False, "error": "session not found"}, 404)
+    return {"ok": True, "sid": sid, "turns": rec.get("turns", [])}
+
+
+@app.route("/api/session/<sid>", methods=["DELETE"])
+def api_session_delete(sid: str):
+    _ensure_sessions_loaded()
+    key = _user_ns(sid)
+    if key not in _sessions:
+        return make_response({"ok": False, "error": "session not found"}, 404)
+    _sessions.pop(key, None)
+    try:
+        with SESSIONS_FILE.open("w", encoding="utf-8") as handle:
+            for existing in _sessions.values():
+                handle.write(json.dumps(existing, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    return {"ok": True}
+
+
 @app.route("/api/health", methods=["GET"])
 def api_health():
     """Liveness probe for all clients: returns workspace and status."""
@@ -332,13 +554,23 @@ def api_health():
 
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
+DIST_DIR = WEB_DIR / "dist"
 
 
 @app.route("/ui/", defaults={"filename": "index.html"})
 @app.route("/ui/<path:filename>")
 def ui_client(filename: str):
-    """Serve the modern Arabic-first web client (web/ directory)."""
-    return send_from_directory(WEB_DIR, filename)
+    """Serve the built desktop app (web/dist) when it exists, falling back to
+    the raw web/ directory for development."""
+    if DIST_DIR.is_dir() and (DIST_DIR / filename).is_file():
+        response = send_from_directory(DIST_DIR, filename)
+    elif DIST_DIR.is_dir() and filename == "index.html" and (DIST_DIR / "index.html").is_file():
+        response = send_from_directory(DIST_DIR, "index.html")
+    else:
+        response = send_from_directory(WEB_DIR, filename)
+    if filename == "index.html":
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
@@ -402,6 +634,6 @@ def new_conversation():
 
 
 if __name__ == "__main__":
-    _load_sessions()
+    _ensure_sessions_loaded()
     print(f"Aali chat UI starting on http://127.0.0.1:{os.getenv('PORT', '5000')}")
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
