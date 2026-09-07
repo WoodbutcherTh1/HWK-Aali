@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  ask,
+  askStream,
   compactSession,
+  deleteSession,
   getApiBase,
+  getSession,
   getSid,
+  getToken,
   health,
+  listSessions,
   setApiBase,
+  setToken,
+  type ActivityEvent,
   type Policy,
-  type PendingAction,
+  type SessionRow,
 } from "./api";
 import {
   fetchGithubRepos,
@@ -18,14 +24,25 @@ import {
   type GithubRepo,
   type GithubUser,
 } from "./github";
+import Markdown from "./markdown";
 import { msgIn, orbPulse, riseIn, spring, stagger } from "./theme";
 
 interface Msg {
   id: number;
   role: "user" | "assistant";
   text: string;
+  ts?: number;
   thinking?: boolean;
   pending?: PendingAction;
+  suggestions?: string[];
+}
+
+interface Activity {
+  id: number;
+  icon: string;
+  label: string;
+  detail?: string;
+  done: boolean;
 }
 
 const ACTIONS: { icon: string; title: string; sub: string; prompt: string }[] = [
@@ -43,71 +60,73 @@ const POLICIES: { id: Policy; label: string; icon: string; hint: string }[] = [
   { id: "always_ask", label: "اسأل دائماً", icon: "🛡️", hint: "يوقف أي إجراء خطير حتى تؤكد" },
 ];
 
-// Slash-command palette — typing "/" opens this, exactly like the composer
-// menus Aali itself was modeled on. Each command either fills the draft with
-// a ready prompt template (kind: "insert", left for the user to finish and
-// send) or runs a UI action immediately (kind: "action").
+const TOOL_ICONS: Record<string, string> = {
+  read_file: "📖", write_file: "✍️", append_file: "➕", search_files: "🔍",
+  list_files: "🗂️", run_command: "⚙️", machine_ops: "🖥️", memory: "🧠",
+  fetch_url: "🌐", edit_image: "🖼️", edit_video: "🎬", analyze_video: "🎥",
+  generate_emoji: "😊", read_image: "👁️", default: "🔧",
+};
+
+function toolIcon(name?: string) {
+  return TOOL_ICONS[name ?? ""] ?? TOOL_ICONS.default;
+}
+
+function activityRow(ev: ActivityEvent): { icon: string; label: string; detail?: string } {
+  if (ev.event === "provider_selected") {
+    return { icon: "🧠", label: `العقل: ${ev.provider ?? ""} ${ev.model ?? ""}`.trim() };
+  }
+  const args = ev.arguments ?? {};
+  const detail =
+    args.path ?? args.command ?? args.query ?? args.url ?? args.action ?? args.file ??
+    (args.input ? String(args.input) : undefined);
+  if (ev.event === "tool_requested") {
+    return { icon: toolIcon(ev.tool), label: `تشغيل ${ev.tool ?? "أداة"}…`, detail: detail ? String(detail) : undefined };
+  }
+  return { icon: "✓", label: `${ev.tool ?? "أداة"} تمّت`, detail: detail ? String(detail) : undefined };
+}
+
 type SlashCommand = {
-  cmd: string;
-  icon: string;
-  label: string;
-  hint: string;
-  kind: "insert" | "action";
-  value: string;
+  cmd: string; icon: string; label: string; hint: string;
+  kind: "insert" | "action"; value: string;
 };
 
 const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    cmd: "usage", icon: "📖", label: "الاستخدام", hint: "اشرح لي كل ما تستطيع فعله",
-    kind: "insert", value: "اشرح لي كل ما تستطيع فعله وكيف أستخدمك بأفضل شكل",
-  },
-  {
-    cmd: "files", icon: "📁", label: "أضف ملفات", hint: "اعمل على ملف أو مسار محدد",
-    kind: "insert", value: "اعمل على الملف/المسار التالي في مساحة العمل: ",
-  },
-  {
-    cmd: "skills", icon: "🧩", label: "المهارات", hint: "اعرض المهارات المتاحة",
-    kind: "insert", value: "اعرض لي المهارات المتاحة واشرح متى تُستخدم كل واحدة",
-  },
-  {
-    cmd: "design", icon: "🎨", label: "تصميم", hint: "صمّم واجهة أو شعاراً",
-    kind: "insert", value: "صمّم لي: ",
-  },
-  {
-    cmd: "extract", icon: "📄", label: "استخراج", hint: "استخرج نصاً من صورة أو مستند",
-    kind: "insert", value: "استخرج النص/المحتوى من الملف التالي: ",
-  },
-  {
-    cmd: "web", icon: "🌐", label: "بحث في الويب", hint: "ابحث ثم اقرأ أفضل نتيجة",
-    kind: "insert", value: "ابحث في الويب عن: ",
-  },
-  {
-    cmd: "github", icon: "🐙", label: "GitHub", hint: "افتح لوحة GitHub",
-    kind: "action", value: "github",
-  },
-  {
-    cmd: "policy", icon: "🛡️", label: "سياسة التنفيذ", hint: "تلقائي / قوي / اسأل دائماً",
-    kind: "action", value: "policy",
-  },
-  {
-    cmd: "compact", icon: "🗜️", label: "اختصار المحادثة", hint: "لخّص الأقدم لتوفير السياق",
-    kind: "action", value: "compact",
-  },
-  {
-    cmd: "new", icon: "＋", label: "محادثة جديدة", hint: "ابدأ من الصفر",
-    kind: "action", value: "new",
-  },
+  { cmd: "usage", icon: "📖", label: "الاستخدام", hint: "اشرح لي كل ما تستطيع فعله", kind: "insert", value: "اشرح لي كل ما تستطيع فعله وكيف أستخدمك بأفضل شكل" },
+  { cmd: "files", icon: "📁", label: "أضف ملفات", hint: "اعمل على ملف أو مسار محدد", kind: "insert", value: "اعمل على الملف/المسار التالي في مساحة العمل: " },
+  { cmd: "skills", icon: "🧩", label: "المهارات", hint: "اعرض المهارات المتاحة", kind: "insert", value: "اعرض لي المهارات المتاحة واشرح متى تُستخدم كل واحدة" },
+  { cmd: "design", icon: "🎨", label: "تصميم", hint: "صمّم واجهة أو شعاراً", kind: "insert", value: "صمّم لي: " },
+  { cmd: "extract", icon: "📄", label: "استخراج", hint: "استخرج نصاً من صورة أو مستند", kind: "insert", value: "استخرج النص/المحتوى من الملف التالي: " },
+  { cmd: "web", icon: "🌐", label: "بحث في الويب", hint: "ابحث ثم اقرأ أفضل نتيجة", kind: "insert", value: "ابحث في الويب عن: " },
+  { cmd: "github", icon: "🐙", label: "GitHub", hint: "افتح لوحة GitHub", kind: "action", value: "github" },
+  { cmd: "policy", icon: "🛡️", label: "سياسة التنفيذ", hint: "تلقائي / قوي / اسأل دائماً", kind: "action", value: "policy" },
+  { cmd: "compact", icon: "🗜️", label: "اختصار المحادثة", hint: "لخّص الأقدم لتوفير السياق", kind: "action", value: "compact" },
+  { cmd: "new", icon: "＋", label: "محادثة جديدة", hint: "ابدأ من الصفر", kind: "action", value: "new" },
 ];
+
+function timeOf(ts?: number) {
+  if (!ts) return "";
+  return new Date(ts * 1000).toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit" });
+}
 
 export default function App() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [draft, setDraft] = useState("");
   const [waiting, setWaiting] = useState(false);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [elapsed, setElapsed] = useState(0);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [apiInput, setApiInput] = useState(getApiBase());
+  const [tokenInput, setTokenInput] = useState(getToken());
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [activeSid, setActiveSid] = useState<string>(() => localStorage.getItem("aali_sid") || "");
+  const [toast, setToast] = useState("");
+  const [atBottom, setAtBottom] = useState(true);
+  const [listening, setListening] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const lastUserMessage = useRef<string>("");
+  const abortRef = useRef<AbortController | null>(null);
 
   const [policy, setPolicy] = useState<Policy>(
     (localStorage.getItem("aali_policy") as Policy) || "auto"
@@ -143,14 +162,13 @@ export default function App() {
   }, [ping]);
 
   useEffect(() => {
-    chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+    if (atBottom) chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, activities, atBottom]);
 
   useEffect(() => {
     localStorage.setItem("aali_policy", policy);
   }, [policy]);
 
-  // Reconnect to GitHub silently if a token was saved from a previous visit.
   useEffect(() => {
     const saved = getGithubToken();
     if (!saved) return;
@@ -159,90 +177,181 @@ export default function App() {
       .catch(() => setGithubToken(""));
   }, []);
 
+  const showToast = useCallback((text: string) => {
+    setToast(text);
+    setTimeout(() => setToast(""), 1800);
+  }, []);
+
+  const refreshSessions = useCallback(async () => {
+    try {
+      setSessions(await listSessions());
+    } catch {
+      /* sidebar is best-effort */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSessions();
+    const t = setInterval(() => void refreshSessions(), 20000);
+    return () => clearInterval(t);
+  }, [refreshSessions]);
+
+  // elapsed-seconds ticker while waiting
+  useEffect(() => {
+    if (!waiting) { setElapsed(0); return; }
+    const started = Date.now();
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [waiting]);
+
   const send = useCallback(
     async (text: string, opts?: { confirm?: boolean }) => {
       const clean = text.trim();
       if (!clean || waiting) return;
       lastUserMessage.current = clean;
       setDraft("");
+      setSlashOpen(false);
       setWaiting(true);
-      const thinkMsg: Msg = { id: Date.now() + 1, role: "assistant", text: "", thinking: true };
+      setActivities([]);
+      const thinkId = Date.now() + 1;
+      const thinkMsg: Msg = { id: thinkId, role: "assistant", text: "", thinking: true, ts: Date.now() / 1000 };
       setMessages((m) => [
-        ...(opts?.confirm ? m : [...m, { id: Date.now(), role: "user", text: clean } as Msg]),
+        ...(opts?.confirm ? m : [...m, { id: Date.now(), role: "user", text: clean, ts: Date.now() / 1000 } as Msg]),
         thinkMsg,
       ]);
+      setAtBottom(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      let sawActivity = false;
       try {
-        const data = await ask(clean, { policy, confirm: opts?.confirm });
+        const data = await askStream(clean, {
+          policy,
+          confirm: opts?.confirm,
+          signal: controller.signal,
+          onActivity: (ev) => {
+            sawActivity = true;
+            const row = activityRow(ev);
+            setActivities((a) => {
+              const isResult = ev.event === "tool_result";
+              const next = isResult
+                ? a.map((x) => (x.label.startsWith(`تشغيل ${ev.tool ?? ""}`) ? { ...x, done: true, label: `${ev.tool} تمّت` } : x))
+                : [...a, { id: Date.now() + Math.random(), icon: row.icon, label: row.label, detail: row.detail, done: false }];
+              return next.slice(-5);
+            });
+          },
+        });
         const reply = data.reply || data.error || "…";
         setMessages((m) =>
           m.map((x) =>
-            x.id === thinkMsg.id
-              ? { ...x, thinking: false, text: reply, pending: data.needs_confirm ? data.pending_action : undefined }
+            x.id === thinkId
+              ? {
+                  ...x,
+                  thinking: false,
+                  text: reply,
+                  pending: data.needs_confirm ? data.pending_action : undefined,
+                  suggestions: data.suggestions?.slice(0, 3),
+                }
               : x
           )
         );
         setConnected(data.ok);
-      } catch {
+        void refreshSessions();
+      } catch (err) {
+        const aborted = controller.signal.aborted;
         setMessages((m) =>
           m.map((x) =>
-            x.id === thinkMsg.id
-              ? { ...x, thinking: false, text: "تعذّر الاتصال بالخادم — تحقق من ⚙︎ الإعدادات" }
+            x.id === thinkId
+              ? {
+                  ...x,
+                  thinking: false,
+                  text: aborted
+                    ? "⏹ أوقفتَ عرض الرد — قد يظل الطلب يعمل في الخلفية وسيظهر في سجل الجلسة."
+                    : sawActivity
+                      ? "انقطع الاتصال أثناء العمل — راجع الجلسة من القائمة الجانبية."
+                      : "تعذّر الاتصال بالخادم — تحقق من ⚙︎ الإعدادات",
+                }
               : x
           )
         );
-        setConnected(false);
+        if (!aborted) setConnected(false);
       } finally {
+        setActivities([]);
         setWaiting(false);
+        abortRef.current = null;
       }
     },
-    [waiting, policy]
+    [waiting, policy, refreshSessions]
   );
 
   const confirmPending = useCallback(() => {
     void send(lastUserMessage.current, { confirm: true });
   }, [send]);
 
-  // Plain function (not useCallback): it closes over openGithubPanel/newChat,
-  // which are declared further down this component — a dependency array here
-  // would evaluate those bindings too early. Callback bodies only resolve
-  // identifiers when actually invoked (after the full render has run), so a
-  // forward reference in the body itself is safe.
+  const newChat = () => {
+    localStorage.removeItem("aali_sid");
+    setMessages([]);
+    setActiveSid("");
+    setSidebarOpen(false);
+  };
+
+  const openSession = async (sid: string) => {
+    try {
+      const turns = await getSession(sid);
+      const restored: Msg[] = turns
+        .filter((t) => t.role === "user" || t.role === "assistant")
+        .map((t, i) => ({
+          id: i + Date.now(),
+          role: t.role as "user" | "assistant",
+          text: String(t.content ?? ""),
+          ts: t.ts,
+        }));
+      setMessages(restored);
+      setActiveSid(sid);
+      localStorage.setItem("aali_sid", sid);
+      setSidebarOpen(false);
+    } catch {
+      showToast("تعذّر فتح الجلسة");
+    }
+  };
+
+  const removeSession = async (sid: string) => {
+    await deleteSession(sid);
+    if (sid === activeSid) newChat();
+    void refreshSessions();
+    showToast("حُذفت الجلسة");
+  };
+
   const runSlashCommand = (c: SlashCommand) => {
-      setSlashOpen(false);
-      if (c.kind === "insert") {
-        setDraft(c.value);
-        return;
+    setSlashOpen(false);
+    if (c.kind === "insert") {
+      setDraft(c.value);
+      return;
+    }
+    switch (c.value) {
+      case "github":
+        void openGithubPanel();
+        setDraft("");
+        break;
+      case "policy":
+        setPolicyOpen(true);
+        setDraft("");
+        break;
+      case "new":
+        newChat();
+        break;
+      case "compact": {
+        setDraft("");
+        const noteId = Date.now();
+        setMessages((m) => [...m, { id: noteId, role: "assistant", text: "", thinking: true, ts: Date.now() / 1000 }]);
+        void compactSession().then((res) => {
+          const text = res.compacted
+            ? `🗜️ تم اختصار المحادثة — بقيت ${res.kept_turns ?? ""} رسالة حديثة.\n\n${res.summary ?? ""}`
+            : res.message || "لا حاجة للاختصار الآن.";
+          setMessages((m) => m.map((x) => (x.id === noteId ? { ...x, thinking: false, text } : x)));
+        });
+        break;
       }
-      switch (c.value) {
-        case "github":
-          void openGithubPanel();
-          setDraft("");
-          break;
-        case "policy":
-          setPolicyOpen(true);
-          setDraft("");
-          break;
-        case "new":
-          newChat();
-          break;
-        case "compact": {
-          setDraft("");
-          const noteId = Date.now();
-          setMessages((m) => [
-            ...m,
-            { id: noteId, role: "assistant", text: "", thinking: true } as Msg,
-          ]);
-          void compactSession().then((res) => {
-            const text = res.compacted
-              ? `🗜️ تم اختصار المحادثة — بقيت ${res.kept_turns ?? ""} رسالة حديثة.\n\n${res.summary ?? ""}`
-              : res.message || "لا حاجة للاختصار الآن.";
-            setMessages((m) =>
-              m.map((x) => (x.id === noteId ? { ...x, thinking: false, text } : x))
-            );
-          });
-          break;
-        }
-      }
+    }
   };
 
   const onDraftChange = (value: string) => {
@@ -262,16 +371,14 @@ export default function App() {
     }
   };
 
-  const newChat = () => {
-    localStorage.removeItem("aali_sid");
-    setMessages([]);
-  };
-
   const saveSettings = () => {
     setApiBase(apiInput.trim() || "http://127.0.0.1:5055");
+    setToken(tokenInput.trim());
     localStorage.removeItem("aali_sid");
+    setActiveSid("");
     setShowSettings(false);
     void ping();
+    void refreshSessions();
   };
 
   const connectGithub = async () => {
@@ -322,17 +429,39 @@ export default function App() {
     );
   };
 
+  const startVoice = () => {
+    type SR = { new (): SpeechRecognitionLike };
+    const w = window as unknown as { SpeechRecognition?: SR; webkitSpeechRecognition?: SR };
+    const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Ctor) {
+      showToast("المتصفح لا يدعم الإدخال الصوتي");
+      return;
+    }
+    const rec = new Ctor();
+    rec.lang = "ar";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onstart = () => setListening(true);
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    rec.onresult = (e: SpeechEventLike) => {
+      const text = e.results?.[0]?.[0]?.transcript;
+      if (text) setDraft((d) => (d ? d + " " + text : text));
+    };
+    rec.start();
+  };
+
   const currentPolicy = POLICIES.find((p) => p.id === policy) ?? POLICIES[0];
+  const onChatScroll = () => {
+    const el = chatRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+  };
 
   const SlashMenu = slashOpen && slashMatches.length > 0 && (
     <div className="slash-menu">
       {slashMatches.map((c) => (
-        <button
-          key={c.cmd}
-          type="button"
-          className="slash-item"
-          onClick={() => runSlashCommand(c)}
-        >
+        <button key={c.cmd} type="button" className="slash-item" onClick={() => runSlashCommand(c)}>
           <span className="slash-icon">{c.icon}</span>
           <span className="slash-text">
             <b>/{c.cmd}</b>
@@ -346,12 +475,7 @@ export default function App() {
   const ControlBar = (
     <div className="control-bar">
       <div className="control-item policy-control">
-        <button
-          type="button"
-          className="control-btn"
-          onClick={() => setPolicyOpen((v) => !v)}
-          title={currentPolicy.hint}
-        >
+        <button type="button" className="control-btn" onClick={() => setPolicyOpen((v) => !v)} title={currentPolicy.hint}>
           <span>{currentPolicy.icon}</span>
           <span>{currentPolicy.label}</span>
         </button>
@@ -362,10 +486,7 @@ export default function App() {
                 key={p.id}
                 type="button"
                 className={`control-menu-item ${p.id === policy ? "active" : ""}`}
-                onClick={() => {
-                  setPolicy(p.id);
-                  setPolicyOpen(false);
-                }}
+                onClick={() => { setPolicy(p.id); setPolicyOpen(false); }}
               >
                 <span className="cmi-icon">{p.icon}</span>
                 <span className="cmi-text">
@@ -377,7 +498,6 @@ export default function App() {
           </div>
         )}
       </div>
-
       <button type="button" className="control-btn" onClick={openGithubPanel}>
         <span>🐙</span>
         <span>{ghUser ? ghUser.login : "GitHub"}</span>
@@ -385,12 +505,79 @@ export default function App() {
     </div>
   );
 
+  const ActivityPanel = waiting && (
+    <div className="activity">
+      {activities.map((a) => (
+        <div key={a.id} className="activity-row">
+          <span className={a.done ? "done-ico" : "spin"}>{a.icon}</span>
+          <span className="activity-tool">{a.label}</span>
+          {a.detail && <span className="activity-detail">{a.detail}</span>}
+        </div>
+      ))}
+      <div className="activity-row">
+        <span className="spin">✦</span>
+        <span>آلي يعمل… {elapsed > 0 ? `${elapsed} ثانية` : ""}</span>
+      </div>
+    </div>
+  );
+
   return (
     <div className="app">
       <div className="stars" aria-hidden="true" />
 
+      {/* SIDEBAR — sessions */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div
+            className="sidebar-backdrop"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.aside
+            className="sidebar"
+            initial={{ x: "-100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "-100%" }}
+            transition={spring}
+          >
+            <div className="sidebar-head">
+              <b>الجلسات</b>
+              <button type="button" className="sidebar-new" onClick={newChat}>＋ جديدة</button>
+            </div>
+            <div className="sidebar-list">
+              {sessions.length === 0 && (
+                <p className="sidebar-empty">لا توجد جلسات محفوظة بعد.<br />ابدأ محادثة وستظهر هنا.</p>
+              )}
+              {sessions.map((s) => (
+                <div key={s.sid} className={`sidebar-item ${s.sid === activeSid ? "active" : ""}`}>
+                  <button
+                    type="button"
+                    className="sidebar-item-text"
+                    style={{ all: "unset", cursor: "pointer", flex: 1, minWidth: 0 }}
+                    onClick={() => void openSession(s.sid)}
+                  >
+                    <b>{s.title || "محادثة"}</b>
+                    <small>
+                      {s.turns} رسالة · {new Date(s.updated_at * 1000).toLocaleDateString("ar")}
+                    </small>
+                  </button>
+                  <button type="button" className="sidebar-del" title="حذف الجلسة" onClick={() => void removeSession(s.sid)}>
+                    🗑
+                  </button>
+                </div>
+              ))}
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
+
       <motion.header className="topbar" initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={spring}>
         <div className="brand">
+          <button type="button" className="ghost-btn" title="الجلسات" onClick={() => setSidebarOpen(true)}>☰</button>
           <motion.span className="brand-star" animate={orbPulse} aria-hidden="true">✦</motion.span>
           <div className="brand-text">
             <strong>آلي</strong>
@@ -403,7 +590,6 @@ export default function App() {
           <span className={`pill ${connected ? "good" : connected === false ? "warn" : ""}`}>
             🧠 <b>العقل</b> <span>{connected ? "يعمل" : "—"}</span>
           </span>
-          <span className="pill pill-wide">📁 <span>المساحة: D:\hwk-projects</span></span>
           {getSid() && <span className="pill">🔗 <span>جلسة مستمرة</span></span>}
         </div>
         <div className="top-actions">
@@ -412,7 +598,7 @@ export default function App() {
         </div>
       </motion.header>
 
-      {/* HOME — hero, only before the first message */}
+      {/* HOME — hero */}
       <AnimatePresence mode="wait">
         {!chatMode ? (
           <motion.section
@@ -449,7 +635,8 @@ export default function App() {
                     onChange={(e) => onDraftChange(e.target.value)}
                     onKeyDown={onKey}
                   />
-                  <button type="submit" disabled={waiting || !draft.trim()} aria-label="إرسال">
+                  <button type="button" className={`mic-btn ${listening ? "listening" : ""}`} title="إدخال صوتي" onClick={startVoice}>🎙</button>
+                  <button type="submit" className="send-btn" disabled={waiting || !draft.trim()} aria-label="إرسال">
                     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9Z" /></svg>
                   </button>
                 </div>
@@ -477,48 +664,79 @@ export default function App() {
         ) : (
           <motion.main
             key="chat"
-            ref={chatRef}
-            className="chat"
+            className="chat-wrap"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            {messages.map((m) => (
-              <motion.div
-                key={m.id}
-                className={`msg ${m.role}`}
-                initial={msgIn.initial}
-                animate={msgIn.animate}
-              >
-                <span className="who">{m.role === "user" ? "أنت" : "آلي"}</span>
-                {m.thinking ? <ThinkingOrbit /> : m.text}
-                {m.pending && (
-                  <div className="confirm-bar">
-                    <span>
-                      يريد آلي تنفيذ <code>{m.pending.tool}</code> — إجراء لا يمكن التراجع عنه بسهولة.
-                    </span>
-                    <div className="confirm-actions">
-                      <button type="button" className="confirm-yes" onClick={confirmPending} disabled={waiting}>
-                        تأكيد وتنفيذ
-                      </button>
+            <div ref={chatRef} className="chat" onScroll={onChatScroll}>
+              {messages.map((m) => (
+                <motion.div
+                  key={m.id}
+                  className={`msg ${m.role}`}
+                  initial={msgIn.initial}
+                  animate={msgIn.animate}
+                >
+                  <span className="who">
+                    {m.role === "user" ? "أنت" : "آلي"}
+                    {m.ts ? <span className="ts">{timeOf(m.ts)}</span> : null}
+                    {m.role === "assistant" && !m.thinking && (
                       <button
                         type="button"
-                        className="confirm-no"
-                        onClick={() =>
-                          setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, pending: undefined } : x)))
-                        }
+                        className="copy-btn"
+                        title="نسخ الرد"
+                        onClick={async () => {
+                          try { await navigator.clipboard.writeText(m.text); showToast("تم النسخ ✓"); } catch { /* noop */ }
+                        }}
                       >
-                        إلغاء
+                        ⧉
                       </button>
+                    )}
+                  </span>
+                  {m.thinking ? <ThinkingOrbit /> : <Markdown text={m.text} />}
+                  {m.thinking && <div style={{ marginTop: 10 }}>{ActivityPanel}</div>}
+                  {m.pending && (
+                    <div className="confirm-bar">
+                      <span>
+                        يريد آلي تنفيذ <code>{m.pending.tool}</code> — إجراء لا يمكن التراجع عنه بسهولة.
+                      </span>
+                      <div className="confirm-actions">
+                        <button type="button" className="confirm-yes" onClick={confirmPending} disabled={waiting}>
+                          تأكيد وتنفيذ
+                        </button>
+                        <button
+                          type="button"
+                          className="confirm-no"
+                          onClick={() =>
+                            setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, pending: undefined } : x)))
+                          }
+                        >
+                          إلغاء
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </motion.div>
-            ))}
+                  )}
+                  {!m.thinking && m.suggestions && m.suggestions.length > 0 && (
+                    <div className="suggestions">
+                      {m.suggestions.map((s) => (
+                        <button key={s} type="button" className="chip" title={s} onClick={() => void send(s)}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+              {!atBottom && (
+                <button type="button" className="scroll-down" title="النزول للأسفل" onClick={() => chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" })}>
+                  ↓
+                </button>
+              )}
+            </div>
           </motion.main>
         )}
       </AnimatePresence>
 
-      {/* DOCKED COMPOSER — only in chat mode */}
+      {/* DOCKED COMPOSER — chat mode */}
       <AnimatePresence>
         {chatMode && (
           <motion.footer
@@ -540,7 +758,14 @@ export default function App() {
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={onKey}
               />
-              <button type="submit" disabled={waiting || !draft.trim()} aria-label="إرسال">
+              {waiting ? (
+                <button type="button" className="stop-btn" title="إيقاف العرض" onClick={() => abortRef.current?.abort()}>
+                  ⏹
+                </button>
+              ) : (
+                <button type="button" className={`mic-btn ${listening ? "listening" : ""}`} title="إدخال صوتي" onClick={startVoice}>🎙</button>
+              )}
+              <button type="submit" className="send-btn" disabled={waiting || !draft.trim()} aria-label="إرسال">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9Z" /></svg>
               </button>
             </form>
@@ -574,8 +799,19 @@ export default function App() {
               />
             </label>
             <small>
-              من الجوال أدخل عنوان حاسوبك على الشبكة، مثال: <code dir="ltr">http://192.168.1.10:5055</code>
+              من الجوال أو جهاز آخر أدخل عنوان الخادم، مثال: <code dir="ltr">http://192.168.1.10:5055</code>.
+              إذا كان الخادم يعمل بنمط متعدد المستخدمين أدخل مفتاح الوصول أدناه.
             </small>
+            <label style={{ marginTop: 12 }}>
+              مفتاح الوصول (اختياري)
+              <input
+                type="password"
+                dir="ltr"
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder="X-API-Key"
+              />
+            </label>
             <div className="dialog-actions">
               <button className="primary" onClick={saveSettings}>حفظ</button>
               <button onClick={() => setShowSettings(false)}>إغلاق</button>
@@ -659,6 +895,8 @@ export default function App() {
           </motion.dialog>
         </div>
       )}
+
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
@@ -676,4 +914,19 @@ function ThinkingOrbit() {
       <span>آلي يفكّر…</span>
     </span>
   );
+}
+
+/* minimal structural types for the Web Speech API (not in TS DOM lib) */
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  start(): void;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  onresult: ((e: SpeechEventLike) => void) | null;
+}
+interface SpeechEventLike {
+  results?: { [index: number]: { [index: number]: { transcript: string } } };
 }

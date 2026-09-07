@@ -1,9 +1,10 @@
-/* آلي service worker — caches the static shell only; API calls always hit the network. */
-const CACHE = "aali-shell-v1";
-const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
+/* آلي service worker — offline shell for the built (dist) app.
+   API calls always hit the network; everything else is network-first with a
+   cached fallback so a version bump takes effect on the next load. */
+const CACHE = "aali-shell-v2";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(["./", "./index.html"])));
   self.skipWaiting();
 });
 
@@ -19,7 +20,16 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.includes("/api/")) return; // never cache the brain
+  if (event.request.method !== "GET") return;
   event.respondWith(
-    caches.match(event.request).then((hit) => hit || fetch(event.request))
+    fetch(event.request)
+      .then((res) => {
+        if (res.ok && url.origin === location.origin) {
+          const copy = res.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(event.request).then((hit) => hit || caches.match("./index.html")))
   );
 });
