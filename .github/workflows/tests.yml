@@ -35,9 +35,9 @@ jobs:
       - name: Install agent deps
         run: pip install -r file-agent/requirements.txt
 
-      - name: Install test deps (torch CPU)
+      - name: Install test deps (torch CPU + tokenizer/model/media deps)
         run: |
-          pip install pytest
+          pip install pytest sentencepiece numpy protobuf Pillow
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run tests
