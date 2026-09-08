@@ -801,12 +801,17 @@ function render(s){
   $('cards').innerHTML=cards.map(c=>'<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div></div>').join('');
   api('GET','/api/admin/keys').then(r=>{
     if(!r.ok) return;
-    $('keys').innerHTML=(r.keys||[]).map(x=>{
-      const pct=Math.min(100, Math.round(x.requests/ (1+(r.stats&&r.stats.total_requests||0)) *100*3));
-      return '<tr><td>'+ (x.label||'—') +'</td><td class="mono">'+x.prefix+'…</td><td>'+x.requests+'</td><td>'+x.chars_in+'+'+x.chars_out+'</td><td>'+fmt(x.last_used_at)+'</td><td><span class="tag '+(x.revoked?'off':'ok')+'">'+(x.revoked?'مُلغى':'نشط')+'</span></td><td>'+(x.revoked?'':'<button class="danger" onclick="revoke(\''+x.key_id+'\')">إلغاء</button>')+'</td></tr>';
-    }).join('') || '<tr><td colspan=7 class="muted">لا مفاتيح بعد</td></tr>';
+    $('keys').innerHTML=(r.keys||[]).map(x=>
+      '<tr data-kid="'+x.key_id+'"><td>'+ (x.label||'—') +'</td><td class="mono">'+x.prefix+'…</td><td>'+x.requests+'</td><td>'+x.chars_in+'+'+x.chars_out+'</td><td>'+fmt(x.last_used_at)+'</td><td><span class="tag '+(x.revoked?'off':'ok')+'">'+(x.revoked?'مُلغى':'نشط')+'</span></td><td>'+(x.revoked?'':'<button class="danger" data-revoke="1">إلغاء</button>')+'</td></tr>'
+    ).join('') || '<tr><td colspan="7" class="muted">لا مفاتيح بعد</td></tr>';
   });
 }
+document.addEventListener('click',function(e){
+  const btn=e.target.closest('button[data-revoke]');
+  if(!btn) return;
+  const tr=btn.closest('tr');
+  if(tr) revoke(tr.getAttribute('data-kid'));
+});
 function issue(){
   api('POST','/api/admin/keys',{label:$('label').value}).then(r=>{
     if(!r.ok){alert(r.error||'فشل');return;}
@@ -922,7 +927,24 @@ def new_conversation():
     return _render(sid, record, "local")
 
 
+def _server_port() -> int:
+    """Resolve the listen port. Defends against harnesses that inject PORT=0
+    ("pick any free port" for their own tooling) into the process environment:
+    port 0 makes Flask bind an ephemeral port, which silently breaks every
+    client that expects Aali on the documented port. Anything invalid or <= 0
+    falls back to the documented default (5055; the run doc's health check)."""
+    raw = (os.getenv("PORT") or "").strip()
+    try:
+        port = int(raw)
+    except ValueError:
+        port = 0
+    if port <= 0:
+        port = int(os.getenv("AALI_DEFAULT_PORT", "5055"))
+    return port
+
+
 if __name__ == "__main__":
     _ensure_sessions_loaded()
-    print(f"Aali chat UI starting on http://127.0.0.1:{os.getenv('PORT', '5000')}")
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
+    _port = _server_port()
+    print(f"Aali chat UI starting on http://127.0.0.1:{_port}")
+    app.run(host="0.0.0.0", port=_port, debug=False)
