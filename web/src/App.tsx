@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   askStream,
@@ -13,6 +13,7 @@ import {
   setApiBase,
   setToken,
   type ActivityEvent,
+  type PendingAction,
   type Policy,
   type SessionRow,
 } from "./api";
@@ -43,15 +44,125 @@ interface Activity {
   label: string;
   detail?: string;
   done: boolean;
+  tool?: string;
+  term?: boolean;
 }
 
-const ACTIONS: { icon: string; title: string; sub: string; prompt: string }[] = [
-  { icon: "🛠️", title: "ابنِ تطبيقاً", sub: "كود + تشغيل + إصلاح أخطاء", prompt: "أنشئ تطبيق ويب بسيط لعرض الأذكار اليومية ثم شغّله" },
-  { icon: "🧩", title: "اصنع سير عمل n8n", sub: "من وصف عربي إلى JSON جاهز", prompt: "اصنع لي سير عمل n8n: عند وصول بريد جديد أرسل ملخصه إلى تيليجرام" },
-  { icon: "🖼️", title: "اقرأ صورة", sub: "استخراج النص من الصور", prompt: "اقرأ الصورة الموجودة في مجلد العمل واستخرج النص منها" },
-  { icon: "🎬", title: "حلّل فيديو", sub: "إطارات + تعليق صوتي", prompt: "لخّص لي فيديو في مجلد العمل: ما النص الظاهر وما المحتوى المنطوق؟" },
-  { icon: "🎨", title: "حرّر صورة", sub: "توليد وتعديل بالذكاء الاصطناعي", prompt: "حرّر صورة: صحّح الألوان واجعلها بأسلوب غروب دافئ" },
-  { icon: "📄", title: "اقرأ مستنداً", sub: "PDF / Word / Excel", prompt: "اقرأ ملف PDF في مجلد العمل ولخّص أهم النقاط بالعربية" },
+/* ————— brand guard —————
+   آلي هو المنتج الوحيد الذي يظهر للمستخدم. أي اسم مزود آخر يصل من الخادم
+   (نشاط/أخطاء/اقتراحات) يُستبدل بـ "آلي" قبل العرض — خارج كتل الأكواد
+   حتى لا يُفسد أمثلة البرمجة. */
+const PROVIDER_RE =
+  /\b(claude|anthropic|openai|chatgpt|gpt-?\d*(?:\.?\d*)?|gemini|bard|deepseek|qwen|ollama|llama|mistral|grok|copilot|cursor|replit|kimi|moonshot|openrouter)\b/gi;
+
+function maskProviders(chunk: string) {
+  return chunk.replace(PROVIDER_RE, "آلي");
+}
+function maskOutsideCode(text: string) {
+  return text
+    .split(/(```[\s\S]*?```|`[^`]*`)/g)
+    .map((chunk, i) => (i % 2 === 1 ? chunk : maskProviders(chunk)))
+    .join("");
+}
+
+function toolIcon(name?: string) {
+  const TOOL_ICONS: Record<string, string> = {
+    read_file: "📖", write_file: "✍️", append_file: "➕", search_files: "🔍",
+    list_files: "🗂️", run_command: "⚙️", machine_ops: "🖥️", memory: "🧠",
+    fetch_url: "🌐", web_search: "🌐", edit_image: "🖼️", edit_video: "🎬",
+    analyze_video: "🎥", generate_emoji: "😊", read_image: "👁️",
+    generate_image: "🎨", make_n8n_workflow: "🧩", default: "🔧",
+  };
+  return TOOL_ICONS[name ?? ""] ?? TOOL_ICONS.default;
+}
+
+/* Human-friendly Arabic tool names instead of raw identifiers. */
+function toolLabel(name?: string) {
+  const LABELS: Record<string, string> = {
+    read_file: "قراءة ملف", write_file: "كتابة ملف", append_file: "إضافة إلى ملف",
+    search_files: "بحث في الملفات", list_files: "عرض الملفات",
+    make_directory: "إنشاء مجلد", move_file: "نقل ملف", delete_file: "حذف ملف",
+    run_command: "تنفيذ أمر", machine_ops: "عملية نظام", memory: "الذاكرة",
+    fetch_url: "قراءة صفحة", web_search: "بحث في الويب",
+    generate_image: "توليد صورة", edit_image: "تحرير صورة",
+    generate_emoji: "إنشاء إيموجي", analyze_video: "تحليل فيديو",
+    edit_video: "تحرير فيديو", read_image: "قراءة صورة",
+    make_n8n_workflow: "بناء سير عمل n8n",
+  };
+  return LABELS[name ?? ""] ?? name ?? "أداة";
+}
+
+function activityRow(ev: ActivityEvent): {
+  icon: string; label: string; doneLabel: string; detail?: string;
+  term?: boolean; tool?: string;
+} {
+  // provider/model names never surface — the brain is always "آلي"
+  if (ev.event === "provider_selected") {
+    return { icon: "🧠", label: "العقل: آلي جاهز", doneLabel: "آلي جاهز" };
+  }
+  const args = ev.arguments ?? {};
+  const detail =
+    args.command ?? args.path ?? args.query ?? args.url ?? args.action ?? args.file ??
+    (args.input ? String(args.input) : undefined);
+  const label = toolLabel(ev.tool);
+  const term = ev.tool === "run_command"; // terminal-style row, like coding agents
+  if (ev.event === "tool_requested") {
+    return {
+      icon: term ? ">_" : toolIcon(ev.tool),
+      label: `${label}…`, doneLabel: `${label} ✓`,
+      detail: detail ? String(detail) : undefined,
+      term, tool: ev.tool,
+    };
+  }
+  return {
+    icon: "✓", label: `${label} ✓`, doneLabel: `${label} ✓`,
+    detail: detail ? String(detail) : undefined, term, tool: ev.tool,
+  };
+}
+
+/* Monotonic message ids — Date.now() can collide within the same millisecond,
+   which once made the reply-update overwrite the user message. */
+let _nextMsgId = 1;
+function nextMsgId() {
+  return _nextMsgId++;
+}
+
+/* ————— sidebar nav (Aali-flavored mirror of the reference layout) ————— */
+type NavItem = {
+  icon: string;
+  label: string;
+  prompt?: string;
+  action?: "github" | "policy";
+  badge?: string;
+  children?: { icon: string; label: string; prompt: string }[];
+};
+
+const NAV_ITEMS: NavItem[] = [
+  { icon: "📁", label: "الملفات", prompt: "اعرض ملفات مجلد العمل ولخّص لي محتواها وبنيتها" },
+  { icon: "🛠️", label: "ابنِ تطبيقاً", prompt: "أنشئ تطبيق ويب بسيط لعرض الأذكار اليومية ثم شغّله" },
+  { icon: "🌐", label: "بحث ويب", prompt: "ابحث في الويب عن آخر مستجدات الذكاء الاصطناعي ولخّصها" },
+  { icon: "📄", label: "المستندات", prompt: "اقرأ ملف PDF في مجلد العمل ولخّص أهم النقاط بالعربية" },
+  {
+    icon: "🖼️", label: "الوسائط",
+    children: [
+      { icon: "👁️", label: "اقرأ صورة", prompt: "اقرأ الصورة الموجودة في مجلد العمل واستخرج النص منها" },
+      { icon: "🎨", label: "حرّر صورة", prompt: "حرّر صورة: صحّح الألوان واجعلها بأسلوب غروب دافئ" },
+      { icon: "🎬", label: "حلّل فيديو", prompt: "لخّص لي فيديو في مجلد العمل: ما النص الظاهر وما المحتوى المنطوق؟" },
+    ],
+  },
+  { icon: "🧩", label: "سير عمل n8n", badge: "تجريبي", prompt: "اصنع لي سير عمل n8n: عند وصول بريد جديد أرسل ملخصه إلى تيليجرام" },
+  { icon: "⬇️", label: "التنزيلات" },
+  { icon: "🐙", label: "GitHub", action: "github" },
+  { icon: "🛡️", label: "سياسة التنفيذ", action: "policy" },
+];
+
+const QUICK_ACTIONS = [
+  { icon: "🛠️", label: "تطبيق", prompt: "أنشئ تطبيق ويب بسيط لعرض الأذكار اليومية ثم شغّله" },
+  { icon: "🧩", label: "سير عمل", prompt: "اصنع لي سير عمل n8n: عند وصول بريد جديد أرسل ملخصه إلى تيليجرام" },
+  { icon: "👁️", label: "اقرأ صورة", prompt: "اقرأ الصورة الموجودة في مجلد العمل واستخرج النص منها" },
+  { icon: "🎬", label: "فيديو", prompt: "لخّص لي فيديو في مجلد العمل: ما النص الظاهر وما المحتوى المنطوق؟" },
+  { icon: "🎨", label: "تحرير صورة", prompt: "حرّر صورة: صحّح الألوان واجعلها بأسلوب غروب دافئ" },
+  { icon: "📄", label: "مستند", prompt: "اقرأ ملف PDF في مجلد العمل ولخّص أهم النقاط بالعربية" },
 ];
 
 const POLICIES: { id: Policy; label: string; icon: string; hint: string }[] = [
@@ -59,31 +170,6 @@ const POLICIES: { id: Policy; label: string; icon: string; hint: string }[] = [
   { id: "aggressive", label: "قوي", icon: "🚀", hint: "ينجز أسرع طريقة ممكنة بأقل أسئلة" },
   { id: "always_ask", label: "اسأل دائماً", icon: "🛡️", hint: "يوقف أي إجراء خطير حتى تؤكد" },
 ];
-
-const TOOL_ICONS: Record<string, string> = {
-  read_file: "📖", write_file: "✍️", append_file: "➕", search_files: "🔍",
-  list_files: "🗂️", run_command: "⚙️", machine_ops: "🖥️", memory: "🧠",
-  fetch_url: "🌐", edit_image: "🖼️", edit_video: "🎬", analyze_video: "🎥",
-  generate_emoji: "😊", read_image: "👁️", default: "🔧",
-};
-
-function toolIcon(name?: string) {
-  return TOOL_ICONS[name ?? ""] ?? TOOL_ICONS.default;
-}
-
-function activityRow(ev: ActivityEvent): { icon: string; label: string; detail?: string } {
-  if (ev.event === "provider_selected") {
-    return { icon: "🧠", label: `العقل: ${ev.provider ?? ""} ${ev.model ?? ""}`.trim() };
-  }
-  const args = ev.arguments ?? {};
-  const detail =
-    args.path ?? args.command ?? args.query ?? args.url ?? args.action ?? args.file ??
-    (args.input ? String(args.input) : undefined);
-  if (ev.event === "tool_requested") {
-    return { icon: toolIcon(ev.tool), label: `تشغيل ${ev.tool ?? "أداة"}…`, detail: detail ? String(detail) : undefined };
-  }
-  return { icon: "✓", label: `${ev.tool ?? "أداة"} تمّت`, detail: detail ? String(detail) : undefined };
-}
 
 type SlashCommand = {
   cmd: string; icon: string; label: string; hint: string;
@@ -118,13 +204,16 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [apiInput, setApiInput] = useState(getApiBase());
   const [tokenInput, setTokenInput] = useState(getToken());
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [activeSid, setActiveSid] = useState<string>(() => localStorage.getItem("aali_sid") || "");
   const [toast, setToast] = useState("");
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState(false);
+  const [navOpen, setNavOpen] = useState(false); // sidebar as overlay on small screens
+  const [railCollapsed, setRailCollapsed] = useState(() => localStorage.getItem("aali_rail") === "1");
+  const [mediaOpen, setMediaOpen] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastUserMessage = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
 
@@ -170,11 +259,27 @@ export default function App() {
   }, [policy]);
 
   useEffect(() => {
+    localStorage.setItem("aali_rail", railCollapsed ? "1" : "0");
+  }, [railCollapsed]);
+
+  useEffect(() => {
     const saved = getGithubToken();
     if (!saved) return;
     fetchGithubUser(saved)
       .then((u) => setGhUser(u))
       .catch(() => setGithubToken(""));
+  }, []);
+
+  /* Ctrl/⌘ + K — focus the composer (matches the kbd hint on the New Chat button) */
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
   }, []);
 
   const showToast = useCallback((text: string) => {
@@ -196,6 +301,16 @@ export default function App() {
     return () => clearInterval(t);
   }, [refreshSessions]);
 
+  // auto-grow the composer textarea; scrollbar stays hidden until the cap
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const cap = Math.round(window.innerHeight * 0.35);
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
+    el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden";
+  }, [draft, chatMode]);
+
   // elapsed-seconds ticker while waiting
   useEffect(() => {
     if (!waiting) { setElapsed(0); return; }
@@ -213,10 +328,11 @@ export default function App() {
       setSlashOpen(false);
       setWaiting(true);
       setActivities([]);
-      const thinkId = Date.now() + 1;
+      const uid = nextMsgId();
+      const thinkId = nextMsgId();
       const thinkMsg: Msg = { id: thinkId, role: "assistant", text: "", thinking: true, ts: Date.now() / 1000 };
       setMessages((m) => [
-        ...(opts?.confirm ? m : [...m, { id: Date.now(), role: "user", text: clean, ts: Date.now() / 1000 } as Msg]),
+        ...(opts?.confirm ? m : [...m, { id: uid, role: "user", text: clean, ts: Date.now() / 1000 } as Msg]),
         thinkMsg,
       ]);
       setAtBottom(true);
@@ -232,15 +348,30 @@ export default function App() {
             sawActivity = true;
             const row = activityRow(ev);
             setActivities((a) => {
-              const isResult = ev.event === "tool_result";
-              const next = isResult
-                ? a.map((x) => (x.label.startsWith(`تشغيل ${ev.tool ?? ""}`) ? { ...x, done: true, label: `${ev.tool} تمّت` } : x))
-                : [...a, { id: Date.now() + Math.random(), icon: row.icon, label: row.label, detail: row.detail, done: false }];
-              return next.slice(-5);
+              if (ev.event === "tool_result") {
+                return a.map((x) =>
+                  x.tool === ev.tool && !x.done
+                    ? { ...x, done: true, label: maskProviders(row.doneLabel) }
+                    : x
+                );
+              }
+              return [
+                ...a,
+                {
+                  id: nextMsgId() + Math.random(),
+                  icon: row.icon,
+                  label: maskProviders(row.label),
+                  detail: row.detail ? maskProviders(row.detail) : undefined,
+                  done: false,
+                  tool: row.tool,
+                  term: row.term,
+                },
+              ];
             });
+            return undefined;
           },
         });
-        const reply = data.reply || data.error || "…";
+        const reply = maskOutsideCode(data.reply || data.error || "…");
         setMessages((m) =>
           m.map((x) =>
             x.id === thinkId
@@ -249,7 +380,7 @@ export default function App() {
                   thinking: false,
                   text: reply,
                   pending: data.needs_confirm ? data.pending_action : undefined,
-                  suggestions: data.suggestions?.slice(0, 3),
+                  suggestions: data.suggestions?.slice(0, 3).map(maskProviders),
                 }
               : x
           )
@@ -291,7 +422,8 @@ export default function App() {
     localStorage.removeItem("aali_sid");
     setMessages([]);
     setActiveSid("");
-    setSidebarOpen(false);
+    setNavOpen(false);
+    setTimeout(() => inputRef.current?.focus(), 60);
   };
 
   const openSession = async (sid: string) => {
@@ -299,8 +431,8 @@ export default function App() {
       const turns = await getSession(sid);
       const restored: Msg[] = turns
         .filter((t) => t.role === "user" || t.role === "assistant")
-        .map((t, i) => ({
-          id: i + Date.now(),
+        .map((t) => ({
+          id: nextMsgId(),
           role: t.role as "user" | "assistant",
           text: String(t.content ?? ""),
           ts: t.ts,
@@ -308,7 +440,7 @@ export default function App() {
       setMessages(restored);
       setActiveSid(sid);
       localStorage.setItem("aali_sid", sid);
-      setSidebarOpen(false);
+      setNavOpen(false);
     } catch {
       showToast("تعذّر فتح الجلسة");
     }
@@ -325,6 +457,7 @@ export default function App() {
     setSlashOpen(false);
     if (c.kind === "insert") {
       setDraft(c.value);
+      inputRef.current?.focus();
       return;
     }
     switch (c.value) {
@@ -341,13 +474,13 @@ export default function App() {
         break;
       case "compact": {
         setDraft("");
-        const noteId = Date.now();
+        const noteId = nextMsgId();
         setMessages((m) => [...m, { id: noteId, role: "assistant", text: "", thinking: true, ts: Date.now() / 1000 }]);
         void compactSession().then((res) => {
           const text = res.compacted
             ? `🗜️ تم اختصار المحادثة — بقيت ${res.kept_turns ?? ""} رسالة حديثة.\n\n${res.summary ?? ""}`
             : res.message || "لا حاجة للاختصار الآن.";
-          setMessages((m) => m.map((x) => (x.id === noteId ? { ...x, thinking: false, text } : x)));
+          setMessages((m) => m.map((x) => (x.id === noteId ? { ...x, thinking: false, text: maskOutsideCode(text) } : x)));
         });
         break;
       }
@@ -358,6 +491,15 @@ export default function App() {
     setDraft(value);
     setSlashOpen(value.startsWith("/"));
   };
+
+  /* Deep link: /ui/?sid=<id> restores that conversation on load (used by
+     the sessions sidebar "share link" and by screenshot automation). */
+  const deepSid = useMemo(() => new URLSearchParams(window.location.search).get("sid") || "", []);
+  useEffect(() => {
+    if (!deepSid) return;
+    localStorage.setItem("aali_sid", deepSid);
+    void openSession(deepSid);
+  }, [deepSid]);
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Escape" && slashOpen) {
@@ -458,6 +600,9 @@ export default function App() {
     setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
   };
 
+  // suggestion chips belong only under the latest assistant reply
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
+
   const SlashMenu = slashOpen && slashMatches.length > 0 && (
     <div className="slash-menu">
       {slashMatches.map((c) => (
@@ -469,39 +614,6 @@ export default function App() {
           </span>
         </button>
       ))}
-    </div>
-  );
-
-  const ControlBar = (
-    <div className="control-bar">
-      <div className="control-item policy-control">
-        <button type="button" className="control-btn" onClick={() => setPolicyOpen((v) => !v)} title={currentPolicy.hint}>
-          <span>{currentPolicy.icon}</span>
-          <span>{currentPolicy.label}</span>
-        </button>
-        {policyOpen && (
-          <div className="control-menu" onMouseLeave={() => setPolicyOpen(false)}>
-            {POLICIES.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`control-menu-item ${p.id === policy ? "active" : ""}`}
-                onClick={() => { setPolicy(p.id); setPolicyOpen(false); }}
-              >
-                <span className="cmi-icon">{p.icon}</span>
-                <span className="cmi-text">
-                  <b>{p.label}</b>
-                  <small>{p.hint}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <button type="button" className="control-btn" onClick={openGithubPanel}>
-        <span>🐙</span>
-        <span>{ghUser ? ghUser.login : "GitHub"}</span>
-      </button>
     </div>
   );
 
@@ -521,153 +633,288 @@ export default function App() {
     </div>
   );
 
+  /* ————— sidebar ————— */
+  const Sidebar = (
+    <aside className={`sidebar ${railCollapsed ? "rail" : ""} ${navOpen ? "open" : ""}`}>
+      <div className="side-head">
+        <div className="logo" title="آلي">HWK</div>
+        <button
+          type="button"
+          className="side-toggle"
+          title={railCollapsed ? "توسيع القائمة" : "تصغير القائمة"}
+          onClick={() => setRailCollapsed((v) => !v)}
+        >
+          {railCollapsed ? "⇥" : "⇤"}
+        </button>
+      </div>
+
+      {railCollapsed ? (
+        <div className="rail-col">
+          <button type="button" className="rail-btn" title="محادثة جديدة (Ctrl K)" onClick={newChat}>＋</button>
+          <button type="button" className="rail-btn" title="الجلسات" onClick={() => setNavOpen(true)}>☰</button>
+          <button type="button" className="rail-btn" title="GitHub" onClick={() => void openGithubPanel()}>🐙</button>
+          <button type="button" className="rail-btn" title="الإعدادات" onClick={() => setShowSettings(true)}>⚙︎</button>
+        </div>
+      ) : (
+        <>
+          <button type="button" className="new-chat" onClick={newChat}>
+            <span className="nc-plus">＋</span>
+            <span className="nc-label">محادثة جديدة</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+
+          <nav className="side-nav">
+            {NAV_ITEMS.map((item) =>
+              item.children ? (
+                <div key={item.label} className={`nav-group ${mediaOpen ? "open" : ""}`}>
+                  <button
+                    type="button"
+                    className="nav-item"
+                    onClick={() => setMediaOpen((v) => !v)}
+                  >
+                    <span className="nav-ico">{item.icon}</span>
+                    <span className="nav-label">{item.label}</span>
+                    <span className="nav-caret">{mediaOpen ? "⌃" : "⌄"}</span>
+                  </button>
+                  {mediaOpen && (
+                    <div className="nav-sub">
+                      {item.children.map((c) => (
+                        <button key={c.label} type="button" className="nav-item sub" onClick={() => void send(c.prompt)}>
+                          <span className="nav-ico">{c.icon}</span>
+                          <span className="nav-label">{c.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  key={item.label}
+                  type="button"
+                  className="nav-item"
+                  title={item.prompt}
+                  onClick={() => {
+                    if (item.action === "github") void openGithubPanel();
+                    else if (item.action === "policy") setPolicyOpen(true);
+                    else if (item.label === "التنزيلات") window.open(getApiBase().replace(/\/+$/, "") + "/download", "_blank");
+                    else if (item.prompt) void send(item.prompt);
+                  }}
+                >
+                  <span className="nav-ico">{item.icon}</span>
+                  <span className="nav-label">{item.label}</span>
+                  {item.badge && <span className="beta-badge">{item.badge}</span>}
+                </button>
+              )
+            )}
+          </nav>
+
+          <div className="side-section">
+            <span>المحادثات</span>
+            <button type="button" className="side-more" title="تحديث" onClick={() => void refreshSessions()}>⟳</button>
+          </div>
+          <div className="chat-list">
+            {sessions.length === 0 && (
+              <p className="side-empty">لا توجد جلسات محفوظة بعد.</p>
+            )}
+            {sessions.map((s) => (
+              <div key={s.sid} className={`chat-row ${s.sid === activeSid ? "active" : ""}`}>
+                <button type="button" className="chat-row-btn" onClick={() => void openSession(s.sid)} title={s.title || "محادثة"}>
+                  <span className="chat-row-title">{s.title || "محادثة"}</span>
+                  <span className="chat-row-meta">{s.turns} رسالة · {new Date(s.updated_at * 1000).toLocaleDateString("ar")}</span>
+                </button>
+                <button type="button" className="chat-row-del" title="حذف الجلسة" onClick={() => void removeSession(s.sid)}>🗑</button>
+              </div>
+            ))}
+          </div>
+
+          <button type="button" className="promo-card" onClick={() => showToast("قريباً — شارك آلي مع أصدقائك ✦")}>
+            <span className="promo-text">
+              <b>ادعُ صديقاً</b>
+              <small>اربح شهراً من آلي+ لكل صديق</small>
+            </span>
+            <span className="promo-arrow">↗</span>
+          </button>
+
+          <div className="profile-row">
+            <span className="profile-avatar">أ</span>
+            <span className="profile-text">
+              <b>مستخدم آلي</b>
+              <small className={connected === null ? "" : connected ? "ok" : "bad"}>
+                {connected === null ? "…" : connected ? "متصل" : "غير متصل"}
+              </small>
+            </span>
+            <button type="button" className="upgrade-badge" onClick={() => showToast("آلي+ قريباً ✦")}>ترقية</button>
+            <button
+              type="button"
+              className="profile-act"
+              title="إنشاء مفتاح جديد"
+              onClick={() => { setNavOpen(false); window.open(getApiBase().replace(/\/+$/, "") + "/signup", "_blank"); }}
+            >
+              🔑
+            </button>
+            <button type="button" className="profile-act" title="الإعدادات" onClick={() => setShowSettings(true)}>⚙︎</button>
+          </div>
+        </>
+      )}
+    </aside>
+  );
+
+  const backdrop = navOpen && (
+    <motion.div
+      className="sidebar-backdrop"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={() => setNavOpen(false)}
+    />
+  );
+
   return (
     <div className="app">
       <div className="stars" aria-hidden="true" />
 
-      {/* SIDEBAR — sessions */}
-      <AnimatePresence>
-        {sidebarOpen && (
-          <motion.div
-            className="sidebar-backdrop"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {sidebarOpen && (
-          <motion.aside
-            className="sidebar"
-            initial={{ x: "-100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "-100%" }}
-            transition={spring}
-          >
-            <div className="sidebar-head">
-              <b>الجلسات</b>
-              <button type="button" className="sidebar-new" onClick={newChat}>＋ جديدة</button>
-            </div>
-            <div className="sidebar-list">
-              {sessions.length === 0 && (
-                <p className="sidebar-empty">لا توجد جلسات محفوظة بعد.<br />ابدأ محادثة وستظهر هنا.</p>
-              )}
-              {sessions.map((s) => (
-                <div key={s.sid} className={`sidebar-item ${s.sid === activeSid ? "active" : ""}`}>
-                  <button
-                    type="button"
-                    className="sidebar-item-text"
-                    style={{ all: "unset", cursor: "pointer", flex: 1, minWidth: 0 }}
-                    onClick={() => void openSession(s.sid)}
-                  >
-                    <b>{s.title || "محادثة"}</b>
-                    <small>
-                      {s.turns} رسالة · {new Date(s.updated_at * 1000).toLocaleDateString("ar")}
-                    </small>
-                  </button>
-                  <button type="button" className="sidebar-del" title="حذف الجلسة" onClick={() => void removeSession(s.sid)}>
-                    🗑
-                  </button>
-                </div>
-              ))}
-            </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
+      {Sidebar}
+      <AnimatePresence>{backdrop}</AnimatePresence>
 
-      <motion.header className="topbar" initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={spring}>
-        <div className="brand">
-          <button type="button" className="ghost-btn" title="الجلسات" onClick={() => setSidebarOpen(true)}>☰</button>
-          <motion.span className="brand-star" animate={orbPulse} aria-hidden="true">✦</motion.span>
-          <div className="brand-text">
-            <strong>آلي</strong>
-            <small className={connected === null ? "" : connected ? "ok" : "bad"}>
-              {connected === null ? "…" : connected ? "متصل" : "غير متصل"}
-            </small>
-          </div>
-        </div>
-        <div className="status-pills">
-          <span className={`pill ${connected ? "good" : connected === false ? "warn" : ""}`}>
-            🧠 <b>العقل</b> <span>{connected ? "يعمل" : "—"}</span>
-          </span>
-          {getSid() && <span className="pill">🔗 <span>جلسة مستمرة</span></span>}
-        </div>
-        <div className="top-actions">
-          <button className="ghost-btn" title="الإعدادات" onClick={() => setShowSettings(true)}>⚙︎</button>
-          <button className="ghost-btn" title="محادثة جديدة" onClick={newChat}>＋</button>
-        </div>
-      </motion.header>
-
-      {/* HOME — hero */}
-      <AnimatePresence mode="wait">
+      <div className="main">
         {!chatMode ? (
-          <motion.section
-            key="home"
-            className="home"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 0.985, transition: { duration: 0.18 } }}
-          >
+          /* ————— HOME WORKSPACE ————— */
+          <section className="home">
+            <div className="home-top">
+              <button type="button" className="rail-btn only-mobile" title="القائمة" onClick={() => setNavOpen(true)}>☰</button>
+              <motion.button
+                type="button"
+                className="upgrade-pill"
+                animate={orbPulse}
+                onClick={() => showToast("آلي+ قريباً ✦")}
+              >
+                <span>✦</span> طوّر خطتك
+              </motion.button>
+              <span className="home-top-spacer" />
+            </div>
+
             <div className="hero">
-              <motion.div className="hero-orb" animate={orbPulse} aria-hidden="true">✦</motion.div>
-              <motion.h1 initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
-                كيف أساعدك <span className="gold">اليوم</span>؟
+              <motion.h1 className="wordmark" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
+                آلي
               </motion.h1>
-              <motion.p className="tagline" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.06 }}>
-                عقل يعمل على حاسوبك: يبني التطبيقات، يقرأ صورك ومستنداتك وفيديوهاتك،
-                وينفّذ سير عملك — بعربي أولاً.
-              </motion.p>
 
               <motion.form
-                className="hero-form"
+                className="ask-box"
                 initial={{ opacity: 0, y: 18, scale: 0.99 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ ...spring, delay: 0.12 }}
+                transition={{ ...spring, delay: 0.08 }}
                 onSubmit={(e) => { e.preventDefault(); void send(draft); }}
               >
-                <div className="hero-form-row">
-                  {SlashMenu}
-                  <textarea
-                    id="heroInput"
-                    rows={1}
-                    placeholder="اطلب أي شيء… أو اكتب / لرؤية الأوامر"
-                    value={draft}
-                    onChange={(e) => onDraftChange(e.target.value)}
-                    onKeyDown={onKey}
-                  />
-                  <button type="button" className={`mic-btn ${listening ? "listening" : ""}`} title="إدخال صوتي" onClick={startVoice}>🎙</button>
-                  <button type="submit" className="send-btn" disabled={waiting || !draft.trim()} aria-label="إرسال">
-                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9Z" /></svg>
+                {SlashMenu}
+                <textarea
+                  id="heroInput"
+                  ref={inputRef}
+                  rows={2}
+                  style={{ overflowY: "hidden" }}
+                  placeholder="اسأل عن أي شيء، أو كلّف الوكيل بمهمة…"
+                  value={draft}
+                  onChange={(e) => onDraftChange(e.target.value)}
+                  onKeyDown={onKey}
+                />
+                <div className="ask-row">
+                  <button
+                    type="button"
+                    className="ask-plus"
+                    title="أوامر سريعة (/)"
+                    onClick={() => { setDraft("/"); setSlashOpen(true); inputRef.current?.focus(); }}
+                  >
+                    ＋
                   </button>
+                  <div className="ask-right">
+                    <div className="model-select-wrap">
+                      <button type="button" className="model-select" onClick={() => setPolicyOpen((v) => !v)} title={currentPolicy.hint}>
+                        <span>{currentPolicy.icon}</span>
+                        <span>آلي {currentPolicy.label}</span>
+                        <span className="ms-caret">▾</span>
+                      </button>
+                      {policyOpen && (
+                        <div className="control-menu" onMouseLeave={() => setPolicyOpen(false)}>
+                          {POLICIES.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className={`control-menu-item ${p.id === policy ? "active" : ""}`}
+                              onClick={() => { setPolicy(p.id); setPolicyOpen(false); }}
+                            >
+                              <span className="cmi-icon">{p.icon}</span>
+                              <span className="cmi-text">
+                                <b>آلي {p.label}</b>
+                                <small>{p.hint}</small>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button type="submit" className="send-round" disabled={waiting || !draft.trim()} aria-label="إرسال">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
+                    </button>
+                  </div>
                 </div>
-                {ControlBar}
               </motion.form>
 
-              <motion.div className="actions" variants={stagger} initial="hidden" animate="show">
-                {ACTIONS.map((a) => (
+              <motion.div className="quick-pills" variants={stagger} initial="hidden" animate="show">
+                {QUICK_ACTIONS.map((a) => (
                   <motion.button
-                    key={a.title}
-                    className="action"
+                    key={a.label}
+                    type="button"
+                    className="quick-pill"
                     variants={riseIn}
-                    whileHover={{ y: -3, borderColor: "rgba(232,179,75,.5)" }}
+                    whileHover={{ y: -2, borderColor: "rgba(232,179,75,.45)" }}
                     whileTap={{ scale: 0.97 }}
                     onClick={() => void send(a.prompt)}
                   >
-                    <span className="action-ico">{a.icon}</span>
-                    <b>{a.title}</b>
-                    <small>{a.sub}</small>
+                    <span className="qp-ico">{a.icon}</span>
+                    {a.label}
                   </motion.button>
                 ))}
+                <motion.button
+                  type="button"
+                  className="quick-pill"
+                  variants={riseIn}
+                  whileHover={{ y: -2, borderColor: "rgba(232,179,75,.45)" }}
+                  onClick={() => startVoice()}
+                  title="إدخال صوتي"
+                >
+                  <span className={`qp-ico ${listening ? "listening" : ""}`}>🎙</span>
+                  صوت
+                </motion.button>
               </motion.div>
             </div>
-          </motion.section>
+
+            <footer className="home-foot">
+              <button type="button" className="foot-link" onClick={() => void send("اقترح لي أفكاراً مشاريع أستطيع بناءها معك اليوم")}>
+                استكشف الإلهام
+              </button>
+              <span className="foot-indicator">
+                مرّر للاستكشاف
+                <span className="foot-arrows" aria-hidden="true">⌃<br />⌃</span>
+              </span>
+            </footer>
+          </section>
         ) : (
+          /* ————— CHAT WORKSPACE ————— */
           <motion.main
-            key="chat"
-            className="chat-wrap"
+            className="chatpane"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
           >
+            <header className="chat-head">
+              <button type="button" className="rail-btn only-mobile" title="القائمة" onClick={() => setNavOpen(true)}>☰</button>
+              <span className="model-chip" title={currentPolicy.hint}>
+                <span className="mc-star">✦</span> آلي
+                <span className="mc-mode">{currentPolicy.label}</span>
+              </span>
+              <span className={`conn-dot ${connected === null ? "" : connected ? "ok" : "bad"}`} title={connected ? "متصل" : "غير متصل"} />
+              <div className="chat-head-actions">
+                <button type="button" className="ghost-btn" title="الإعدادات" onClick={() => setShowSettings(true)}>⚙︎</button>
+                <button type="button" className="ghost-btn" title="محادثة جديدة (Ctrl K)" onClick={newChat}>＋</button>
+              </div>
+            </header>
+
             <div ref={chatRef} className="chat" onScroll={onChatScroll}>
               {messages.map((m) => (
                 <motion.div
@@ -676,54 +923,71 @@ export default function App() {
                   initial={msgIn.initial}
                   animate={msgIn.animate}
                 >
-                  <span className="who">
-                    {m.role === "user" ? "أنت" : "آلي"}
-                    {m.ts ? <span className="ts">{timeOf(m.ts)}</span> : null}
-                    {m.role === "assistant" && !m.thinking && (
-                      <button
-                        type="button"
-                        className="copy-btn"
-                        title="نسخ الرد"
-                        onClick={async () => {
-                          try { await navigator.clipboard.writeText(m.text); showToast("تم النسخ ✓"); } catch { /* noop */ }
-                        }}
-                      >
-                        ⧉
-                      </button>
-                    )}
-                  </span>
-                  {m.thinking ? <ThinkingOrbit /> : <Markdown text={m.text} />}
-                  {m.thinking && <div style={{ marginTop: 10 }}>{ActivityPanel}</div>}
-                  {m.pending && (
-                    <div className="confirm-bar">
-                      <span>
-                        يريد آلي تنفيذ <code>{m.pending.tool}</code> — إجراء لا يمكن التراجع عنه بسهولة.
+                  <span className="avatar" aria-hidden="true">{m.role === "user" ? "👤" : <span className="avatar-hwk">HWK</span>}</span>
+                  <div className="msg-main">
+                    <div className="body">
+                      <span className="who">
+                        {m.role === "user" ? "أنت" : "آلي"}
+                        {m.ts ? <span className="ts">{timeOf(m.ts)}</span> : null}
                       </span>
-                      <div className="confirm-actions">
-                        <button type="button" className="confirm-yes" onClick={confirmPending} disabled={waiting}>
-                          تأكيد وتنفيذ
-                        </button>
-                        <button
-                          type="button"
-                          className="confirm-no"
-                          onClick={() =>
-                            setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, pending: undefined } : x)))
-                          }
-                        >
-                          إلغاء
-                        </button>
+                      {m.thinking ? <ThinkingOrbit /> : <Markdown text={m.text} />}
+                      {m.thinking && <div style={{ marginTop: 10 }}>{ActivityPanel}</div>}
+                      {!m.thinking && m.role === "assistant" && (
+                        <div className="msg-actions">
+                          <button
+                            type="button"
+                            title="نسخ الرد"
+                            onClick={async () => {
+                              try { await navigator.clipboard.writeText(m.text); showToast("تم النسخ ✓"); } catch { /* noop */ }
+                            }}
+                          >
+                            ⧉
+                          </button>
+                          <button
+                            type="button"
+                            title="إعادة التوليد"
+                            disabled={waiting}
+                            onClick={() => {
+                              const lastUser = [...messages].reverse().find((x) => x.role === "user");
+                              if (lastUser) void send(lastUser.text);
+                            }}
+                          >
+                            ↻
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {m.pending && (
+                      <div className="confirm-bar" style={{ width: "100%" }}>
+                        <span>
+                          يريد آلي تنفيذ <code>{m.pending.tool}</code> — إجراء لا يمكن التراجع عنه بسهولة.
+                        </span>
+                        <div className="confirm-actions">
+                          <button type="button" className="confirm-yes" onClick={confirmPending} disabled={waiting}>
+                            تأكيد وتنفيذ
+                          </button>
+                          <button
+                            type="button"
+                            className="confirm-no"
+                            onClick={() =>
+                              setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, pending: undefined } : x)))
+                            }
+                          >
+                            إلغاء
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {!m.thinking && m.suggestions && m.suggestions.length > 0 && (
-                    <div className="suggestions">
-                      {m.suggestions.map((s) => (
-                        <button key={s} type="button" className="chip" title={s} onClick={() => void send(s)}>
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                    )}
+                    {!m.thinking && m.role === "assistant" && m.id === lastAssistantId && m.suggestions && m.suggestions.length > 0 && (
+                      <div className="suggestions">
+                        {m.suggestions.map((s) => (
+                          <button key={s} type="button" className="chip" title={s} onClick={() => void send(s)}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </motion.div>
               ))}
               {!atBottom && (
@@ -732,50 +996,39 @@ export default function App() {
                 </button>
               )}
             </div>
+
+            <footer className="composer">
+              <form
+                onSubmit={(e) => { e.preventDefault(); void send(draft); }}
+                className="composer-form"
+              >
+                {SlashMenu}
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  placeholder="تابع الحديث مع آلي… (Enter للإرسال، / للأوامر)"
+                  value={draft}
+                  onChange={(e) => onDraftChange(e.target.value)}
+                  onKeyDown={onKey}
+                />
+                {waiting ? (
+                  <button type="button" className="stop-btn" title="إيقاف العرض" onClick={() => abortRef.current?.abort()}>
+                    ⏹
+                  </button>
+                ) : (
+                  <button type="button" className={`mic-btn ${listening ? "listening" : ""}`} title="إدخال صوتي" onClick={startVoice}>🎙</button>
+                )}
+                <button type="submit" className="send-btn" disabled={waiting || !draft.trim()} aria-label="إرسال">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
+                </button>
+              </form>
+              <p className="hint">
+                يتصل بـ <code>{getApiBase()}</code> — غيّره من ⚙︎ الإعدادات
+              </p>
+            </footer>
           </motion.main>
         )}
-      </AnimatePresence>
-
-      {/* DOCKED COMPOSER — chat mode */}
-      <AnimatePresence>
-        {chatMode && (
-          <motion.footer
-            className="composer"
-            initial={{ y: 60, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 60, opacity: 0 }}
-            transition={spring}
-          >
-            <form
-              onSubmit={(e) => { e.preventDefault(); void send(draft); }}
-              className="composer-form"
-            >
-              {SlashMenu}
-              <textarea
-                rows={1}
-                placeholder="تابع الحديث مع آلي… (Enter للإرسال، / لرؤية الأوامر)"
-                value={draft}
-                onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={onKey}
-              />
-              {waiting ? (
-                <button type="button" className="stop-btn" title="إيقاف العرض" onClick={() => abortRef.current?.abort()}>
-                  ⏹
-                </button>
-              ) : (
-                <button type="button" className={`mic-btn ${listening ? "listening" : ""}`} title="إدخال صوتي" onClick={startVoice}>🎙</button>
-              )}
-              <button type="submit" className="send-btn" disabled={waiting || !draft.trim()} aria-label="إرسال">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9Z" /></svg>
-              </button>
-            </form>
-            {ControlBar}
-            <p className="hint">
-              يتصل بـ <code>{getApiBase()}</code> — غيّره من ⚙︎ الإعدادات
-            </p>
-          </motion.footer>
-        )}
-      </AnimatePresence>
+      </div>
 
       {/* SETTINGS */}
       {showSettings && (

@@ -3,38 +3,70 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>آلي — إنشاء مفتاح</title>
+<title>آلي — إنشاء مفتاحك</title>
 <style>
-  :root{--bg:#0f1117;--panel:#171a23;--line:#262b38;--fg:#e6e8ee;--mut:#9aa0ae;--acc:#4f8cff;--ok:#2ecc71;--bad:#e74c3c}
+  :root{
+    --bg:#121214; --panel:#18181c; --bg3:#23242b; --line:#2a2c35; --line-soft:#22242c;
+    --fg:#f2f2f3; --mut:#8f929c; --gold:#e8b34b; --gold-soft:#f5cf8a;
+    --gold-dim:rgba(232,179,75,.12); --ok:#7fd6a4; --bad:#f08c8c;
+  }
   *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-       font-family:system-ui,'Tajawal',sans-serif;background:var(--bg);color:var(--fg);padding:20px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px;max-width:420px;width:100%}
-  h1{font-size:20px;margin:0 0 6px}
-  .sub{color:var(--mut);font-size:13px;margin:0 0 18px;line-height:1.7}
-  label{display:block;font-size:13px;margin-bottom:6px}
-  input{width:100%;font:inherit;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
-        background:#0f1117;color:var(--fg);margin-bottom:14px}
-  button{font:inherit;padding:11px 18px;border-radius:10px;border:1px solid var(--acc);
-         background:var(--acc);color:#fff;cursor:pointer;width:100%}
-  button:disabled{opacity:.5;cursor:wait}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    font-family:"Tajawal",system-ui,sans-serif; background:var(--bg); color:var(--fg); padding:20px;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; opacity:.3;
+    background-image:
+      radial-gradient(1.5px 1.5px at 20% 30%, #fff6, transparent),
+      radial-gradient(1px 1px at 60% 20%, #ffe9c45a, transparent),
+      radial-gradient(1px 1px at 80% 70%, #fff4, transparent);
+  }
+  .card{
+    position:relative; background:var(--panel); border:1px solid var(--line);
+    border-radius:22px; padding:30px; max-width:440px; width:100%;
+    box-shadow:0 14px 50px rgba(0,0,0,.4);
+  }
+  .logo{
+    width:46px; height:46px; border-radius:13px; display:grid; place-items:center;
+    background:var(--gold-dim); color:var(--gold); border:1px solid rgba(232,179,75,.3);
+    font-size:22px; margin-bottom:14px;
+  }
+  h1{font-size:20px; margin:0 0 6px; font-weight:800}
+  .sub{color:var(--mut); font-size:13px; margin:0 0 18px; line-height:1.8}
+  label{display:block; font-size:13px; margin-bottom:6px; font-weight:700}
+  input{
+    width:100%; font:inherit; padding:12px 13px; border-radius:12px;
+    border:1px solid var(--line); background:var(--bg); color:var(--fg); margin-bottom:14px;
+  }
+  input:focus{outline:none; border-color:rgba(232,179,75,.5)}
+  button{
+    font:inherit; font-weight:800; padding:12px 18px; border-radius:12px;
+    border:0; background:var(--gold); color:#241a05; cursor:pointer; width:100%;
+    transition:all .15s ease;
+  }
+  button:hover{background:var(--gold-soft)}
+  button:disabled{opacity:.5; cursor:wait}
   .hidden{display:none}
-  #key{word-break:break-all;background:rgba(79,140,255,.1);border:1px solid var(--acc);
-       padding:12px;border-radius:10px;font-family:ui-monospace,monospace;font-size:13px;
-       direction:ltr;text-align:left;margin-bottom:12px}
-  .note{color:var(--mut);font-size:12px;line-height:1.7;margin:0 0 14px}
-  .done{color:var(--ok);font-weight:700}
-  a{color:var(--acc);text-decoration:none}
-  .err{color:var(--bad);font-size:13px;margin:0 0 12px}
-  .row{display:flex;gap:8px}
+  #key{
+    word-break:break-all; background:var(--gold-dim); border:1px solid rgba(232,179,75,.4);
+    padding:12px; border-radius:12px; font-family:ui-monospace,monospace; font-size:13px;
+    direction:ltr; text-align:left; margin-bottom:12px; color:var(--gold-soft);
+  }
+  .note{color:var(--mut); font-size:12px; line-height:1.8; margin:0 0 14px}
+  .done{color:var(--ok); font-weight:800}
+  a{color:var(--gold-soft); text-decoration:none}
+  .err{color:var(--bad); font-size:13px; margin:0 0 12px}
+  .row{display:flex; gap:8px}
   .row button{flex:1}
-  .ghost{background:transparent;color:var(--fg);border-color:var(--line)}
+  .ghost{background:var(--bg3); color:var(--fg); border:1px solid var(--line)}
 </style>
 </head>
 <body>
 <div class="card">
   <!-- STEP 1: request -->
   <div id="step1">
+    <div class="logo">✦</div>
     <h1>ابدأ مع آلي</h1>
     <p class="sub">آلي يخدم المستخدمين حول العالم بنموذجه الخاص. أنشئ مفتاحك الخاص — يستغرق ثانية واحدة، ولا نطلب بريدًا ولا بيانات شخصية.</p>
     <label for="label">ماذا ستستخدم آلي لأجل؟ (اختياري)</label>
@@ -46,7 +78,8 @@
 
   <!-- STEP 2: the one-time key -->
   <div id="step2" class="hidden">
-    <h1 class="done">✅ مفتاحك جاهز</h1>
+    <div class="logo">✅</div>
+    <h1 class="done">مفتاحك جاهز</h1>
     <p class="sub">احفظه الآن — يُعرض <b>مرة واحدة فقط</b> ولن نستطيع استعادته.</p>
     <div id="key"></div>
     <p class="note">سنحفظه في هذا المتصفح تلقائيًا لتدخل فورًا، ويمكنك دائمًا لصقه يدويًا من إعدادات التطبيق (⚙︎).</p>
