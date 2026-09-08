@@ -129,8 +129,8 @@ FLOWS: dict[str, dict[str, Any]] = {
             {"id": "own", "t": "النموذج الخاص أولاً",
              "d": "إن وُجد checkpoint مُرقَّى (نموذج آلي المدرَّب من الصفر) فهو الافتراضي.",
              "c": "file-agent/agent_loop.py::promoted_own_model", "n": "ollama"},
-            {"id": "ollama", "t": "أو Ollama المحلي",
-             "d": "نماذج محلية عبر ollama — بلا مفاتيح ولا إنترنت (سياق 8192 ليتسع كتلة الذاكرة).",
+            {"id": "ollama", "t": "أو Ollama المحلي — عقل مؤقت فقط",
+             "d": "حلقة انتظار محلية 100% على جهازك (بلا إنترنت ولا مفاتيح ولا حسابات) يعمل بها آلي حتى تُرقَّى checkpoint نموذجك الخاص — ليست خدمة خارجية ولا تبعية: نفس سلسلة الأدوات والذاكرة والأمان تعمل فوقها، وتُستبدل تلقائياً بنموذجك عند ترقيته.",
              "c": "file-agent/agent_loop.py::_ollama_chat", "n": "scratch"},
             {"id": "scratch", "t": "أو النموذج الصغير المباشر",
              "d": "transformer من الصفر (hwk_model) — يعمل دائماً حتى قبل التدريب الكامل.",
@@ -270,13 +270,13 @@ def live_snapshot() -> dict[str, Any]:
     snap["memory_store"] = _stat(mem_dir / "aali_memory.json")
     snap["conversation_archive"] = _stat(mem_dir / "aali_conversations.jsonl")
 
-    which = "scratch (hwk_model)"
+    which = "النموذج الصغير المباشر (hwk_model)"
     try:  # which brain would answer right now
         from agent_loop import promoted_own_model, _ollama_available
         if promoted_own_model():
-            which = "own model (promoted checkpoint)"
+            which = "نموذج آلي الخاص ✦ (promoted checkpoint)"
         elif _ollama_available():
-            which = "ollama (local)"
+            which = "Ollama المحلي — عقل مؤقت حتى ترقية نموذج آلي الخاص"
     except Exception:  # noqa: BLE001
         pass
     snap["active_brain"] = which
@@ -310,8 +310,12 @@ def render_ascii() -> str:
     return "\n".join(lines)
 
 
-def render_html(live: dict[str, Any] | None = None, *, demo: bool = False) -> str:
-    """Self-contained RTL page for the admin-gated /brain route."""
+def render_html(live: dict[str, Any] | None = None, *, demo: bool = False,
+                feed_token: str = "") -> str:
+    """Self-contained RTL page for the admin-gated /brain route.
+
+    feed_token: short-lived token allowing the page's live feed to stream
+    without the browser ever holding the master key."""
     live_rows = ""
     if live:
         k = live.get("keys") or {}
@@ -378,17 +382,73 @@ def render_html(live: dict[str, Any] | None = None, *, demo: bool = False) -> st
  table.src th{{color:#e8b34b}} table.src td:first-child{{font-weight:700;white-space:nowrap}}
  h2.sec{{color:#e8b34b;margin-top:26px}}
  .warn{{color:#f08c8c;font-weight:700}}
+ .feed{{max-height:300px;overflow-y:auto;font-family:ui-monospace,Consolas,monospace;font-size:12px;direction:ltr;text-align:left}}
+ .frow{{padding:4px 8px;border-bottom:1px solid #1e2027;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+ .frow .ev{{color:#e8b34b;font-weight:700}} .frow .tool{{color:#7aa5ff}} .frow .ok{{color:#7fd6a4}} .frow .err{{color:#f08c8c}}
+ .frow.muted{{color:#8f929c}}
+ .dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:#7fd6a4;margin-inline-end:6px;animation:pulse 2s infinite}}
+ @keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.3}}}}
 </style></head><body><div class="wrap">
 <h1>🧠 شجرة عقل آلي <small>v{TREE_VERSION} — للمالك فقط، تحديث حي</small></h1>
 <p class="warn">هذه الصفحة إدارية: تُظهر كيف يعمل آلي من الداخل. لا تُشارك مع المستخدمين.</p>
 {demo_banner}
 {f"<div class='live'><h3>⏱ الحالة الحية — {live.get('generated_at_iso', '')}</h3><table>{live_rows}</table></div>" if live else ""}
+<div class="live">
+ <h3>📡 نبض آلي الحي — الأحداث كما تحدث</h3>
+ <div id="feed" class="feed"><div class="frow muted">جارٍ الاتصال…</div></div>
+</div>
 {flows_html}
 <h2 class="sec">📥 من أين يحصل آلي على المعلومات؟</h2>
 <table class="src"><tr><th>المصدر</th><th>المسار</th><th>ماذا يقدّم</th></tr>{srcs}</table>
 <h2 class="sec">🛡️ بوابات الأمان المفروضة</h2>
 <ul>{sec}</ul>
-</div></body></html>"""
+</div>
+<script>
+(function(){{
+  var feed=document.getElementById('feed'); if(!feed) return;
+  var url='/api/brain/stream?limit=25'+'{f"&feed_token={feed_token}" if feed_token else ""}';
+  function row(ev){{
+    var d=document.createElement('div'); d.className='frow';
+    var t=(ev.timestamp||'').replace('T',' ').slice(5,19);
+    var kind=ev.event||'?';
+    var cls=kind.indexOf('error')>=0?'err':(kind==='tool_result'?'ok':'');
+    var detail=ev.tool?(' <span class="tool">'+ev.tool+'</span>')
+      :(ev.provider?(' <span class="tool">'+ev.provider+'</span>'):'');
+    var extra=ev.duration_ms?(' '+ev.duration_ms+'ms'):'';
+    d.innerHTML='<span class="dot"></span>'+t+' <span class="ev '+cls+'">'+kind+'</span>'+detail+extra;
+    return d;
+  }}
+  function connect(){{
+    fetch(url).then(function(r){{ if(!r.ok) throw new Error('HTTP '+r.status); return r.body; }})
+    .then(function(body){{
+      var reader=body.getReader(), dec=new TextDecoder(), buf='';
+      function pump(){{
+        return reader.read().then(function(res){{
+          if(res.done) {{ setTimeout(connect, 5000); return; }}
+          buf+=dec.decode(res.value, {{stream:true}});
+          var parts=buf.split('\\n\\n'); buf=parts.pop();
+          parts.forEach(function(chunk){{
+            var line=chunk.split('\\n').find(function(l){{return l.indexOf('data:')===0;}});
+            if(!line) return;
+            try{{ var ev=JSON.parse(line.slice(5));
+              feed.appendChild(row(ev));
+              while(feed.children.length>400) feed.removeChild(feed.firstChild);
+              feed.scrollTop=feed.scrollHeight;
+            }}catch(e){{}}
+          }});
+          return pump();
+        }});
+      }}
+      return pump();
+    }}).catch(function(){{
+      feed.innerHTML='<div class="frow muted">تعذّر الاتصال بالبث — إعادة المحاولة…</div>';
+      setTimeout(connect, 8000);
+    }});
+  }}
+  connect();
+}})();
+</script>
+</body></html>"""
 
 
 def _fmt_stat(st: Any) -> str:

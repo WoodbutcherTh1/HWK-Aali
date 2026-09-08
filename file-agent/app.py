@@ -23,7 +23,7 @@ from pathlib import Path
 
 import agent_log
 from agent_log import new_request_id
-from flask import Flask, Response, make_response, render_template_string, request, send_from_directory
+from flask import Flask, Response, make_response, request, send_file, send_from_directory
 from agent_loop import AgentLoopError, agent_loop, compact_history
 
 app = Flask(__name__)
@@ -44,6 +44,11 @@ from file_agent import apikeys
 # are stored hashed in apikeys (never the admin key).
 API_KEY = os.getenv("AALI_API_KEY", "").strip()
 apikeys.ensure_loaded()
+
+# Version of the desktop build served from /download — bumped by
+# scripts/build_desktop.bat on every rebuild so installed clients can
+# detect and offer an update via /api/desktop-version.
+DESKTOP_BUILD_VERSION = "1.0.1"
 
 
 def _client_key() -> str:
@@ -193,115 +198,13 @@ def _history(record: dict[str, object]) -> list[dict[str, str]]:
     ]
 
 
-PAGE = """\
-<!doctype html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>آلي — المساعد المحلي</title>
-  <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: #0f172a; color: #e2e8f0; }
-    main { width: min(760px, 100%); margin: auto; padding: 28px 16px 48px; }
-    h1 { margin: 0 0 8px; font-size: clamp(1.7rem, 6vw, 2.4rem); }
-    .subtitle { color: #94a3b8; line-height: 1.7; margin: 0 0 20px; }
-    .chat { display: flex; flex-direction: column; gap: 12px; margin: 0 0 18px; }
-    .bubble { padding: 12px 14px; border-radius: 14px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
-    .bubble.user { align-self: flex-start; background: #1e3a8a; border: 1px solid #3b82f6; }
-    .bubble.assistant { align-self: flex-end; background: #111c33; border: 1px solid #334155; }
-    .bubble .who { display: block; font-size: .78rem; color: #7dd3fc; margin-bottom: 4px; }
-    form, .error { padding: 16px; border: 1px solid #334155; border-radius: 16px; background: #111c33; }
-    label { display: block; margin-bottom: 8px; font-weight: 700; }
-    textarea { width: 100%; min-height: 110px; resize: vertical; padding: 13px; border: 1px solid #475569; border-radius: 12px; background: #0b1220; color: #f8fafc; font: inherit; line-height: 1.6; }
-    textarea:focus { outline: 2px solid #38bdf8; outline-offset: 2px; }
-    button { width: 100%; margin-top: 14px; padding: 13px 18px; border: 0; border-radius: 11px; background: #38bdf8; color: #082f49; font: inherit; font-weight: 800; cursor: pointer; }
-    button:hover { background: #7dd3fc; }
-    .new-chat { background: #1e293b; color: #cbd5e1; border: 1px solid #475569; }
-    .new-chat:hover { background: #334155; }
-    .error { border-color: #f87171; color: #fecaca; }
-    select { width: 100%; margin-bottom: 14px; padding: 12px; border: 1px solid #475569; border-radius: 12px; background: #0b1220; color: #f8fafc; font: inherit; }
-    .meta { color: #64748b; font-size: .86rem; margin-top: 14px; }
-    .empty { color: #64748b; text-align: center; padding: 22px 0; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>آلي</h1>
-    <p class="subtitle">مساعدك المحلي: محادثة طويلة + بناء وتعديل المشاريع داخل مجلد العمل، بدون API key.</p>
-    {% if turns %}
-    <section class="chat">
-      {% for turn in turns %}
-        <div class="bubble {{ turn.role }}">
-          <span class="who">{{ 'أنت' if turn.role == 'user' else 'آلي' }}</span>{{ turn.content }}
-        </div>
-      {% endfor %}
-    </section>
-    {% else %}
-    <p class="empty">ابدأ محادثة جديدة بالأسفل.</p>
-    {% endif %}
-    {% if error %}<section class="error">{{ error }}</section>{% endif %}
-    <form method="post">
-      <label for="mode">طريقة التشغيل</label>
-      <select id="mode" name="mode">
-        <option value="local" {% if mode == "local" %}selected{% endif %}>نموذج محلي / وضع بلا مفتاح</option>
-        <option value="cloud" {% if mode == "cloud" %}selected{% endif %}>نموذج سحابي اختياري</option>
-      </select>
-      <label for="message">رسالتك</label>
-      <textarea id="message" name="message" required placeholder="مثال: أنشئ ملف notes/today.txt واكتب بداخله مرحباً"></textarea>
-      <button type="submit">إرسال</button>
-    </form>
-    <form method="post" action="/new">
-      <button type="submit" class="new-chat">محادثة جديدة</button>
-    </form>
-    <p class="meta">مجلد العمل: {{ workspace }} — الملفات والأوامر تعمل داخل هذا المجلد فقط</p>
-  </main>
-</body>
-</html>
-"""
 
 
-def _render(sid: str, record: dict[str, object], mode: str, error: str | None = None):
-    response = make_response(
-        render_template_string(
-            PAGE,
-            turns=record["turns"],
-            error=error,
-            mode=mode,
-            workspace=WORKSPACE_ROOT,
-        )
-    )
-    response.set_cookie(SID_COOKIE, sid, max_age=SESSION_TTL_SECONDS, httponly=True, samesite="Lax")
-    return response
 
-
-@app.route("/", methods=["GET", "POST"])
+@app.route("/")
 def home():
-    sid = request.cookies.get(SID_COOKIE) or uuid.uuid4().hex
-    record = _get_session(sid)
-    if sid not in _sessions:
-        _save_session(record)
-    mode = "local"
-    error = None
-    if request.method == "POST":
-        message = request.form.get("message", "").strip()
-        mode = request.form.get("mode", "local")
-        if message:
-            _append_turn(record, "user", message)
-            try:
-                response = agent_loop(
-                    message,
-                    WORKSPACE_ROOT,
-                    mode=mode,
-                    print_final=False,
-                    history=_history(record),
-                )
-            except AgentLoopError as exc:
-                response = f"[خطأ] {exc}"
-                error = str(exc)
-            _append_turn(record, "assistant", response)
-    return _render(sid, record, mode, error)
+    """The React client at /ui/ is the real app - root just forwards there."""
+    return make_response("", 302, {"Location": "/ui/"})
 
 
 @app.route("/api/ask", methods=["POST"])
@@ -324,7 +227,7 @@ def api_ask():
     policy = str(payload.get("policy", "auto"))
     confirmed = bool(payload.get("confirm", False))
     # Which connector to use in cloud mode: "auto" (managed/OpenRouter,
-    # unchanged default), or "openai"/"anthropic"/"gemini"/"openrouter" —
+    # unchanged default), or a registered bridge name —
     # each connector reads its API key from an env var on this machine, so
     # picking one here never means sending a key through the chat.
     provider = str(payload.get("provider", "auto"))
@@ -386,7 +289,7 @@ def _meter_chars(chars_in: int, chars_out: int) -> None:
 @app.route("/api/compact", methods=["POST"])
 def api_compact():
     """Fold older turns of a session into one summary — the same idea as
-    Claude Code's own conversation-compacting step. The frontend calls this
+    The senior coding agents' conversation-compacting step. The frontend calls this
     from the "/compact" slash command; it can also be called any time a
     session has grown long, to keep future requests small and fast.
     """
@@ -605,6 +508,43 @@ def api_health():
     return {"ok": True, "service": "aali", "workspace": str(WORKSPACE_ROOT)}
 
 
+@app.route("/api/file/<path:relpath>")
+def api_file(relpath: str):
+    """Serve a workspace file (images embedded in chat replies) safely.
+
+    Only files INSIDE the workspace root are served — path traversal via
+    .. is refused. Authentication mirrors the ask endpoints: admin master
+    key or a valid user key; in single-user local mode it stays open.
+    """
+    relpath = relpath.replace("\\", "/").lstrip("/")
+    root = Path(WORKSPACE_ROOT).resolve()
+    target = (root / relpath).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return make_response('{"ok": false, "error": "forbidden"}', 403)
+    if not target.is_file():
+        return make_response('{"ok": false, "error": "not found"}', 404)
+    if API_KEY and _auth_state() is None:
+        return make_response('{"ok": false, "error": "unauthorized"}', 401)
+    return send_file(target)
+
+
+@app.route("/api/desktop-version", methods=["GET"])
+def api_desktop_version():
+    """Latest served desktop build — installed clients check this on startup."""
+    root = Path(__file__).resolve().parents[1]
+    exe = root / "build-desktop" / "dist" / "Aali-Desktop.exe"
+    payload = {
+        "version": DESKTOP_BUILD_VERSION,
+        "download_url": "/download/desktop-exe",
+        "available": exe.is_file(),
+    }
+    if exe.is_file():
+        payload["mtime"] = int(exe.stat().st_mtime)
+    return payload
+
+
 # ————— Aali as a provider: key platform + admin —————
 
 def _require_admin():
@@ -661,16 +601,65 @@ def api_admin_keys_revoke(key_id: str):
         return make_response({"ok": False, "error": "key not found"}, 404)
     return {"ok": True, "revoked": key_id}
 
+
 # ————— شجرة عقل آلي (المالك فقط) —————
 
-@app.route("/brain")
-def brain_page():
-    """LIVE tree of how Aali works — owner/admin only, never linked for users."""
+# Short-lived tokens minted by /brain so the page can stream events without
+# the browser ever holding the master admin key.
+_FEED_TOKENS: dict[str, float] = {}
+
+
+def _feed_auth() -> bool:
+    """Feed endpoints accept the admin key OR a live feed token from /brain."""
+    if _require_admin() is None:
+        return True
+    token = request.args.get("feed_token", "")
+    expiry = _FEED_TOKENS.get(token, 0)
+    return bool(token and expiry > time.time())
+
+
+@app.route("/api/brain/token", methods=["POST"])
+def api_brain_token():
+    """Admin-only: mint a one-time /brain visit token (?bt=...) so the admin
+    dashboard can open the brain tree without putting the master key in the
+    URL bar or browser history."""
     denied = _require_admin()
     if denied:
         return denied
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(16)
+    _FEED_TOKENS["bt:" + token] = time.time() + 300  # 5 minutes, single visit
+    return {"ok": True, "url": "/brain?bt=" + token}
+
+
+@app.route("/brain")
+def brain_page():
+    """LIVE tree of how Aali works — owner/admin only, never linked for users.
+
+    Shows every flow (signin, chat, output, keys, memory, brain, training),
+    where information comes from, and the security gates — plus a live
+    snapshot (counts and timestamps only, never user content) and a live
+    event feed. The page embeds a short-lived feed token so the browser can
+    stream events without ever holding the master key.
+    """
+    visit_token = request.args.get("bt", "")
+    if visit_token:
+        expiry = _FEED_TOKENS.get("bt:" + visit_token, 0)
+        if expiry < time.time():
+            return make_response('{"ok": false, "error": "token expired"}', 403)
+        _FEED_TOKENS.pop("bt:" + visit_token, None)  # single-use
+    else:
+        denied = _require_admin()
+        if denied:
+            return denied
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(16)
+    _FEED_TOKENS[token] = time.time() + 6 * 3600
+    stale = [t for t, exp in _FEED_TOKENS.items() if exp < time.time()]
+    for t in stale:
+        _FEED_TOKENS.pop(t, None)
     from file_agent import brain_tree
-    return brain_tree.render_html(brain_tree.live_snapshot())
+    return brain_tree.render_html(brain_tree.live_snapshot(), feed_token=token)
 
 
 @app.route("/api/brain/live", methods=["GET"])
@@ -687,6 +676,52 @@ def api_brain_live():
         "security": brain_tree.SECURITY_NOTES,
         "live": brain_tree.live_snapshot(),
     }
+
+
+@app.route("/api/brain/events", methods=["GET"])
+def api_brain_events():
+    """Recent agent events (backlog) for the owner's brain page — admin only.
+    Content = exactly what agent.log records (already secret-redacted)."""
+    if not _feed_auth():
+        return make_response('{"ok": false, "error": "forbidden"}', 403)
+    try:
+        limit = int(request.args.get("limit", 120))
+    except ValueError:
+        limit = 120
+    kinds = request.args.get("kinds") or None
+    from file_agent import brain_tree
+    return {
+        "ok": True,
+        "events": agent_log.recent_events(limit=limit, kinds=kinds),
+        "live": brain_tree.live_snapshot(),
+    }
+
+
+@app.route("/api/brain/stream", methods=["GET"])
+def api_brain_stream():
+    """SSE: every agent event live (tool calls, providers, requests) — admin
+    only (admin key or /brain feed token), for the owner's brain page.
+    Replays a short backlog, then streams until the client disconnects;
+    keep-alive beats every 15s."""
+    if not _feed_auth():
+        return make_response('{"ok": false, "error": "forbidden"}', 403)
+    feed_q = agent_log.subscribe_feed()
+
+    def _generate():
+        try:
+            for ev in agent_log.recent_events(limit=30):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+            while True:
+                try:
+                    ev = feed_q.get(timeout=15)
+                except queue.Empty:
+                    yield ": keep-alive\n\n"
+                    continue
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        finally:
+            agent_log.unsubscribe_feed(feed_q)
+
+    return Response(_generate(), mimetype="text/event-stream")
 
 
 @app.route("/api/admin/stats", methods=["GET"])
@@ -793,6 +828,7 @@ def admin_dashboard():
     <div class="row"><label>مفتاح المدير (X-API-Key)</label>
       <input type="password" id="adminkey" placeholder="أدخل AALI_API_KEY">
       <button class="primary" onclick="load()">دخول</button>
+      <button onclick="openBrain()" title="شجرة عقل آلي الحية — للمالك فقط">🧠 شجرة العقل</button>
     </div>
     <div class="muted" style="margin-top:8px">المفتاح يُحفظ في متصفحك فقط (localStorage) ولا يُرسل إلا لعنوان هذا الخادم.</div>
   </div>
@@ -806,9 +842,14 @@ def admin_dashboard():
   </div>
 
   <div class="panel">
-    <h2>المفاتيح</h2>
-    <table><thead><tr><th>العميل</th><th>المفتاح</th><th>الطلبات</th><th>أحرف</th><th>آخر استخدام</th><th>الحالة</th><th></th></tr></thead>
+    <h2>المفاتيح</h2>     <table><thead><tr><th>العميل</th><th>المفتاح</th><th>تاريخ التسجيل</th><th>الطلبات</th><th>أحرف</th><th>آخر استخدام</th><th>الحالة</th><th></th></tr></thead>
     <tbody id="keys"></tbody></table>
+  </div>
+
+  <div class="panel">
+    <h2>🧠 شجرة العقل — الحالة الحية <button onclick="loadBrain()" style="font-size:12px;padding:5px 10px">تحديث</button></h2>
+    <div id="brainLive" class="muted">…</div>
+    <div class="muted" style="margin-top:10px">الشجرة الكاملة خطوة بخطوة: <a href="/brain" target="_blank" style="color:var(--acc)">فتح /brain</a> · تصدير Obsidian: <code>python scripts/build_brain_vault.py</code></div>
   </div>
 </main>
 <div class="dlg-backdrop hidden" id="dlg">
@@ -830,11 +871,11 @@ function load(){
   localStorage.setItem('aali_admin_token',$('adminkey').value.trim());
   api('GET','/api/admin/stats').then(s=>{
     if(!s.ok){uiAlert(s.error||'فشل الدخول');return;}
-    render(s);
+    render(s); loadBrain();
   });
 }
 function render(s){
-  $('brain').textContent = s.brain ? ('العقل: '+s.brain.provider+(s.brain.detail&&typeof s.brain.detail==='object'?(s.brain.detail.adapter_dir||''):'') ) : '';
+  $('brain').textContent = s.brain ? 'العقل: آلي' + (s.brain.detail&&typeof s.brain.detail==='object'&&s.brain.detail.adapter_dir?(' ('+s.brain.detail.adapter_dir+')'):'') : '';
   const k=s.keys||{};
   const cards=[
     ['مفاتيح نشطة',k.active_keys],['إجمالي المفاتيح',k.total_keys],['طلبات',k.total_requests],['أحرف',k.total_chars],['جلسات مستخدمين',s.user_sessions]
@@ -843,8 +884,8 @@ function render(s){
   api('GET','/api/admin/keys').then(r=>{
     if(!r.ok) return;
     $('keys').innerHTML=(r.keys||[]).map(x=>
-      '<tr data-kid="'+x.key_id+'"><td>'+ (x.label||'—') +'</td><td class="mono">'+x.prefix+'…</td><td>'+x.requests+'</td><td>'+x.chars_in+'+'+x.chars_out+'</td><td>'+fmt(x.last_used_at)+'</td><td><span class="tag '+(x.revoked?'off':'ok')+'">'+(x.revoked?'مُلغى':'نشط')+'</span></td><td>'+(x.revoked?'':'<button class="danger" data-revoke="1">إلغاء</button>')+'</td></tr>'
-    ).join('') || '<tr><td colspan="7" class="muted">لا مفاتيح بعد</td></tr>';
+      '<tr data-kid="'+x.key_id+'"><td>'+ (x.label||'—') +'</td><td class="mono">'+x.prefix+'…</td><td>'+fmt(x.created_at)+'</td><td>'+x.requests+'</td><td>'+x.chars_in+'+'+x.chars_out+'</td><td>'+fmt(x.last_used_at)+'</td><td><span class="tag '+(x.revoked?'off':'ok')+'">'+(x.revoked?'مُلغى':'نشط')+'</span></td><td>'+(x.revoked?'':'<button class="danger" data-revoke="1">إلغاء</button>')+'</td></tr>'
+    ).join('') || '<tr><td colspan="8" class="muted">لا مفاتيح بعد</td></tr>';
   });
 }
 document.addEventListener('click',function(e){
@@ -894,7 +935,40 @@ function issue(){
     load();
   });
 }
-window.onload=()=>{ $('adminkey').value=localStorage.getItem('aali_admin_token')||''; if($('adminkey').value) load(); };
+function openBrain(){
+  /* Admin-only handshake: fetch a one-time visit token, then open the tree
+     with it — the master key never appears in the URL or history. */
+  api('POST','/api/brain/token').then(function(r){
+    if(r.ok) window.open(r.url, '_blank');
+    else uiAlert(r.error||'يتطلب مفتاح المدير');
+  });
+}
+function brainLabel(ab){
+  if(!ab) return '—';
+  if(ab.indexOf('نموذج آلي')===0) return 'نموذج آلي الخاص ✦';
+  if(ab.indexOf('Ollama')===0) return 'Ollama المحلي (عقل مؤقت)';
+  return ab;
+}
+function loadBrain(){
+  api('GET','/api/brain/live').then(function(d){
+    if(!d.ok){ $('brainLive').textContent='يتطلب مفتاح المدير'; return; }
+    const L=d.live||{}, k=L.keys||{};
+    const flows=Object.keys(d.flows||{}).map(function(fk){ const f=d.flows[fk];
+      return '<span class="tag">'+f.icon+' '+f.title+'</span>'; }).join(' ');
+    $('brainLive').innerHTML =
+      '<div class="cards" style="margin-bottom:10px">'
+      +'<div class="card"><div class="k">العقل الآن</div><div class="v" style="font-size:16px">'+brainLabel(L.active_brain)+'</div></div>'
+      +'<div class="card"><div class="k">مفاتيح نشطة</div><div class="v">'+(k.active_keys!=null?k.active_keys:'—')+'</div></div>'
+      +'<div class="card"><div class="k">الطلبات</div><div class="v">'+(k.total_requests!=null?k.total_requests:'—')+'</div></div>'
+      +'<div class="card"><div class="k">سجل الأحداث</div><div class="v">'+((L.event_log&&L.event_log.exists)?(L.event_log.size_kb+'KB'):'—')+'</div></div>'
+      +'<div class="card"><div class="k">الذاكرة الدائمة</div><div class="v">'+((L.memory_store&&L.memory_store.exists)?(L.memory_store.size_kb+'KB'):'—')+'</div></div>'
+      +'</div>'
+      +'<div style="line-height:2.6">'+flows+'</div>'
+      +'<div class="muted" style="margin-top:8px">آخر تحديث: '+(L.generated_at_iso||'—')+' — يتحدث تلقائياً كل 30 ثانية</div>';
+  }).catch(function(){ $('brainLive').textContent='تعذّر الجلب'; });
+}
+setInterval(loadBrain, 30000);
+window.onload=()=>{ $('adminkey').value=localStorage.getItem('aali_admin_token')||''; if($('adminkey').value){ load(); } else { loadBrain(); } };
 </script>
 </body>
 </html>"""
@@ -921,6 +995,108 @@ def ui_client(filename: str):
     return response
 
 
+@app.route("/download")
+def download_page():
+    """Downloads hub: desktop launcher, friend connector, tunnel script."""
+    html = """<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>آلي — التنزيلات</title>
+<style>
+  :root{--bg:#121214;--panel:#18181c;--bg3:#23242b;--line:#2a2c35;--fg:#f2f2f3;--mut:#8f929c;
+        --gold:#e8b34b;--gold-soft:#f5cf8a;--gold-dim:rgba(232,179,75,.12)}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(--fg);padding:30px 18px}
+  .wrap{max-width:860px;margin:0 auto}
+  .logo{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;background:var(--gold-dim);
+        color:var(--gold);border:1px solid rgba(232,179,75,.3);font-size:24px;margin-bottom:14px}
+  h1{margin:0 0 6px;font-size:26px;font-weight:800}
+  .sub{color:var(--mut);margin:0 0 26px;line-height:1.8}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:8px}
+  .card .ico{font-size:30px}
+  .card b{font-size:16px}
+  .card small{color:var(--mut);line-height:1.8;flex:1}
+  .card a{display:block;text-align:center;background:var(--gold);color:#241a05;font-weight:800;
+          padding:10px;border-radius:11px;text-decoration:none;margin-top:6px}
+  .card a:hover{background:var(--gold-soft)}
+  .note{background:var(--gold-dim);border:1px solid rgba(232,179,75,.35);border-radius:14px;padding:14px 18px;
+        color:var(--gold-soft);font-size:13px;line-height:1.9;margin-top:22px}
+  code{background:var(--bg3);border-radius:6px;padding:2px 7px;font-family:ui-monospace,monospace;direction:ltr;unicode-bidi:embed}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">✦</div>
+  <h1>حمّل آلي</h1>
+  <p class="sub">ملفات صغيرة بلا تثبيت — تعمل من أي جهاز على أي شبكة.</p>
+  <div class="grid">
+    <div class="card">
+      <span class="ico">🖥️</span>
+      <b>آلي — Desktop (تطبيق حقيقي)</b>
+      <small>ملف exe واحد بلا تثبيت — نافذة مستقلة بعلامة آلي. حمّله، شغّله، وأدخل رابط الخادم مرة واحدة.</small>
+      <a href="/download/desktop-exe" download>تنزيل التطبيق</a>
+      <a href="/download/desktop-installer" download style="background:var(--bg3);color:var(--fg)">مثبّت (Setup)</a>
+      <a href="/download/desktop" download style="background:var(--bg3);color:var(--fg)">نسخة خفيفة (.bat)</a>
+    </div>
+    <div class="card">
+      <span class="ico">📩</span>
+      <b>آلي — Connect</b>
+      <small>ملف واحد ترسله لأي صديق — يفتح له آلي في المتصفح وينشئ مفتاحه. بلا تثبيت وبلا بايثون.</small>
+      <a href="/download/connect" download>تنزيل</a>
+    </div>
+    <div class="card">
+      <span class="ico">🔗</span>
+      <b>آلي — دومين دائم + HTTPS</b>
+      <small>(لمالك الخادم) رابط دائم باسم نطاقك مثل <span style="direction:ltr;unicode-bidi:embed">https://aali.site.com</span> — شهادة تلقائية، خدمة ويندوز تعمل 24/7. الشرح: docs/custom_domain.md</small>
+      <a href="/download/domain" download>السكربت</a>
+      <a href="/download/domain-guide" style="background:var(--bg3);color:var(--fg)">الدليل</a>
+    </div>
+    <div class="card">
+      <span class="ico">🌐</span>
+      <b>آلي — رابط سريع مؤقت</b>
+      <small>(لمالك الخادم) رابط عام مؤقت للتجارب بلا حساب ولا نطاق — جيد لساعات ثم يتغير.</small>
+      <a href="/download/tunnel" download>تنزيل</a>
+    </div>
+  </div>
+  <div class="note">
+    الوصول المباشر داخل نفس الشبكة: <code>http://&lt;عنوان-الجهاز&gt;:5055/ui/</code> —
+    وللإنترنت الدائم شغّل <code>آلي — دومين دائم</code> مرة واحدة (شرح كامل داخل الدليل).
+  </div>
+</div>
+</body>
+</html>"""
+    return html
+
+
+@app.route("/download/<name>")
+def download_file(name: str):
+    """Serve the small launcher files (bat) with sensible download names."""
+    allowed = {
+        "desktop": (Path(__file__).resolve().parents[1] / "scripts" / "aali_desktop.bat", "Aali-Desktop.bat"),
+        "desktop-exe": (Path(__file__).resolve().parents[1] / "build-desktop" / "dist" / "Aali-Desktop.exe", "Aali-Desktop.exe"),
+        "desktop-installer": (Path(__file__).resolve().parents[1] / "build-desktop" / "installer" / "Aali-Desktop-Setup.exe", "Aali-Desktop-Setup.exe"),
+        "domain": (Path(__file__).resolve().parents[1] / "scripts" / "aali_domain.bat", "Aali-Permanent-Domain.bat"),
+        "connect": (Path(__file__).resolve().parents[1] / "scripts" / "aali_connect.bat", "Aali-Connect.bat"),
+        "tunnel": (Path(__file__).resolve().parents[1] / "scripts" / "aali_tunnel.bat", "Aali-Internet.bat"),
+    }
+    if name == "domain-guide":
+        src = Path(__file__).resolve().parents[1] / "docs" / "custom_domain.md"
+        if not src.is_file():
+            return make_response("", 404)
+        response = send_from_directory(src.parent, src.name, as_attachment=True, download_name="custom-domain-guide.md")
+        return response
+    entry = allowed.get(name)
+    if not entry:
+        return make_response("", 404)
+    src, download_name = entry
+    if not src.is_file():
+        return make_response("", 404)
+    return send_from_directory(src.parent, src.name, as_attachment=True, download_name=download_name)
+
+
 @app.route("/signup")
 def signup_page():
     """User-facing self-serve signup: issues an Aali key and drops the visitor
@@ -932,7 +1108,7 @@ def signup_page():
 
 @app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
 def openai_compat():
-    """OpenAI-compatible chat endpoint so opencode / Cursor / Aider / Zed etc.
+    """OpenAI-compatible chat endpoint so popular coding tools etc.
     can use Aali as their model: point the tool at
       base_url = http://<pc-ip>:5055/v1   (api_key: a real Aali-issued key)
     Runs the full agent loop with tools; returns an OpenAI-shaped response.
@@ -997,12 +1173,8 @@ def openai_compat():
 
 @app.route("/new", methods=["POST"])
 def new_conversation():
-    sid = request.cookies.get(SID_COOKIE) or uuid.uuid4().hex
-    record = _get_session(sid)
-    record["turns"] = []
-    record["updated_at"] = time.time()
-    _save_session(record)
-    return _render(sid, record, "local")
+    """Legacy endpoint kept for compatibility - the client manages chats itself."""
+    return make_response("", 302, {"Location": "/ui/"})
 
 
 def _server_port() -> int:

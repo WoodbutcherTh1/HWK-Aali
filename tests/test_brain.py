@@ -75,5 +75,11 @@ def test_brain_page_is_admin_only(monkeypatch) -> None:
     live = client.get("/api/brain/live", headers={"X-API-Key": "brain-test-master"})
     assert live.status_code == 200
     assert live.get_json()["ok"] is True
+    # feed endpoints: same gate as the page
+    assert client.get("/api/brain/events").status_code == 401
+    assert client.get("/api/brain/stream").status_code == 401
+    ev = client.get("/api/brain/events?limit=2", headers={"X-API-Key": "brain-test-master"})
+    assert ev.status_code == 200 and ev.get_json()["ok"] is True
+    assert isinstance(ev.get_json()["events"], list)
     monkeypatch.delenv("AALI_API_KEY")
     importlib.reload(aali_app)

@@ -6,6 +6,7 @@ import json
 import os
 import queue
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -80,4 +81,66 @@ def log_event(request_id: str, event: str, **data: Any) -> None:
         if subscriber is not None:
             subscriber.put_nowait(entry)
     except Exception:  # noqa: BLE001
+        pass
+    # Global tail + owner feed waiters (same redaction as the log file).
+    try:
+        _tail.append(entry)
+        for waiter in list(_feed_waiters):
+            try:
+                waiter.put_nowait(entry)
+            except queue.Full:
+                pass  # a slow owner page drops events; the file has them all
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ————— Global event tail + live waiters (owner's /brain feed) —————
+# The owner page is admin-gated at the route level; content here is exactly
+# what agent.log already records (secret-redacted by _safe_value), so the
+# feed exposes nothing new — it just makes the same events watchable live.
+_TAIL_MAX = 500
+_tail: "deque[dict[str, Any]]" = deque(maxlen=_TAIL_MAX)
+_feed_waiters: list["queue.Queue[dict[str, Any]]"] = []
+_MAX_WAITERS = 8
+
+
+def recent_events(limit: int = 120, kinds: str | None = None) -> list[dict[str, Any]]:
+    """Most recent events, newest LAST. Backfills from agent.log on disk
+    when the in-memory tail is short (e.g. right after a restart)."""
+    limit = max(1, min(int(limit), _TAIL_MAX))
+    if len(_tail) < limit:
+        try:
+            path = log_file_path()
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                lines = handle.readlines()[-limit * 2:]
+            for line in lines:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(entry, dict):
+                    _tail.append(entry)
+        except OSError:
+            pass
+    events = list(_tail)[-limit:]
+    if kinds:
+        wanted = {k.strip() for k in kinds.split(",") if k.strip()}
+        events = [e for e in events if e.get("event") in wanted]
+    return events
+
+
+def subscribe_feed() -> "queue.Queue[dict[str, Any]]":
+    """Register a live waiter for ALL future events (owner feed only).
+    Bounded queue: overflow drops instead of blocking the agent."""
+    q: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=200)
+    if len(_feed_waiters) >= _MAX_WAITERS:
+        _feed_waiters.pop(0)  # drop the oldest watcher
+    _feed_waiters.append(q)
+    return q
+
+
+def unsubscribe_feed(q: "queue.Queue[dict[str, Any]]") -> None:
+    try:
+        _feed_waiters.remove(q)
+    except ValueError:
         pass
