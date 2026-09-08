@@ -1,0 +1,44 @@
+# Run the Aali test suite on every push and pull request.
+#
+# The suite (tests/test_hwk.py) covers the model, tokenizers, and the agent's
+# file/memory/command tools. It self-skips what a CI runner cannot have
+# (the BPE model on D:, Pillow/docx when absent), so a plain pip install of
+# the core deps is enough. Mirrors the documented local invocation:
+#
+#   PYTHONIOENCODING=utf-8 PYTHONPATH=file-agent python -m pytest tests -q
+
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONPATH: file-agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Full torch/transformers from the root requirements (training stack);
+      # the agent server needs only its own two deps. Install both so the
+      # model tests actually run instead of skipping.
+      - name: Install agent deps
+        run: pip install -r file-agent/requirements.txt
+
+      - name: Install test deps (torch CPU)
+        run: |
+          pip install pytest
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run tests
+        run: python -m pytest tests -q
