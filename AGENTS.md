@@ -1,8 +1,7 @@
 # AGENTS.md — تعليمات لأي ذكاء اصطناعي يعمل على هذا المستودع
 
-> This file is the contract for ANY AI agent (Codebuff, Claude Code, Cursor,
-> Codex, a human…) working in this repository. **Read it fully before touching
-> anything.** If this file and your assumptions disagree, this file wins.
+> This file is the contract for ANY coding agent or human contributor working
+> in this repository. **Read it fully before touching anything.** If this file and your assumptions disagree, this file wins.
 > Keep this file updated as the project evolves — it must always describe
 > reality, not intentions.
 
@@ -11,7 +10,7 @@
 ## 1. ما هذا المشروع (What this project is)
 
 **HWK Aali (آلي)** — a home-built AI system by the owner (HmamK) on a single
-Windows PC (RTX 3070 8GB, 16GB RAM, ~2TB across C:/D:/X:):
+Windows PC (8GB-VRAM GPU, 16GB RAM, ~2TB across C:/D:/X:):
 
 1. **نموذج لغوي يُبنى من الصفر** — a ~125M-param decoder-only transformer
    (RoPE, SwiGLU, RMSNorm) trained from scratch on the owner's own data.
@@ -37,7 +36,7 @@ Windows PC (RTX 3070 8GB, 16GB RAM, ~2TB across C:/D:/X:):
 | `download_corpora.py` | HF corpus downloader (resume-safe, capped) |
 | `tokenize_corpus.py` | Corpus → token shards (BPE 32k) |
 | `train_scratch.py` | Phase A/B trainer (resumable, mirrors to X:) |
-| `claude_teach.py`, `deepseek_teacher.py` | Teacher automation (Claude Desktop / DeepSeek web) |
+| `mentor_a.py` … `mentor_d.py` | Mentor capture automation (external desktop/web assistants → SFT examples) |
 
 **Data lives OUTSIDE the repo** on `D:\hwk-data\` (raw corpora, token shards,
 teacher records, logs, SD/whisper models) and `X:\hwk-backups\` (mirrors).
@@ -92,7 +91,7 @@ in parallel:
 - **Tokenizer**: pile (18.8B+ tokens, ~2358 shards) — Arabic next.
 - **Next milestone**: Phase A pretraining launches when pile+arabic shards are
   complete (ctx 1024, d_model 768, resumable, mirrors to X:).
-- **Teacher data**: 87+ SFT records from Claude/DeepSeek/Cursor in
+- **Teacher data**: 87+ SFT records captured from the external mentors in
   `data/teacher_sft.jsonl`.
 - **Recent additions**: web client (`web/`), CLI (`aali_cli.py`), desktop shell
   (`desktop_app.py`), iOS project (`ios/`), OCR/doc/video tools, SD image
@@ -104,8 +103,8 @@ in parallel:
   ("earlier you told me X"), secrets auto-redacted, user-only statements,
   memory-forget confirmation-gated; Ollama num_ctx 8192
   (AALI_OLLAMA_NUM_CTX). Docs: docs/long_term_memory.md.
-- **Security hardening (LIVE)**: lessons from real incidents (Samsung 2023,
-  OpenAI 2023, DeepSeek 2025, Microsoft 2024, nx/npm 2025, OWASP injection)
+- **Security hardening (LIVE)**: lessons from real industry incidents
+  (2023–2025, OWASP injection)
   taught in all four system prompts EN+AR and skills/security-rules.md,
   enforced in code: run_command blocks env-dumping (os.environ/process.env/
   printenv/$VAR/.env) and redacts credentials from tool output; Aali never
@@ -143,6 +142,7 @@ in parallel:
   audits+prunes lab episodes (scripts/audit_mentor_lab.py: runs every build,
   keeps only verified-working ones), rebuilds sft_v2, launches the soup
   pipeline, chains the 4096 extension, and writes D:/hwk-data/MORNING_REPORT.md.
+- **Brain tree (LIVE, owner-only)**: /brain — admin-gated live tree of every flow (signin, signup, chat, output, keys, memory, brain selection, training) with each step citing its real code file; /api/brain/live JSON; live snapshot = counts/timestamps only, never user content. Obsidian export: scripts/build_brain_vault.py → D:/hwk-data/aali-brain-vault (wiki-linked, Graph View). Tests in tests/test_brain.py.
 - **Aali as a product (2026-09-07)**: one server, every client — the vision is
   Aali on servers with users on web/desktop/CLI/terminal. Shipped: SSE
   streaming (`/api/ask/stream` with live tool-activity events via the
@@ -154,7 +154,21 @@ in parallel:
   deployment, mock API for GPU-free UI testing (scripts/mock_aali_api.py).
   Docs: docs/desktop_app.md. Tests 46/46.
 - **Known gaps**: n8n webhook needs one manual activation click in the editor;
-  ffmpeg installed but PATH needs refresh in new shells; arena.ai capture
-  experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
+  ffmpeg installed but PATH needs refresh in new shells; web-mentor capture
+  experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%); chat
+  attachments (photo/file analyze-first loop) designed but not built yet.
+- **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
+  + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);
+  Obsidian vault export (scripts/build_brain_vault.py, hooked into the night
+  caretaker before training); admin dashboard got an 'Open Brain Tree' button
+  (short-lived token handshake, master key never in the URL). Publishing:
+  scripts/publish_aali.py (HF/Ollama/GGUF preflight) + scripts/aali_deploy.bat
+  owner-only deploy menu + docs/publish_aali.md. UI: warm-black #252523 theme,
+  gold HWK icon (web/icon.svg + make_hwk_icon.py), shareable ?sid= deep links.
+  Model: Phase A complete (90k steps / 2.95B tokens); Phase B context-4096
+  extension running under the night caretaker; soup graduation pipeline queued
+  behind it (baseline→QLoRA→exam→auto-promote, VRAM-safe staging fixed).
+  Guide: scripts/make_aali_guide.py renders Aali-Guide-<date>.pdf to the
+  Desktop from docs/assets screenshots; docs/assets/aali_tour.gif in README.
 
-— Last updated: 2026-09-07 (Aali-as-a-product: server + streaming + multi-user + desktop app; earlier: memory + security upgrade, Phase A restart bf16 + watchdog, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-09 (owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; Phase A done, Phase B 4096 running, soup graduation queued; earlier: Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, Phase A restart bf16 + watchdog, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)

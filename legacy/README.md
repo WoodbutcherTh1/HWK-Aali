@@ -1,11 +1,11 @@
 # Legacy scripts (deprecated)
 
 These scripts belonged to the earlier hosted/pretrained-model direction
-(`transformers.pipeline`, DistilGPT2, Qwen2.5 fine-tuning). The project is now
+(transformers.pipeline, small pretrained checkpoints). The project is now
 **from-scratch only**, so they are retired and kept here for reference only:
 
 - `train.py` — old Transformers-based training (DistilGPT2 path).
-- `train_agent.py` — old Qwen instruction fine-tuning (requires a pretrained
+- `train_agent.py` — old instruction fine-tuning (requires a pretrained
   base model; conflicts with the from-scratch requirement).
 - `evaluate.py` — old Transformers-based evaluator.
 

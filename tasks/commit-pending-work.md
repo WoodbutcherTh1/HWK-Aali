@@ -1,4 +1,4 @@
-owner: claude-cowork (hmam's cloud session, via badboy)
+owner: senior-coding-agent (owner cloud session)
 status: done
 started: 2026-09-05
 

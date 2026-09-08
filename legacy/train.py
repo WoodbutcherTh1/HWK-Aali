@@ -53,7 +53,7 @@ def main() -> None:
         )
     except ImportError as exc:
         raise SystemExit(
-            "Training dependencies are missing. Run ./setup_replit.sh first."
+            "Training dependencies are missing. Install requirements first (python -m pip install -r requirements.txt)."
         ) from exc
 
     import torch

@@ -37,7 +37,7 @@ Aali should tell him he earlier said no."*
 4. **Only the user writes memory** — `source != "user"` raises; tool results,
    web pages, and files can never persist instructions (anti memory-poisoning).
 5. **Secrets never enter memory** — credential-like text is redacted to
-   `[REDACTED-SECRET]` before storage (Samsung/DeepSeek lesson), so the block
+   `[REDACTED-SECRET]` before storage (Samsung/the external web mentor lesson), so the block
    that rides inside system prompts to cloud providers is safe.
 6. **Recall before denial** — prompts instruct Aali to call
    `memory(recall)` *before* ever saying "I don't know what you told me".

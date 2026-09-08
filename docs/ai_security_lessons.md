@@ -9,7 +9,7 @@ code and prompts; this document is the teaching material.*
 
 ### 1. Samsung (April–May 2023) — secrets pasted into a public chatbot
 Three Samsung engineers pasted confidential source code and internal meeting
-notes into ChatGPT (one asked it to debug proprietary semiconductor code) to
+notes into a public AI chatbot (one asked it to debug proprietary semiconductor code) to
 fix them faster; the data left the company and Samsung banned generative AI
 tools for staff.
 **Lesson:** a chatbot's history is not a private scratchpad.
@@ -17,7 +17,7 @@ tools for staff.
 token, or confidential code the user shares — suggest environment variables.
 Memory and logs auto-redact credential-like text.
 
-### 2. OpenAI (March 2023) — the chat library bug
+### 2. a major AI vendor (March 2023) — the chat library bug
 A bug in the open-source `redis-py` client made some users see OTHER users'
 chat titles in their sidebar.
 **Lesson:** stored data can leak sideways to strangers; anything persisted
@@ -25,7 +25,7 @@ must assume future exposure.
 **Aali's rule:** store the minimum; the conversation log keeps raw turns for
 training but the memory store keeps only short user statements, redacted.
 
-### 3. DeepSeek (January 2025, Wiz Research) — open database of chats + keys
+### 3. the external web mentor (January 2025, Wiz Research) — open database of chats + keys
 A ClickHouse database was left reachable from the open internet: chat
 histories, API keys (plaintext), and over a million log lines were readable
 and writable by anyone.
@@ -48,7 +48,7 @@ relative paths (already enforced by the path-escape guard).
 Hijacked npm releases of the Nx build tool ran a post-install script that
 harvested wallets, GitHub/npm tokens, SSH keys, and environment secrets —
 and, in a world first, *weaponized AI coding agents already installed on
-victims' machines* (Claude CLI, Gemini CLI) to hunt for credentials on the
+victims' machines* (the external mentor CLI, Gemini CLI) to hunt for credentials on the
 victim's own filesystem, publishing results publicly on GitHub.
 **Lesson:** this is EXACTLY Aali's new attack surface — an agent with
 machine power can be tricked (or shipped compromised) into exfiltrating
@@ -92,8 +92,8 @@ real instructions.
 ## Sources
 
 - Samsung: Forbes (2023-05-02), Bloomberg (2023-05-01), Mashable.
-- OpenAI Redis bug: OpenAI blog (2023-03-20); AI Incident Database #768.
-- DeepSeek: Wiz Research blog (2025-01-29); Reuters (2025-01-29).
+- a major AI vendor Redis bug: a major AI vendor blog (2023-03-20); AI Incident Database #768.
+- the external web mentor: Wiz Research blog (2025-01-29); Reuters (2025-01-29).
 - Microsoft 38TB: SecurityWeek / Horizon3.ai disclosure (2024-02).
 - nx s1ngularity: Wiz blog (2025-08-28), Snyk (2025-08-27), Socket, StepSecurity; CVE-2025-10894.
 - Prompt injection: OWASP Prompt Injection community page; Forcepoint X-Labs "10 payloads caught in the wild" (2026-04).

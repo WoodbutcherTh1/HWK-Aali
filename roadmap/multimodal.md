@@ -2,7 +2,7 @@
 
 What the user asked: the model should read images, generate and edit images,
 view videos, and handle "all file types". This doc is the honest plan split into
-three columns: **done now**, **buildable on this PC (3070 8 GB VRAM)**, and
+three columns: **done now**, **buildable on this PC (8 GB VRAM)**, and
 **needs more hardware or a cloud GPU**.
 
 ## 1. Reading images (image → understanding)
@@ -21,7 +21,7 @@ describe it". No pretending.
 
 | Capability | Status |
 |---|---|
-| Text → image, image → image (edit), inpainting | ✅ **BUILT & VERIFIED** — Stable Diffusion 1.4 in a **separate venv** (`D:\hwk-tools\sd-venv`; training venv untouched). `scripts/image_tools.py gen|edit` → txt2img and img2img. Tested on the 3070: 15-step 384² image in **3.4 s** (load 77 s). Outputs go to `D:\hwk-projects\images\`. Run via `scripts\run_image_tools.bat`. |
+| Text → image, image → image (edit), inpainting | ✅ **BUILT & VERIFIED** — Stable Diffusion 1.4 in a **separate venv** (`D:\hwk-tools\sd-venv`; training venv untouched). `scripts/image_tools.py gen|edit` → txt2img and img2img. Tested locally: 15-step 384² image in **3.4 s** (load 77 s). Outputs go to `D:\hwk-projects\images\`. Run via `scripts\run_image_tools.bat`. |
 | Native image *generation* inside our own model | ⏳ Years-scale from scratch. Never pretend otherwise. The local model learns to *write* (prompts, descriptions); SD does the pixels. |
 | The model describing/editing via its own weights | Later — teach it prompt-crafting in Phase C with image-caption data (e.g., download a caption dataset). |
 
