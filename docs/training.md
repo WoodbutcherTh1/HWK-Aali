@@ -10,7 +10,7 @@
 
 إذا أردت إضافة corpora جديدة، راجع `download_corpora.py` (تمت إضافة `instruct` و`arabic_instruct` و`math` و`orca_math` و`reasoning` مؤخراً) ثم أعد `scripts/tokenize.bat`.
 
-بالإضافة، `download_github_corpora.py` (جديد) يسحب 3 مجموعات تعليمات مفتوحة الترخيص من GitHub مباشرة (لا تحتاج huggingface_hub ولا مفاتيح API): `alpaca` (52K), `code_alpaca` (20K تعليمات برمجة), `alpaca_gpt4` (52K، أعلى جودة لأنها مولّدة عبر GPT-4). شغّلها بـ:
+بالإضافة، `download_github_corpora.py` (جديد) يسحب 3 مجموعات تعليمات مفتوحة الترخيص من GitHub مباشرة (لا تحتاج huggingface_hub ولا مفاتيح API): `alpaca` (52K), `code_alpaca` (20K تعليمات برمجة), `alpaca_gpt4` (52K، أعلى جودة). شغّلها بـ:
 
 ```
 .venv\Scripts\python download_github_corpora.py
@@ -19,7 +19,7 @@
 
 وأيضاً `generate_tool_sft.py` يولّد `data/tool_calling_sft.jsonl`: أمثلة تعليمية تُعلّم آلي استخدام الأدوات الفعلية (write_file, read_file, run_command, web_search...) بصيغة JSON بالضبط كما يتوقعها `agent_loop.py`.
 
-## 2. إطلاق تدريب Phase A الحقيقي (على RTX 3070 عندك)
+## 2. إطلاق تدريب Phase A الحقيقي (على بطاقة الشاشة المحلية)
 
 هذا يتطلب جهازك فعلياً (GPU + PyTorch) — أنا (آلي عبر الجسر السحابي) لا أملك GPU ولا PyTorch في بيئتي، فلا أستطيع تشغيله من هنا. الأمر جاهز ومُعدّ مسبقاً:
 
@@ -47,7 +47,7 @@ scripts\resume_training.bat
 - `--resume` يجعل السكربت آمناً للتشغيل المتكرر: إذا توقف التدريب (إغلاق الجهاز، انقطاع كهرباء) يكفي تشغيل نفس الأمر من جديد وسيكمل من آخر checkpoint في `D:/hwk-models/scratch`.
 - كل حفظ (`--save-steps 2500`) يُنسخ تلقائياً إلى `X:/hwk-backups/scratch` (`--mirror-dir`) كنسخة احتياطية.
 - تأكد أن لديك مساحة حرة كافية (حسب AGENTS.md: لا تبدأ تدريباً إن كانت المساحة الحرة أقل من 20%).
-- بالإعدادات الحالية (context=1024, d-model=768, 12 layers, 90000 خطوة) هذا تدريب طويل قد يستغرق أياماً على RTX 3070 — راقب `training.log` لتقدير المعدل الفعلي (tokens/sec) ثم احسب الوقت التقريبي.
+- بالإعدادات الحالية (context=1024, d-model=768, 12 layers, 90000 خطوة) هذا تدريب طويل قد يستغرق أياماً على بطاقة الشاشة المحلية — راقب `training.log` لتقدير المعدل الفعلي (tokens/sec) ثم احسب الوقت التقريبي.
 
 ## 3. مراقبة التدريب
 

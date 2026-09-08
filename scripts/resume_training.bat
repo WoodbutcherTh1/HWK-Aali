@@ -1,6 +1,6 @@
 @echo off
 rem Phase A: general pretraining on English (pile) + Arabic (fineweb-2).
-rem Context 1024, ~23k tokens/sec on the RTX 3070 -> roughly 2-3B tokens total.
+rem Context 1024, ~23k tokens/sec on the home GPU -> roughly 2-3B tokens total.
 rem Close the window to pause; reopening with --resume continues from the
 rem last checkpoint. Console output is mirrored to D:\hwk-data\training.log
 rem (watch it with watch_training.bat).

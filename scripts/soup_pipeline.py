@@ -363,6 +363,14 @@ def main() -> int:
         if baseline is None:
             write_verdict(None, None)
             return 1
+        # OOM lesson (2026-09-08 04:48 run): soup train ran WHILE the exam
+        # server still held VRAM -> CUDA OOM at batch_size=1. Stop the server
+        # and let the driver release memory BEFORE training starts.
+        log("stopping exam server to free VRAM for training")
+        server.terminate()
+        server.wait(timeout=60)
+        time.sleep(15)  # driver async release
+        server = None
         if not run_training():
             write_verdict(baseline, None)
             return 1
@@ -370,11 +378,24 @@ def main() -> int:
         if tuned is None:
             write_verdict(baseline, None)
             return 1
-        write_verdict(baseline, tuned)
+        report_text = write_verdict(baseline, tuned)
         log("=== soup pipeline done ===")
+        # When promoted, keep serving the TUNED adapter so Aali's own brain
+        # (agent_loop.promoted_own_model -> promoted.json base_url) is live.
+        if report_text.startswith("# Soup re-SFT pipeline report") and "Verdict: PROMOTE" in report_text:
+            adapter = _adapter_dir()
+            try:
+                server = subprocess.Popen(
+                    [str(SOUP_EXE), "serve", "--model", str(adapter), "--port", str(PORT)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                )
+                log(f"serving promoted adapter on :{PORT} (pid {server.pid})")
+            except OSError as exc:
+                log(f"could not serve promoted adapter ({exc}) - Aali falls back")
         return 0
     finally:
-        server.terminate()
+        if server is not None:
+            server.terminate()
 
     try:
         (Path(os.environ.get("TEMP", "/tmp")) / "hwk_soup_pipeline.lock").unlink()

@@ -10,7 +10,7 @@ training venv, per AGENTS.md).
 |---|---|
 | `D:/hwk-tools/soup-venv/` | Soup + torch 2.14 + transformers 5.16 + trl 0.29 + peft 0.20 (uv env, Python 3.12) |
 | `%USERPROFILE%/.local/bin/uv.exe` | uv (package manager used to create the env) |
-| `soup.yaml` (repo root) | HWK config: Qwen2.5-1.5B-Instruct base, 4-bit QLoRA, our SFT mix |
+| `soup.yaml` (repo root) | HWK config: the local teacher checkpoint base, 4-bit QLoRA, our SFT mix |
 | `scripts/soup_export_sft.py` | Converts `data/sft_mix.jsonl` → `D:/hwk-data/soup/sft_alpaca.jsonl` + exports the 12 exam cases |
 | `scripts/soup_exam.py` | Grades a Soup-served model on the same 12-case exam Aali takes |
 | `D:/hwk-data/soup/` | Exported data + exam prompts + report (data stays off the repo) |
@@ -22,7 +22,7 @@ there are 49. Instead of the manual web teachers, generate them locally:
 
 ```bash
 # 1. Pause Phase A (close the training window) — the GPU is needed.
-# 2. Fine-tune the small teacher on the current mix (~30-60 min on the 3070):
+# 2. Fine-tune the small teacher on the current mix (~30-60 min on the home GPU):
 D:/hwk-tools/soup-venv/Scripts/soup.exe train --config soup.yaml
 # 3. Chat with it to brainstorm+draft Arabic episodes, or batch-generate:
 D:/hwk-tools/soup-venv/Scripts/soup.exe chat --config soup.yaml
@@ -35,7 +35,7 @@ D:/hwk-tools/soup-venv/Scripts/soup.exe infer --config soup.yaml --input prompts
 ## Use case 2 — comparison model on Aali's exam
 
 ```bash
-D:/hwk-tools/soup-venv/Scripts/soup.exe serve --model Qwen/Qwen2.5-1.5B-Instruct --port 20129
+D:/hwk-tools/soup-venv/Scripts/soup.exe serve --model <teacher-checkpoint-id> --port 20129
 .venv/Scripts/python.exe scripts/soup_exam.py --base-url http://127.0.0.1:20129/v1
 ```
 Same prompts, same grading as `scripts/exam_tool_calling.py` → the score is

@@ -9,7 +9,7 @@ to free up); everything here also works manually.*
    GPU + `training.log` idle ≥15 min. Browsers hold CUDA contexts too, so
    only *python-family* processes block (the Phase A trainer is the one that
    matters). Never touches a live run.
-2. **Serve** — Soup serves Qwen2.5-1.5B-Instruct on 127.0.0.1:20129
+2. **Serve** — Soup serves the teacher checkpoint on 127.0.0.1:20129
    (up to 10 min for the first download).
 3. **Baseline exam** — the 24-case exam (memory + security +
    anti-hallucination + tools) via `scripts/soup_exam.py` →

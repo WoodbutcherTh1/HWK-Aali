@@ -124,7 +124,27 @@ def launch(script: str, args: str = "", log_name: str = "caretaker_child.log") -
 
 
 def gpu_really_free() -> bool:
-    """Log idle AND no python compute process - the same rule as soup_pipeline."""
+    """Log idle AND no python/soup compute process on the GPU.
+
+    Lesson (2026-09-08 night): a running soup train/serve does not match the
+    train_scratch process check and its output is captured (not streamed to
+    training.log), so the log-idle check alone looked 'free' while the GPU was
+    fully busy - the caretaker then stacked jobs and OOM'd the pipeline. The
+    nvidia-smi compute-app list is the source of truth (same as soup_pipeline)."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,process_name",
+             "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=30,
+        ).stdout
+        busy = [line for line in out.splitlines()
+                if re.search(r"python|soup|ptxas", line, re.IGNORECASE)]
+        if busy:
+            log(f"GPU busy with: {busy}")
+            return False
+    except (OSError, subprocess.TimeoutExpired):
+        log("could not query GPU compute apps - refusing to assume free")
+        return False
     state = training_state()
     idle = state["log_idle_min"] is None or state["log_idle_min"] >= IDLE_MINUTES
     return idle and not state["process_alive"]
@@ -173,6 +193,18 @@ def _lab_count() -> int:
 def main() -> int:
     started = time.time()
     log("=== night caretaker on duty ===")
+    # Owner request (2026-09-08): snapshot the Obsidian brain vault to X:
+    # before the night's GPU work, so every training run starts from a
+    # recorded state of the project.
+    try:
+        subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "build_brain_vault.py"),
+             "--out", "X:/hwk-backups/aali-brain-vault"],
+            capture_output=True, text=True, timeout=120,
+        )
+        decide("brain vault exported to X:/hwk-backups/aali-brain-vault")
+    except Exception as exc:  # noqa: BLE001
+        log(f"vault export failed (non-fatal): {exc}")
     pipeline_launched = False
     extension_launched = False
 
@@ -205,27 +237,58 @@ def main() -> int:
             )
             decide("sft_v2 + soup export rebuilt with lab + arabic data")
 
-            # 2b) re-SFT pipeline (if not already handled)
+            # 2b) re-SFT pipeline (if not already handled). A verdict newer
+            # than tonight's start means the pipeline already ran — skip it.
             if not pipeline_launched and process_running("soup_pipeline") is None:
-                decide("launching soup pipeline (exam baseline -> re-SFT -> tuned exam)")
-                pipeline_launched = launch("soup_pipeline.py", "--no-wait",
-                                           "soup_pipeline_run.log")
-                # give it time; poll for its verdict up to 3.5 hours
-                for _ in range(21):
-                    time.sleep(CHECK_INTERVAL)
-                    if (REPORTS / "resft_pipeline_report.md").exists():
-                        decide("pipeline verdict ready")
-                        break
-                    if process_running("soup_pipeline") is None:
-                        decide("pipeline exited (check soup_pipeline_run.log)")
-                        break
+                verdict = REPORTS / "resft_pipeline_report.md"
+                fresh = verdict.exists() and verdict.stat().st_mtime > started
+                if fresh:
+                    decide("soup pipeline already produced a verdict tonight - skipping")
+                else:
+                    decide("launching soup pipeline (exam baseline -> re-SFT -> tuned exam)")
+                    pipeline_launched = launch("soup_pipeline.py", "--no-wait",
+                                               "soup_pipeline_run.log")
+                    # give it time; poll for its verdict up to 3.5 hours
+                    for _ in range(21):
+                        time.sleep(CHECK_INTERVAL)
+                        if (REPORTS / "resft_pipeline_report.md").exists():
+                            decide("pipeline verdict ready")
+                            break
+                        if process_running("soup_pipeline") is None:
+                            decide("pipeline exited (check soup_pipeline_run.log)")
+                            break
 
-            # 2c) chain the 4096 context extension if GPU still free
-            if not extension_launched and gpu_really_free():
-                decide("GPU still free - launching 4096 context extension")
+            # 2b+) Phase A resume: the 90k-step pretrain stopped mid-run
+            # (last seen at step 49425/90,000). A stale training.log means
+            # Phase A is NOT running - resume it (resumable by design,
+            # mirrors to X:). after_phaseA.bat chains the 4096 extension
+            # (Phase B) when this run eventually ends.
+            training_log = Path("D:/hwk-data/training.log")
+            phase_a_idle = True
+            try:
+                phase_a_idle = (time.time() - training_log.stat().st_mtime) > 1800
+            except OSError:
+                pass  # no log yet: nothing to protect
+            if phase_a_idle and process_running("train_scratch") is None:
+                decide("Phase A idle - resuming pretraining (resume_training.bat)")
+                subprocess.Popen(
+                    [r"C:\Windows\System32\cmd.exe", "/c",
+                     str(ROOT / "scripts" / "resume_training.bat")],
+                    cwd=str(ROOT),
+                )
+
+            # 2c) chain the 4096 context extension (Phase B) via the watcher:
+            # after_phaseA.bat waits for training.log idle 15+ min itself, so
+            # spawning the WATCHER (not the extension) is collision-free.
+            # System32 cmd explicitly: Git-bash PATH made `timeout /t` resolve
+            # to GNU timeout and spin the watcher in a fast loop (incident
+            # 2026-09-08 21:03).
+            if not extension_launched:
+                decide("spawning after_phaseA watcher (chains Phase B on Phase A end)")
                 extension_launched = True
                 subprocess.Popen(
-                    ["cmd", "/c", str(ROOT / "scripts" / "after_phaseA.bat")],
+                    [r"C:\Windows\System32\cmd.exe", "/c",
+                     str(ROOT / "scripts" / "after_phaseA.bat")],
                     cwd=str(ROOT),
                 )
             write_morning_report()

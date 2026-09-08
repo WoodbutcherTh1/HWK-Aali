@@ -7,7 +7,7 @@ where the mentor **failed** and avoid the same mistakes.
 ## The pipeline
 
 ```
-~/.claude/projects/**/*.jsonl     (Claude Code + Freebuff session logs:
+~/.mentor-capture/projects/**/*.jsonl     (the external coding mentor + Freebuff session logs:
   user asks / assistant moves /      every tool call + its result, errors included)
   tool calls & results)
         │  scripts/mentor_capture.py
