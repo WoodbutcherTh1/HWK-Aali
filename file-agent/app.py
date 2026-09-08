@@ -852,6 +852,15 @@ def ui_client(filename: str):
     return response
 
 
+@app.route("/signup")
+def signup_page():
+    """User-facing self-serve signup: issues an Aali key and drops the visitor
+    straight into the chat UI (web/signup.html; stores the key in localStorage)."""
+    response = send_from_directory(WEB_DIR, "signup.html")
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
 def openai_compat():
     """OpenAI-compatible chat endpoint so opencode / Cursor / Aider / Zed etc.
