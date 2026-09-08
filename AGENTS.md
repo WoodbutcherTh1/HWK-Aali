@@ -170,5 +170,11 @@ in parallel:
   behind it (baseline→QLoRA→exam→auto-promote, VRAM-safe staging fixed).
   Guide: scripts/make_aali_guide.py renders Aali-Guide-<date>.pdf to the
   Desktop from docs/assets screenshots; docs/assets/aali_tour.gif in README.
+- **Terminal client (2026-09-09)**: scripts/aali_cli.py — Claude Code-style
+  colorful REPL (● tool traces via /api/ask/stream SSE, spinner, /new /open
+  /clear /sid /help, y/N danger confirm, UTF-8 forced for exe use); ships as
+  build-desktop/dist/aali-cli.exe inside the installer with a Start-Menu
+  «آلي — Terminal» entry (Aali-Setup.iss [Icons]); docs/assets/aali_cli_demo.gif
+  + README CLI section; auto-starts the server via start_app.bat when absent.
 
 — Last updated: 2026-09-09 (owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; Phase A done, Phase B 4096 running, soup graduation queued; earlier: Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, Phase A restart bf16 + watchdog, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)

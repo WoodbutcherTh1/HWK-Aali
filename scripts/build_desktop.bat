@@ -21,6 +21,9 @@ if not exist build-desktop\icon.ico (
 
 echo [build] compiling exe...
 .venv-desktop\Scripts\pyinstaller.exe --noconfirm --clean --distpath build-desktop\dist --workpath build-desktop\work Aali-Desktop.spec
+
+rem --- terminal client (aali-cli.exe) ---
+.venv-desktop\Scripts\pyinstaller.exe --noconfirm --onefile --name aali-cli --icon "%~dp0..\build-desktop\icon.ico" --distpath build-desktop\dist --workpath build-desktop\work --specpath build-desktop scripts\aali_cli.py
 if errorlevel 1 goto :fail
 
 where ISCC.exe >nul 2>&1

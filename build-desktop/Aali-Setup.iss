@@ -29,11 +29,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "dist\Aali-Desktop.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Terminal client (Claude Code-style CLI) — same app, chat from any console.
+Source: "dist\aali-cli.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; Bundled tunnel binary — powers the in-app «شارك آلي» one-click public link.
 Source: "cloudflared.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\آلي — Desktop"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\آلي — Terminal"; Filename: "{app}\aali-cli.exe"; Parameters: "--base http://127.0.0.1:5055"; IconFilename: "{app}\aali-cli.exe"
 Name: "{group}\Uninstall آلي Desktop"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\آلي — Desktop"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
