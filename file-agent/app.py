@@ -749,6 +749,11 @@ def admin_dashboard():
   .muted{color:var(--mut);font-size:12px}
   .hidden{display:none}
   #secret{word-break:break-all;background:rgba(79,140,255,.1);border:1px solid var(--acc);padding:10px;border-radius:8px;font-family:ui-monospace,monospace;font-size:13px}
+  /* in-page confirm dialog (webview-safe replacement for window.confirm) */
+  .dlg-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50}
+  .dlg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;max-width:340px;width:90%}
+  .dlg p{margin:0 0 16px;line-height:1.7}
+  .dlg .row{justify-content:flex-start}
 </style>
 </head>
 <body>
@@ -779,6 +784,15 @@ def admin_dashboard():
     <tbody id="keys"></tbody></table>
   </div>
 </main>
+<div class="dlg-backdrop hidden" id="dlg">
+  <div class="dlg">
+    <p id="dlgmsg"></p>
+    <div class="row">
+      <button class="primary" id="dlgok">تأكيد</button>
+      <button class="ghost" id="dlgcancel">تراجع</button>
+    </div>
+  </div>
+</div>
 <script>
 const $=id=>document.getElementById(id);
 function api(method,path,body,key){
@@ -788,7 +802,7 @@ function fmt(t){ if(!t) return '—'; const d=new Date(t*1000); return d.toLocal
 function load(){
   localStorage.setItem('aali_admin_token',$('adminkey').value.trim());
   api('GET','/api/admin/stats').then(s=>{
-    if(!s.ok){alert(s.error||'فشل الدخول');return;}
+    if(!s.ok){uiAlert(s.error||'فشل الدخول');return;}
     render(s);
   });
 }
@@ -810,20 +824,48 @@ document.addEventListener('click',function(e){
   const btn=e.target.closest('button[data-revoke]');
   if(!btn) return;
   const tr=btn.closest('tr');
-  if(tr) revoke(tr.getAttribute('data-kid'));
+  if(tr) askRevoke(tr.getAttribute('data-kid'), tr.querySelector('td'));
 });
+/* In-page confirm/alert: window.confirm and window.alert BLOCK embedded
+   webviews (the whole page freezes until the host answers the dialog), so
+   the dashboard ships its own. uiConfirm falls back to window.confirm only
+   if the dialog elements are missing. */
+function uiConfirm(msg){
+  const dlg=$('dlg');
+  if(!dlg) return Promise.resolve(window.confirm(msg));
+  $('dlgmsg').textContent=msg;
+  dlg.classList.remove('hidden');
+  return new Promise(function(resolve){
+    function done(v){ dlg.classList.add('hidden'); $('dlgok').onclick=$('dlgcancel').onclick=null; resolve(v); }
+    $('dlgok').onclick=function(){ done(true); };
+    $('dlgcancel').onclick=function(){ done(false); };
+  });
+}
+function uiAlert(msg){
+  const dlg=$('dlg');
+  if(!dlg){ window.alert(msg); return; }
+  $('dlgmsg').textContent=msg;
+  $('dlgcancel').classList.add('hidden');
+  dlg.classList.remove('hidden');
+  $('dlgok').onclick=function(){ dlg.classList.add('hidden'); $('dlgcancel').classList.remove('hidden'); };
+}
+function askRevoke(id,labelCell){
+  const label = labelCell ? labelCell.textContent : '';
+  uiConfirm('إلغاء مفتاح «'+label+'»؟ لن يعود بعدو صالحًا.').then(function(yes){
+    if(yes) doRevoke(id);
+  });
+}
+function doRevoke(id){
+  api('DELETE','/api/admin/keys/'+id).then(function(r){ if(r.ok) load(); else uiAlert(r.error||'فشل'); });
+}
 function issue(){
   api('POST','/api/admin/keys',{label:$('label').value}).then(r=>{
-    if(!r.ok){alert(r.error||'فشل');return;}
+    if(!r.ok){uiAlert(r.error||'فشل');return;}
     $('secret').classList.remove('hidden');
     $('secret').textContent='مفتاحك الجديد (يُعرض مرة واحدة): '+r.api_key;
     $('label').value='';
     load();
   });
-}
-function revoke(id){
-  if(!confirm('إلغاء هذا المفتاح؟')) return;
-  api('DELETE','/api/admin/keys/'+id).then(r=>{ if(r.ok) load(); else alert(r.error||'فشل'); });
 }
 window.onload=()=>{ $('adminkey').value=localStorage.getItem('aali_admin_token')||''; if($('adminkey').value) load(); };
 </script>
