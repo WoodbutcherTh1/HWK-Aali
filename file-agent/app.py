@@ -661,6 +661,33 @@ def api_admin_keys_revoke(key_id: str):
         return make_response({"ok": False, "error": "key not found"}, 404)
     return {"ok": True, "revoked": key_id}
 
+# ————— شجرة عقل آلي (المالك فقط) —————
+
+@app.route("/brain")
+def brain_page():
+    """LIVE tree of how Aali works — owner/admin only, never linked for users."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    from file_agent import brain_tree
+    return brain_tree.render_html(brain_tree.live_snapshot())
+
+
+@app.route("/api/brain/live", methods=["GET"])
+def api_brain_live():
+    """JSON version of the tree: full structure + live counters (admin only)."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    from file_agent import brain_tree
+    return {
+        "ok": True,
+        "flows": brain_tree.FLOWS,
+        "sources": brain_tree.SOURCES,
+        "security": brain_tree.SECURITY_NOTES,
+        "live": brain_tree.live_snapshot(),
+    }
+
 
 @app.route("/api/admin/stats", methods=["GET"])
 def api_admin_stats():
