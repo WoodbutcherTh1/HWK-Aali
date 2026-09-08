@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import socket
+import time
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import quote_plus, urljoin, urlparse
@@ -113,15 +114,24 @@ def web_search(query: str, workspace_root: Any, *, max_results: int = 6) -> dict
     if not query:
         raise FileAgentError("query must not be empty")
     search_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-    try:
-        response = requests.post(
-            search_url,
-            data={"q": query},
-            headers={"User-Agent": _UA},
-            timeout=_TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        raise FileAgentError(f"web search failed: {exc}") from exc
+    response = None
+    last_exc: Exception | None = None
+    # DuckDuckGo intermittently resets connections (10054); retry with a
+    # short backoff before giving up — one flaky reset must not kill a chat.
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                search_url,
+                data={"q": query},
+                headers={"User-Agent": _UA},
+                timeout=_TIMEOUT,
+            )
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+            time.sleep(0.8 * (attempt + 1))
+    if response is None:
+        raise FileAgentError(f"web search failed: {last_exc}") from last_exc
     if response.status_code >= 400:
         raise FileAgentError(f"search endpoint returned HTTP {response.status_code}")
     html = response.text

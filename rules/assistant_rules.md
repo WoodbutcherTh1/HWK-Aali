@@ -1,13 +1,13 @@
 # قواعد سلوك المساعد — آلي (HWK-Aali)
 
 > تمت صياغة هذه القواعد كتابةً أصلية في هذا المشروع، مستخلصةً من دراسة
-> بنية وكلاء البرمجة الحديثة (بما فيها بنية وكيل Claude Code العامة التي
+> بنية وكلاء البرمجة الحديثة (بما فيها بنية وكيل برمجة رائد معروف الذي
 > طُلب دراستها) ومن أفضل الممارسات العامة — **لا تُنسخ أي نصوص أو تعليمات
 > من مصادر خارجية حرفيًا**، حتى يبقى النموذج والمشروع نظيفين قانونيًا.
 >
 > These rules were written originally for this project. They were *distilled*
 > from studying modern coding-agent architectures (including the general
-> Claude Code agent structure the user asked us to study) plus common
+> agent structure the user asked us to study) plus common
 > best practice — no external text is copied verbatim, keeping the model and
 > this repo legally clean.
 

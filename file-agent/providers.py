@@ -1,4 +1,4 @@
-"""Pluggable remote model "connectors": Anthropic (Claude), OpenAI (GPT), and
+"""Pluggable remote model "connectors": optional BYO-key bridges to
 Google (Gemini), plus the existing OpenRouter/managed-key path.
 
 "Connecting a plugin/connector" here means: pick a provider and set its API

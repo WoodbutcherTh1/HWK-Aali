@@ -54,11 +54,12 @@ _CHAT = {
     "مشكلت": "مشكلة", "شكرا": "شكرًا", "مرحبتين": "مرحبتين",
 }
 
-# --- Arabic normalization rules (applied as regex) -------------------------
+# --- Arabic cosmetic fixes (applied as regex) -------------------------------
+# ONLY genuinely-wrong cosmetics count as corrections. Hamza forms (أ/إ/آ)
+# and alef maqsura (ى) are VALID spelling — stripping them is a search
+# normalization, not a fix, so they must NOT surface in the reading hint.
 _ARABIC_RULES = (
-    (re.compile(r"[أإآ]"), "ا"),   # hamza forms -> plain alef (search-friendly)
-    (re.compile(r"ى"), "ي"),       # alef maqsura -> ya
-    (re.compile(r"ـ"), ""),        # tatweel removal
+    (re.compile(r"ـ"), ""),        # tatweel removal (مرحبـــا -> مرحبا)
 )
 
 _PROTECT = re.compile(
@@ -102,20 +103,13 @@ def _damerau_levenshtein(a: str, b: str, cap: int = 3) -> int:
     return previous[-1]
 
 
-# Small dictionary of words worth fuzzy-matching to (chat + project domain).
-_MINI_DICT = (
-    "hello hi hey thanks please help create make build file folder delete"
-    " move copy rename write read list search install open close start stop"
-    " python video image game app website training model memory exam arabic"
-    " english translate summarize explain fix error bug code command terminal"
-    " tomorrow today morning evening schedule reminder email export import"
-).split()
-
-MIN_WORD_LEN_FOR_FUZZY = 5  # never fuzzy-correct short words (too risky)
+# NOTE: there is deliberately NO fuzzy/phonetic guessing here. Guessing
+# mangled real requests ("small" -> "email", "reach" -> "read") and the
+# model then acted on the wrong request. Only exact dictionary hits count.
 
 
 def _correct_token(token: str) -> tuple[str, bool]:
-    """(corrected, changed) for one word token. Conservative by design."""
+    """(corrected, changed) for one word token. Exact matches only."""
     lowered = token.lower()
     if lowered in _CHAT:
         replacement = _CHAT[lowered]
@@ -132,19 +126,6 @@ def _correct_token(token: str) -> tuple[str, bool]:
         for pattern, repl in _ARABIC_RULES:
             normalized = pattern.sub(repl, normalized)
         return normalized, normalized != token
-    # Fuzzy match for longer unknown ASCII words
-    if (token.isascii() and len(lowered) >= MIN_WORD_LEN_FOR_FUZZY
-            and lowered not in _MINI_DICT):
-        best, best_distance = None, 3
-        for word in _MINI_DICT:
-            if abs(len(word) - len(lowered)) > 2:
-                continue
-            distance = _damerau_levenshtein(lowered, word)
-            if distance < best_distance:
-                best, best_distance = word, distance
-        if best is not None and best_distance <= 2:
-            replacement = best.capitalize() if token[0].isupper() else best
-            return replacement, True
     return token, False
 
 

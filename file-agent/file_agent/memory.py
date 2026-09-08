@@ -57,7 +57,7 @@ class MemoryError(ValueError):
     """Caller misuse (bad kind, refusing to store agent beliefs, etc.)."""
 
 
-# --- secret redaction (lesson: Samsung 2023 / DeepSeek 2025 leaks) ---------
+# --- secret redaction (lesson: real industry leak incidents) ---------
 # Memory entries are injected into system prompts and can therefore be SENT
 # TO CLOUD PROVIDERS. A key, token, or password pasted by the user must never
 # ride along. We keep the sentence but replace the secret with a redaction
@@ -195,7 +195,7 @@ def remember(
             "only user statements are stored (source='user'); "
             "Aali's own beliefs would make the memory hallucinate"
         )
-    # Security guard (lesson: real leaks at Samsung/DeepSeek/etc.): a secret
+    # Security guard (lesson: real industry leaks): a secret
     # pasted in chat must not end up in memory blocks that get sent to cloud
     # providers. Keep the statement, drop the secret.
     redacted = redact_secrets(text)

@@ -1,5 +1,5 @@
 """Skills: small markdown playbooks the agent can list and load on demand —
-the same idea as Claude's own Skills feature, kept intentionally simple.
+the same idea as the well-known assistant Skills pattern, kept intentionally simple.
 
 A skill is a markdown file under <repo_root>/skills/<name>.md:
 
@@ -13,7 +13,7 @@ Skills live at the repo root (not inside the sandboxed per-conversation
 workspace) because they are shared playbooks, not per-session files. The
 agent calls list_skills to see what is available (name + one-line
 description only — cheap) and use_skill(name) to load the full body only
-when it looks relevant, mirroring how Claude decides whether to open a
+when it looks relevant, mirroring how a senior assistant decides whether to open a
 skill's SKILL.md before using it.
 """
 
