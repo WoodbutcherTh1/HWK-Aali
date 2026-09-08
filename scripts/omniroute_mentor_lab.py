@@ -1,6 +1,6 @@
-"""OmniRoute mentor lab: Claude builds 30 things through AALI's tool layer.
+"""OmniRoute mentor lab: the external mentor builds 30 things through AALI's tool layer.
 
-The owner's learning-loop request (2026-09-06): have a strong model (Claude
+The owner's learning-loop request (2026-09-06): have a strong external model (
 via the local OmniRoute gateway) actually BUILD apps, games, and files - not
 answer questions about building - while every behind-the-scenes tool call and
 every failure is captured in Aali's exact JSON wire format, then fed to Aali
@@ -239,7 +239,7 @@ def run_task(task_id: str, category: str, request: str, language: str) -> dict |
         ],
         "meta": {
             "task_id": task_id, "category": category, "language": language,
-            "mentor": "claude-via-omniroute", "model": MODEL,
+            "mentor": "external-via-omniroute", "model": MODEL,
             "tool_calls": tool_calls, "failures": failures,
             "captured": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         },

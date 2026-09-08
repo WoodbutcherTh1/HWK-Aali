@@ -1,6 +1,6 @@
 """Audit the mentor-lab episodes: keep only builds that actually work.
 
-Every lab episode claims Claude built something in its sandbox. This audit
+Every lab episode claims the external mentor built something in its sandbox. This audit
 VERIFIES the claim (evidence first - the rule Aali is being taught):
 
 - For each captured task, inspect the sandbox files.

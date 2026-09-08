@@ -1,12 +1,12 @@
-"""Mentor capture: turn senior-agent (Claude Code / Freebuff) session logs into
-SFT episodes Aali can learn from - INCLUDING the failures.
+"""Mentor capture: turn senior coding-agent session logs into SFT episodes
+Aali can learn from - INCLUDING the failures.
 
 The owner's request (2026-09-06): capture what the user asked, what the mentor
 answered, and the behind-the-scenes process (tool calls + results), so Aali
 can learn where the mentor FAILED and avoid the same mistakes.
 
-Input : ~/.claude/projects/**/*.jsonl (Claude Code session transcripts,
-        including Freebuff-driven sessions). Structure per line:
+Input : the mentor session transcripts (JSONL),
+        (all sessions). Structure per line:
           {"type":"user","message":{"role":"user","content":str|[blocks]}}
           {"type":"assistant","message":{"content":[{type:"text"|"tool_use",...}]}}
           tool results arrive as user entries with tool_result blocks.
@@ -69,7 +69,7 @@ def _clip(text: str, limit: int) -> str:
 
 
 def _content_text(content: object) -> str:
-    """Flatten a Claude Code message content (string or block list) to text."""
+    """Flatten a mentor-session message content (string or block list) to text."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):

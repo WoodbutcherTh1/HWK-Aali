@@ -1,17 +1,17 @@
-"""Overnight Aali-vs-Claude arena — same tasks to both agents, all night.
+"""Overnight Aali-vs-reference arena — same tasks to both agents, all night.
 
 The owner's order (2026-09-07, before sleep): "Let Aali talk and act like
-Claude Code... test on both and don't let go until Aali be like Claude."
+Senior-agent comparison... test on both until Aali matches it."
 
 Per task, every round:
   1. AALI  — the real server (port 5055, CPU brain while the GPU re-SFTs),
      via /api/ask/stream so tool events are captured too. Artifacts are then
      VERIFIED on disk in the agent workspace (evidence, never claims).
-  2. CLAUDE — the free OmniRoute gateway (model "auto"), prompted as the same
+  2. REFERENCE — the free OmniRoute gateway (model "auto"), prompted as the same
      agent; its full tool plan + answer is captured as the reference behavior.
 
 Scoring per task: artifact_verified (Aali), tools_used (Aali, from the live
-event stream), reference_tools (Claude). Where Aali falls short of the
+event stream), reference_tools (the reference model). Where Aali falls short of the
 reference, a gap episode is written in messages format for the next SFT.
 
 Outputs (all under D:/hwk-data/arena/):
@@ -43,7 +43,7 @@ DAWN_HOUR = 7          # stop starting new rounds at 07:00 local
 MAX_ROUNDS = 14
 SETTLE_SECONDS = 20
 
-SYSTEM_CLAUDE = (
+SYSTEM_REFERENCE = (
     "You are Aali, a local coding agent on the owner's Windows PC. You work by "
     "emitting tool calls. Available tools: write_file(path, content), "
     "read_file(path), append_file(path, content), list_files(path), "
@@ -154,13 +154,13 @@ def aali_stream(message: str) -> tuple[str, list[str], float]:
     return reply, tools, time.time() - started
 
 
-def claude_reference(message: str) -> tuple[str, bool, float]:
-    """Ask Claude-via-OmniRoute for the reference behavior; returns (text, emitted_tool_json, seconds)."""
+def reference_reference(message: str) -> tuple[str, bool, float]:
+    """Ask the reference model (via the local gateway) for reference behavior; returns (text, emitted_tool_json, seconds)."""
     started = time.time()
     payload = json.dumps({
         "model": "auto",
         "messages": [
-            {"role": "system", "content": SYSTEM_CLAUDE},
+            {"role": "system", "content": SYSTEM_REFERENCE},
             {"role": "user", "content": message},
         ],
         "temperature": 0.2, "max_tokens": 3000, "stream": False,
@@ -210,26 +210,26 @@ def write_report(rows: list[dict]) -> None:
     total = len(rows)
     aali_ok = sum(1 for r in rows if r["aali_verified"])
     tools_used = sum(1 for r in rows if r["aali_tools"])
-    ref_tools = sum(1 for r in rows if r["claude_tools"])
+    ref_tools = sum(1 for r in rows if r["ref_tools"])
     lines = [
-        "# Arena — Aali vs Claude (overnight)",
+        "# Arena — Aali vs reference (overnight)",
         f"_updated {datetime.now().isoformat(timespec='seconds')} — {total} task-runs_",
         "",
         "| metric | value |",
         "|---|---|",
         f"| Aali artifacts verified | **{aali_ok}/{total}** |",
         f"| Aali used tools | {tools_used}/{total} |",
-        f"| Claude reference used tools | {ref_tools}/{total} |",
+        f"| Reference model used tools | {ref_tools}/{total} |",
         f"| Aali avg reply time | {sum(r['aali_secs'] for r in rows) / max(total, 1):.0f}s |",
         "",
-        "| task | Aali verified | Aali tools | reply secs | Claude tools |",
+        "| task | Aali verified | Aali tools | reply secs | Reference tools |",
         "|---|---|---|---|---|",
     ]
     for r in rows[-60:]:
         lines.append(
             f"| {r['task']} | {'✅' if r['aali_verified'] else '❌'} "
             f"| {', '.join(r['aali_tools']) or '—'} | {r['aali_secs']:.0f} "
-            f"| {'✓' if r['claude_tools'] else '—'} |"
+            f"| {'✓' if r['ref_tools'] else '—'} |"
         )
     lines += [
         "",
@@ -246,7 +246,7 @@ def write_report(rows: list[dict]) -> None:
 def main() -> int:
     ARENA.mkdir(parents=True, exist_ok=True)
     WORKSPACE.mkdir(parents=True, exist_ok=True)
-    log("arena start — Aali (CPU) vs Claude reference (OmniRoute)")
+    log("arena start — Aali (CPU) vs reference model (OmniRoute)")
     all_rows: list[dict] = []
     if RESULTS.exists():
         for line in RESULTS.read_text(encoding="utf-8").splitlines():
@@ -269,14 +269,14 @@ def main() -> int:
             reply, tools, secs = aali_stream(prompt)
             ok, note = verify(reply, task.get("verify", {}), round_id)
             log(f"        -> {'VERIFIED' if ok else 'FAILED'} ({secs:.0f}s, tools: {tools or '—'})")
-            log(f"  CLAUDE: {task_id}")
-            reference, ref_tools, ref_secs = claude_reference(prompt)
+            log(f"  REFERENCE: {task_id}")
+            reference, ref_tools, ref_secs = reference_reference(prompt)
             log(f"        -> {'tool plan' if ref_tools else 'no tools'} ({ref_secs:.0f}s)")
             record = {
                 "round": round_no, "task": task_id, "cat": task["cat"],
                 "aali_verified": ok, "note": note, "aali_tools": tools,
-                "aali_secs": round(secs, 1), "claude_tools": ref_tools,
-                "claude_secs": round(ref_secs, 1),
+                "aali_secs": round(secs, 1), "ref_tools": ref_tools,
+                "ref_secs": round(ref_secs, 1),
                 "aali_reply_head": reply[:400],
                 "ts": datetime.now().isoformat(timespec="seconds"),
             }

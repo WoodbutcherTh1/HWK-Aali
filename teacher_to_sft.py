@@ -1,4 +1,4 @@
-"""Turn transcripts saved by claude_teach.py into SFT instruction records.
+"""Turn transcripts saved by the mentor capture scripts (mentor_a.py .. mentor_d.py) into SFT instruction records.
 
 Reads D:\\hwk-data\\teacher\\*.jsonl, keeps clean question/answer pairs,
 de-duplicates them, and writes them in the messages format that

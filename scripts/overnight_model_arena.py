@@ -34,8 +34,8 @@ KEY_FILE = Path("D:/hwk-data/aali_server_key.txt")
 AALI = "http://127.0.0.1:5055"
 GATEWAY = "http://localhost:20128/v1/chat/completions"
 CANDIDATE_MODELS = [
-    "auto", "t3chat/claude-sonnet-4", "vp/claude-sonnet-4",
-    "t3chat/gpt-4o", "vp/gpt-4o", "deepseek-v3", "gemini-2.0-flash",
+    "auto", "t3chat/reference-a", "vp/reference-a",
+    "t3chat/reference-b", "vp/reference-b", "reference-v3", "reference-flash",
     "grok-3", "mistral-large", "llama-4-maverick",
 ]
 DAWN_HOUR = 7
