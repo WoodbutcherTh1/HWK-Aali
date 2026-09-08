@@ -10,6 +10,7 @@ X:/
 node_modules/
 file-agent/logs/*.log
 file-agent/sessions.jsonl
+file-agent/api_keys.jsonl
 .pytest_cache/
 
 # One-off device-side edit helper scripts (not part of the project)

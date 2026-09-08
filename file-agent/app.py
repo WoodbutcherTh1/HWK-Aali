@@ -37,7 +37,13 @@ app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
 # ?key= for simple GETs) — that key also ISOLATES sessions per user, so two
 # people sharing one server never see each other's conversations.
 # Unset (default): local single-user mode, unchanged behaviour.
+from file_agent import apikeys
+
+# The ADMIN key. Aali is the provider: clients authenticate with either this
+# master key (admin) or a per-user key issued via the key platform. User keys
+# are stored hashed in apikeys (never the admin key).
 API_KEY = os.getenv("AALI_API_KEY", "").strip()
+apikeys.ensure_loaded()
 
 
 def _client_key() -> str:
@@ -45,21 +51,53 @@ def _client_key() -> str:
     return request.headers.get("X-API-Key", "") or request.args.get("key", "")
 
 
+def _auth_state(presented: str | None = None) -> dict:
+    """Resolve the caller's key: returns {is_admin, key_id, key} or None if
+    unauthenticated. Admin = master AALI_API_KEY; user = an issued key."""
+    key = presented if presented is not None else _client_key()
+    if not key:
+        return None
+    if API_KEY and key == API_KEY:
+        return {"is_admin": True, "key_id": "admin", "key": key}
+    rec = apikeys.authenticate(key)
+    if not rec:
+        return None
+    return {"is_admin": False, "key_id": rec["key_id"], "key": key}
+
+
 def _user_ns(sid: str | None) -> str:
-    """Session ids are stored PER USER: <ns>:<sid>. Local mode keeps the bare sid."""
+    """Session ids are stored PER USER: <ns>:<sid>. Local mode keeps the bare sid.
+    Issued keys namespace by their key_id (the plaintext key never touches disk)."""
     if not API_KEY:
         return sid or ""
+    auth = _auth_state()
+    if auth and not auth["is_admin"]:
+        return f"u{auth['key_id']}:{sid or uuid.uuid4().hex}"
     return f"u{_client_key()}:{sid}" if sid else f"u{_client_key()}:{uuid.uuid4().hex}"
 
 
 @app.before_request
 def _require_api_key():
-    if request.method == "OPTIONS" or not API_KEY:
+    if request.method == "OPTIONS":
         return None
+    # The OpenAI-compatible /v1 endpoint is a public API surface and is guarded
+    # separately (it accepts Authorization: Bearer too). UI and static assets
+    # stay public.
+    if request.path.startswith("/v1/"):
+        return None
+    if not API_KEY:
+        return None  # local single-user mode: open
+    if request.path.startswith("/api/register"):
+        return None  # self-serve signup is public (rate-limited inside)
     if not request.path.startswith("/api/"):
         return None
-    if _client_key() != API_KEY:
+    auth = _auth_state()
+    if not auth:
         return make_response({"ok": False, "error": "unauthorized: missing or wrong X-API-Key"}, 401)
+    if not auth["is_admin"] and apikeys.over_daily_cap(auth["key_id"]):
+        return make_response({"ok": False, "error": "daily request cap reached for this key"}, 429)
+    # Meter usage (best-effort) for every authenticated /api call.
+    apikeys.record_usage(auth["key_id"])
     return None
 
 
@@ -294,6 +332,7 @@ def api_ask():
     if sid not in _sessions:
         _save_session(record)
     _append_turn(record, "user", message)
+    _meter_chars(len(message), 0)
     gate_state: dict[str, object] = {}
     try:
         reply = agent_loop(
@@ -314,6 +353,7 @@ def api_ask():
         ok = False
         status = 500
     _append_turn(record, "assistant", reply)
+    _meter_chars(0, len(reply))
     body = {"ok": ok, "reply": reply, "sid": sid}
     from file_agent import suggestions
     body["suggestions"] = suggestions.suggest(reply, message)
@@ -329,6 +369,18 @@ def api_ask():
     response = make_response(body, status)
     response.headers["Content-Type"] = "application/json; charset=utf-8"
     return response
+
+
+def _meter_chars(chars_in: int, chars_out: int) -> None:
+    """Attribute request chars to the calling user key (admin/none = skip)."""
+    if not API_KEY:
+        return
+    auth = _auth_state()
+    if auth and not auth["is_admin"]:
+        try:
+            apikeys.record_chars(auth["key_id"], chars_in, chars_out)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @app.route("/api/compact", methods=["POST"])
@@ -553,6 +605,228 @@ def api_health():
     return {"ok": True, "service": "aali", "workspace": str(WORKSPACE_ROOT)}
 
 
+# ————— Aali as a provider: key platform + admin —————
+
+def _require_admin():
+    """Return None when the caller presented the admin master key, else a 401."""
+    if not API_KEY:
+        return None  # local single-user mode: open admin (localhost tooling)
+    auth = _auth_state()
+    if not auth or not auth["is_admin"]:
+        return make_response({"ok": False, "error": "admin key required"}, 401)
+    return None
+
+
+@app.route("/api/register", methods=["POST"])
+def api_register():
+    """Self-serve signup: POST {"label": "..."} -> {"ok": true, "api_key": "aali-..."}.
+    Rate-limited per IP; disable entirely with AALI_OPEN_SIGNUP=0."""
+    payload = request.get_json(silent=True) or {}
+    label = str(payload.get("label", ""))[:80]
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "")
+    key_id, plaintext, err = apikeys.signup(label, ip)
+    if err:
+        return make_response({"ok": False, "error": err}, 429)
+    return {"ok": True, "key_id": key_id, "api_key": plaintext,
+            "note": "احفظ هذا المفتاح — يُعرض مرة واحدة فقط"}
+
+
+@app.route("/api/admin/keys", methods=["GET"])
+def api_admin_keys_list():
+    denied = _require_admin()
+    if denied:
+        return denied
+    return {"ok": True, "keys": apikeys.list_keys(), "stats": apikeys.stats()}
+
+
+@app.route("/api/admin/keys", methods=["POST"])
+def api_admin_keys_issue():
+    """Issue a key: POST {"label": "client-name"} (admin only)."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    payload = request.get_json(silent=True) or {}
+    label = str(payload.get("label", ""))[:80]
+    key_id, plaintext = apikeys.issue_key(label=label, created_by="admin")
+    return {"ok": True, "key_id": key_id, "api_key": plaintext,
+            "note": "احفظ هذا المفتاح — يُعرض مرة واحدة فقط"}
+
+
+@app.route("/api/admin/keys/<key_id>", methods=["DELETE"])
+def api_admin_keys_revoke(key_id: str):
+    denied = _require_admin()
+    if denied:
+        return denied
+    if not apikeys.revoke(key_id):
+        return make_response({"ok": False, "error": "key not found"}, 404)
+    return {"ok": True, "revoked": key_id}
+
+
+@app.route("/api/admin/stats", methods=["GET"])
+def api_admin_stats():
+    denied = _require_admin()
+    if denied:
+        return denied
+    _ensure_sessions_loaded()
+    admin_prefix = "uadmin:"
+    user_sessions = sum(
+        1 for key in _sessions
+        if key.startswith("u") and not key.startswith(admin_prefix)
+    )
+    return {"ok": True, "keys": apikeys.stats(), "user_sessions": user_sessions,
+            "workspace": str(WORKSPACE_ROOT),
+            "brain": _brain_summary()}
+
+
+def _promoted_model() -> dict | None:
+    """Aali's own promoted model, if one exists: read from the file the soup
+    pipeline writes when its tuned adapter beats the baseline on the exam."""
+    marker = Path(os.getenv("AALI_PROMOTED_FILE", "D:/hwk-data/soup/promoted.json"))
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not data or not data.get("adapter_dir"):
+        return None
+    return data
+
+
+def _brain_summary() -> dict:
+    """Which brain is Aali serving right now (own model first)."""
+    promoted = _promoted_model()
+    if promoted:
+        return {"provider": "aali_own", "detail": promoted}
+    if os.getenv("AALI_OLLAMA", "1") != "0":
+        try:
+            import requests as _rq
+            if _rq.get(agent_loop.OLLAMA_URL + "/api/tags", timeout=2).ok:
+                return {"provider": "ollama", "detail": agent_loop.OLLAMA_MODEL,
+                        "note": "interim brain until Aali's own model is promoted"}
+        except Exception:  # noqa: BLE001
+            pass
+    return {"provider": "scratch_model", "detail": "local checkpoint"}
+
+
+@app.route("/admin")
+def admin_dashboard():
+    """Admin dashboard — full control like other AI-provider consoles.
+    Self-contained page (no rebuild); talks to /api/admin/* with the master
+    key. Set ?demo=1 to see it without a key in local single-user mode."""
+    html = """<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>آلي — لوحة التحكم</title>
+<style>
+  :root{--bg:#0f1117;--panel:#171a23;--line:#262b38;--fg:#e6e8ee;--mut:#9aa0ae;--acc:#4f8cff;--ok:#2ecc71;--bad:#e74c3c}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,'Tajawal',sans-serif;background:var(--bg);color:var(--fg)}
+  header{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid var(--line)}
+  header h1{font-size:18px;margin:0}
+  header .sub{color:var(--mut);font-size:12px}
+  main{padding:22px;max-width:1100px;margin:0 auto}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card .k{color:var(--mut);font-size:12px}
+  .card .v{font-size:22px;font-weight:700;margin-top:4px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:20px}
+  .panel h2{font-size:15px;margin:0 0 12px}
+  input,button{font:inherit;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--fg)}
+  input{flex:1;min-width:0}
+  button{cursor:pointer;border:1px solid var(--line)}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+  button.danger{background:transparent;border-color:var(--bad);color:var(--bad)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:right;padding:8px;border-bottom:1px solid var(--line)}
+  th{color:var(--mut);font-weight:600}
+  .mono{font-family:ui-monospace,monospace;font-size:12px;color:var(--mut)}
+  .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px}
+  .tag.ok{background:rgba(46,204,113,.15);color:var(--ok)}
+  .tag.off{background:rgba(231,76,60,.15);color:var(--bad)}
+  .bar{height:6px;background:#0f1117;border-radius:999px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--acc)}
+  .muted{color:var(--mut);font-size:12px}
+  .hidden{display:none}
+  #secret{word-break:break-all;background:rgba(79,140,255,.1);border:1px solid var(--acc);padding:10px;border-radius:8px;font-family:ui-monospace,monospace;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>آلي · لوحة التحكم</h1>
+  <div class="sub" id="brain">…</div>
+</header>
+<main>
+  <div class="panel">
+    <div class="row"><label>مفتاح المدير (X-API-Key)</label>
+      <input type="password" id="adminkey" placeholder="أدخل AALI_API_KEY">
+      <button class="primary" onclick="load()">دخول</button>
+    </div>
+    <div class="muted" style="margin-top:8px">المفتاح يُحفظ في متصفحك فقط (localStorage) ولا يُرسل إلا لعنوان هذا الخادم.</div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>إصدار مفتاح جديد</h2>
+    <div class="row"><input id="label" placeholder="اسم العميل (مثال: تطبيق ويب)"><button class="primary" onclick="issue()">إصدار</button></div>
+    <div id="secret" class="hidden"></div>
+  </div>
+
+  <div class="panel">
+    <h2>المفاتيح</h2>
+    <table><thead><tr><th>العميل</th><th>المفتاح</th><th>الطلبات</th><th>أحرف</th><th>آخر استخدام</th><th>الحالة</th><th></th></tr></thead>
+    <tbody id="keys"></tbody></table>
+  </div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+function api(method,path,body,key){
+  return fetch(path,{method,headers:{'Content-Type':'application/json','X-API-Key':key||$('adminkey').value.trim()},body:body?JSON.stringify(body):undefined}).then(r=>r.json());
+}
+function fmt(t){ if(!t) return '—'; const d=new Date(t*1000); return d.toLocaleString('ar'); }
+function load(){
+  localStorage.setItem('aali_admin_token',$('adminkey').value.trim());
+  api('GET','/api/admin/stats').then(s=>{
+    if(!s.ok){alert(s.error||'فشل الدخول');return;}
+    render(s);
+  });
+}
+function render(s){
+  $('brain').textContent = s.brain ? ('العقل: '+s.brain.provider+(s.brain.detail&&typeof s.brain.detail==='object'?(s.brain.detail.adapter_dir||''):'') ) : '';
+  const k=s.keys||{};
+  const cards=[
+    ['مفاتيح نشطة',k.active_keys],['إجمالي المفاتيح',k.total_keys],['طلبات',k.total_requests],['أحرف',k.total_chars],['جلسات مستخدمين',s.user_sessions]
+  ];
+  $('cards').innerHTML=cards.map(c=>'<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div></div>').join('');
+  api('GET','/api/admin/keys').then(r=>{
+    if(!r.ok) return;
+    $('keys').innerHTML=(r.keys||[]).map(x=>{
+      const pct=Math.min(100, Math.round(x.requests/ (1+(r.stats&&r.stats.total_requests||0)) *100*3));
+      return '<tr><td>'+ (x.label||'—') +'</td><td class="mono">'+x.prefix+'…</td><td>'+x.requests+'</td><td>'+x.chars_in+'+'+x.chars_out+'</td><td>'+fmt(x.last_used_at)+'</td><td><span class="tag '+(x.revoked?'off':'ok')+'">'+(x.revoked?'مُلغى':'نشط')+'</span></td><td>'+(x.revoked?'':'<button class="danger" onclick="revoke(\''+x.key_id+'\')">إلغاء</button>')+'</td></tr>';
+    }).join('') || '<tr><td colspan=7 class="muted">لا مفاتيح بعد</td></tr>';
+  });
+}
+function issue(){
+  api('POST','/api/admin/keys',{label:$('label').value}).then(r=>{
+    if(!r.ok){alert(r.error||'فشل');return;}
+    $('secret').classList.remove('hidden');
+    $('secret').textContent='مفتاحك الجديد (يُعرض مرة واحدة): '+r.api_key;
+    $('label').value='';
+    load();
+  });
+}
+function revoke(id){
+  if(!confirm('إلغاء هذا المفتاح؟')) return;
+  api('DELETE','/api/admin/keys/'+id).then(r=>{ if(r.ok) load(); else alert(r.error||'فشل'); });
+}
+window.onload=()=>{ $('adminkey').value=localStorage.getItem('aali_admin_token')||''; if($('adminkey').value) load(); };
+</script>
+</body>
+</html>"""
+    return html
+
+
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 DIST_DIR = WEB_DIR / "dist"
 
@@ -577,11 +851,25 @@ def ui_client(filename: str):
 def openai_compat():
     """OpenAI-compatible chat endpoint so opencode / Cursor / Aider / Zed etc.
     can use Aali as their model: point the tool at
-      base_url = http://<pc-ip>:5055/v1   (api_key: anything)
+      base_url = http://<pc-ip>:5055/v1   (api_key: a real Aali-issued key)
     Runs the full agent loop with tools; returns an OpenAI-shaped response.
     """
     if request.method == "OPTIONS":
         return make_response(("", 204))
+    # Aali is the provider: this public endpoint accepts ONLY real keys —
+    # the admin master key or an issued per-user key — never "anything".
+    bearer = ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        bearer = auth_header[7:].strip()
+    presented = bearer or _client_key()
+    if API_KEY:
+        auth = _auth_state(presented) if presented else None
+        if not auth:
+            return make_response({"error": {"message": "invalid API key", "type": "auth_error", "code": "invalid_api_key"}}, 401)
+        if not auth["is_admin"] and apikeys.over_daily_cap(auth["key_id"]):
+            return make_response({"error": {"message": "daily request cap reached", "type": "quota_error", "code": "rate_limit"}}, 429)
+        apikeys.record_usage(auth["key_id"])
     payload = request.get_json(silent=True) or {}
     messages = payload.get("messages") or []
     user_msgs = [str(m.get("content", "")) for m in messages if m.get("role") == "user"]
@@ -606,6 +894,7 @@ def openai_compat():
         ok = False
     _append_turn(record, "user", message)
     _append_turn(record, "assistant", reply)
+    _meter_chars(len(message), len(reply))
     import time as _time
 
     body = {

@@ -51,7 +51,9 @@ def record_turn(role: str, text: str) -> None:
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "anthropic/claude-3.5-sonnet"
+# Aali is the provider: the default model is Aali's own, not another company's.
+# (Cloud connectors only ever pick a default for dev/testing when mode="cloud".)
+DEFAULT_MODEL = "aali-own"
 DEFAULT_MAX_ITERATIONS = 5
 DEFAULT_WORKSPACE = Path(__file__).resolve().parent / "agent_workspace"
 DEFAULT_SCRATCH_CHECKPOINT = (
@@ -61,6 +63,30 @@ DEFAULT_SCRATCH_CHECKPOINT = (
 # finishes training; disable with AALI_OLLAMA=0).
 OLLAMA_URL = os.getenv("AALI_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("AALI_OLLAMA_MODEL", "qwen2.5:7b-instruct")
+# Aali's OWN brain: when the soup re-SFT pipeline promotes a tuned adapter
+# (promoted.json), the runtime serves THAT model first — Aali is his own
+# provider, not a client of other providers. Set AALI_OWN_MODEL=0 to force the
+# old order (Ollama -> scratch) while debugging.
+PROMOTED_FILE = Path(os.getenv("AALI_PROMOTED_FILE", "D:/hwk-data/soup/promoted.json"))
+OWN_MODEL_URL = os.getenv("AALI_OWN_MODEL_URL", "").strip()
+OWN_MODEL_NAME = os.getenv("AALI_OWN_MODEL_NAME", "aali-own")
+OWN_MODEL_API_KEY = os.getenv("AALI_OWN_MODEL_KEY", "aali-self")
+
+
+def promoted_own_model() -> dict | None:
+    """Return {base_url, model} for Aali's promoted own model, or None."""
+    if os.getenv("AALI_OWN_MODEL", "1") == "0":
+        return None
+    if OWN_MODEL_URL:
+        return {"base_url": OWN_MODEL_URL.rstrip("/"), "model": OWN_MODEL_NAME}
+    try:
+        data = json.loads(PROMOTED_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    base_url = str(data.get("base_url") or "").strip()
+    if not base_url:
+        return None
+    return {"base_url": base_url.rstrip("/"), "model": OWN_MODEL_NAME}
 SYSTEM_PROMPT = """\
 You are a careful local file assistant. Use only the provided tools to inspect
 or modify files. All paths are relative to the configured workspace and must
@@ -1025,6 +1051,19 @@ def _agent_loop(
         raise AgentLoopError("max_iterations must be at least 1")
     root = _workspace_path(workspace_root)
     if mode == "local":
+        own = promoted_own_model()
+        if own:
+            log_event(request_id, "provider_selected", provider="aali_own", model=own["model"])
+            response = _openai_compat_loop(
+                user_message, root, request_id,
+                base_url=own["base_url"], api_key=OWN_MODEL_API_KEY,
+                model=own["model"], max_iterations=max_iterations, history=history,
+                policy=policy, confirmed=confirmed, gate_state=gate_state,
+                provider_label="aali_own",
+            )
+            if print_final:
+                print(response)
+            return response
         if _ollama_available():
             log_event(request_id, "provider_selected", provider="ollama", model=OLLAMA_MODEL)
             response = _ollama_agent_loop(
@@ -1131,6 +1170,40 @@ def _agent_loop(
         "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "http://localhost"),
         "X-Title": os.getenv("OPENROUTER_APP_NAME", "Local File Agent"),
     }
+    response = _openai_compat_loop(
+        user_message, root, request_id,
+        base_url=endpoint, api_key=api_key, model=selected_model,
+        max_iterations=max_iterations, history=history,
+        policy=policy, confirmed=confirmed, gate_state=gate_state,
+        provider_label=provider, client=client, headers=headers,
+        print_final=print_final,
+    )
+    return response
+
+
+def _openai_compat_loop(
+    user_message: str,
+    root: Path,
+    request_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    max_iterations: int,
+    history: list[dict[str, str]] | None,
+    policy: str,
+    confirmed: bool,
+    gate_state: dict[str, Any] | None,
+    provider_label: str,
+    client: Any | None = None,
+    headers: dict[str, str] | None = None,
+    print_final: bool = False,
+) -> str:
+    """Shared OpenAI-compatible tool loop: used by the cloud connectors AND by
+    Aali's own promoted model (soup serve exposes the same schema)."""
+    client = client or requests
+    if headers is None:
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT + _POLICY_PROMPTS.get(policy, "") + _memory_block()}
     ]
@@ -1144,7 +1217,7 @@ def _agent_loop(
     for _ in range(max_iterations):
         iteration = _ + 1
         payload = {
-            "model": selected_model,
+            "model": model,
             "messages": list(messages),
             "tools": get_tool_definitions(),
             "tool_choice": "auto",
@@ -1153,13 +1226,13 @@ def _agent_loop(
             request_id,
             "model_request",
             iteration=iteration,
-            model=selected_model,
-            provider=provider,
+            model=model,
+            provider=provider_label,
             tool_choice="auto",
         )
         try:
             response = client.post(
-                endpoint,
+                base_url,
                 headers=headers,
                 json=payload,
                 timeout=90,

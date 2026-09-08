@@ -201,9 +201,10 @@ def run_exam(stage: str, model: str) -> dict | None:
          "--base-url", f"http://127.0.0.1:{PORT}/v1",
          "--model", model,
          "--output", str(report_path)],
-        capture_output=True, text=True, timeout=3600,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=3600,
     )
-    LOG_TAIL.write_text(completed.stdout[-2000:] + completed.stderr[-2000:],
+    LOG_TAIL.write_text((completed.stdout or "")[-2000:] + (completed.stderr or "")[-2000:],
                         encoding="utf-8")
     if completed.returncode != 0:
         log(f"exam [{stage}] FAILED (exit {completed.returncode}) - see {LOG_TAIL}")
@@ -222,17 +223,19 @@ def run_training() -> bool:
     if not SFT_V2.exists():
         log(f"missing dataset {SFT_V2} - run scripts/build_aali_sft_v2.py first")
         return False
-    # Point soup.yaml at sft_v2 for this run (the config is ours to edit).
-    config_text = SOUP_CONFIG.read_text(encoding="utf-8")
-    updated = config_text.replace(
-        "D:/hwk-data/soup/sft_alpaca.jsonl", str(SFT_V2).replace("\\", "/"))
-    SOUP_CONFIG.write_text(updated, encoding="utf-8")
+    # soup.yaml already points at sft_v2 in-repo; verify instead of rewriting,
+    # so a stale local edit fails fast instead of training on the wrong data.
+    config_text = SOUP_CONFIG.read_text(encoding="utf-8").replace("\\", "/")
+    if str(SFT_V2).replace("\\", "/") not in config_text:
+        log(f"error: {SOUP_CONFIG} does not point at {SFT_V2} - fix data.train first")
+        return False
     log(f"starting soup train on {SFT_V2.name}")
     completed = subprocess.run(
-        [str(SOUP_EXE), "train", "--config", str(SOUP_CONFIG)],
-        capture_output=True, text=True, timeout=6 * 3600,
+        [str(SOUP_EXE), "train", "--config", str(SOUP_CONFIG), "--yes"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=6 * 3600,
     )
-    LOG_TAIL.write_text(completed.stdout[-4000:] + completed.stderr[-4000:],
+    LOG_TAIL.write_text((completed.stdout or "")[-4000:] + (completed.stderr or "")[-4000:],
                         encoding="utf-8")
     if completed.returncode != 0:
         log(f"soup train FAILED (exit {completed.returncode}) - see {LOG_TAIL}")
@@ -274,6 +277,21 @@ def write_verdict(baseline: dict | None, tuned: dict | None) -> str:
     ]
     report_text = "\n".join(lines)
     (REPORTS / "resft_pipeline_report.md").write_text(report_text, encoding="utf-8")
+    # Promotion gate: when the tuned adapter beats the baseline, record it as
+    # Aali's own model so the runtime brain can switch to it (see agent_loop).
+    if verdict.startswith("PROMOTE"):
+        promoted = {
+            "adapter_dir": str(_adapter_dir()),
+            "base_model": _model_for_adapter(),
+            "base_url": f"http://127.0.0.1:{PORT}/v1",
+            "port": PORT,
+            "baseline_score": baseline_score,
+            "tuned_score": tuned_score,
+            "promoted_at": _stamp(),
+        }
+        (REPORTS / "promoted.json").write_text(
+            json.dumps(promoted, ensure_ascii=False, indent=2), encoding="utf-8")
+        log(f"PROMOTED -> {promoted['adapter_dir']} (score {tuned_score} > {baseline_score})")
     log(f"verdict: {verdict}")
     return report_text
 

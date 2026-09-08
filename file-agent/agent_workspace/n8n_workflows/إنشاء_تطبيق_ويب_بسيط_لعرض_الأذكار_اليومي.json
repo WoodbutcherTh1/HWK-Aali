@@ -1,0 +1,81 @@
+{
+ "name": "Aali · إنشاء تطبيق ويب بسيط لعرض الأذكار اليومية",
+ "nodes": [
+  {
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "aali",
+    "responseMode": "responseNode",
+    "options": {}
+   },
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    -380,
+    0
+   ],
+   "id": "4049116548824a7f9d88cbf6"
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:5055/api/ask",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ message: $json.message || $json.text || 'مرحبا', sid: 'n8n-flow', mode: 'local' }) }}",
+    "options": {}
+   },
+   "name": "Aali Brain",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    -160,
+    0
+   ],
+   "id": "219c8290512e4175ab1eb76b"
+  },
+  {
+   "parameters": {
+    "respondWith": "allIncomingItems",
+    "options": {}
+   },
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    60,
+    0
+   ],
+   "id": "ff3a37ca3c954edc8110f420"
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "Aali Brain",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Aali Brain": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ },
+ "pinData": {}
+}

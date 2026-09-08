@@ -1,0 +1,61 @@
+{
+ "name": "Aali · إنشاء ملف app_config.yaml في arena_r2 لخدمة ويب ",
+ "nodes": [
+  {
+   "parameters": {
+    "pollTimes": [
+     {
+      "item": {
+       "mode": "everyHour"
+      }
+     }
+    ],
+    "simple": true,
+    "filters": {}
+   },
+   "name": "Gmail Trigger",
+   "type": "n8n-nodes-base.gmailTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    -380,
+    0
+   ],
+   "id": "a03d2278534248aa9d4c73ed"
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:5055/api/ask",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ message: 'بريد جديد\\nمن: ' + ($json.from || ($json.headers && $json.headers.from) || 'unknown') + '\\nالموضوع: ' + ($json.subject || ($json.headers && $json.headers.subject) || '(no subject)') + '\\n\\n' + ($json.textPlain || $json.text || $json.snippet || '(no body)'), sid: 'n8n-flow', mode: 'local' }) }}",
+    "options": {}
+   },
+   "name": "Aali Brain",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    -160,
+    0
+   ],
+   "id": "0127b24dca434cc791c8c68b"
+  }
+ ],
+ "connections": {
+  "Gmail Trigger": {
+   "main": [
+    [
+     {
+      "node": "Aali Brain",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ },
+ "pinData": {}
+}

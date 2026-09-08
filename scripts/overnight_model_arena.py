@@ -79,7 +79,7 @@ def post(url: str, payload: dict, headers: dict, timeout: int) -> dict | None:
 def ask_aali(q: str) -> str:
     key = KEY_FILE.read_text(encoding="utf-8").strip()
     body = post(f"{AALI}/api/ask", {"message": q},
-                {"Content-Type": "application/json", "X-API-Key": key}, 600)
+                {"Content-Type": "application/json", "X-API-Key": key}, 90)
     if not body:
         return ""
     return str(body.get("reply", "")) if body.get("ok") else f"[error] {body.get('error')}"
@@ -98,10 +98,13 @@ def ask_model(model: str, q: str) -> str:
 
 
 def grade(q: dict, answer: str) -> dict:
+    # A transport failure or timeout produced "[error] ..."/"[unavailable] ...";
+    # that is not an answer, so it must fail every check instead of scoring 6/7.
+    errored = answer.startswith("[unavailable]") or answer.startswith("[error]")
     checks = {
-        "nonempty": bool(answer.strip()) and not answer.startswith("[unavailable]"),
+        "nonempty": bool(answer.strip()) and not errored,
         "no_json_leak": '{"content"' not in answer and '"]' not in answer[:5],
-        "no_echo": answer.strip()[:40] != q.strip()[:40],
+        "no_echo": answer.strip()[:40] != str(q["q"]).strip()[:40],
         "lang_ok": True,
         "correct": True,
         "complete": len(answer.strip()) >= 15 or bool(answer.strip()),
@@ -113,6 +116,8 @@ def grade(q: dict, answer: str) -> dict:
     expected = q.get("expect_number")
     if expected:
         checks["correct"] = expected.lower() in answer.lower()
+    if errored:
+        checks = dict.fromkeys(checks, False)
     score = sum(1 for v in checks.values() if v)
     return checks, score
 
