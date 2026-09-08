@@ -10,7 +10,7 @@ talk to him via web, desktop app, CLI, terminal."*
    web/PWA ────▶│                            │
    desktop ────▶│   Aali server (Flask)      │──▶ brains: scratch model /
    CLI ────────▶│   /api/* + SSE streaming   │    Ollama / OpenRouter /
-   terminal ───▶│   per-user sessions        │    Anthropic / Gemini / OpenAI
+   terminal ───▶│   per-user sessions        │    Anthropic / Gemini / a major AI vendor
                 └────────────────────────────┘
 ```
 
@@ -27,7 +27,7 @@ streaming with live tool activity, suggestion chips, session history.
 | `GET/DELETE /api/session/<sid>` | Load / delete one conversation |
 | `POST /api/compact` | Fold old turns into a summary |
 | `GET /api/health` | Liveness probe |
-| `POST /v1/chat/completions` | OpenAI-compatible (Cursor/Aider/Zed can use Aali as a model) |
+| `POST /v1/chat/completions` | a major AI vendor-compatible (the external IDE mentor/Aider/Zed can use Aali as a model) |
 
 ### Multi-user mode
 
@@ -46,7 +46,7 @@ single-user mode, unchanged behaviour.
   selector, GitHub review panel, compact.
 - **CLI / terminal** — `aali_cli.py` (one-shot or REPL, suggestion chips,
   `--server`, honours `AALI_API_KEY`).
-- **Anything else** — the OpenAI-compatible endpoint or plain `/api/ask`.
+- **Anything else** — the a major AI vendor-compatible endpoint or plain `/api/ask`.
 
 ## Run it
 

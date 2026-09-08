@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>دليل تشغيل آلي</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: #16181d; background: #ffffff;
+    font-family: "Tajawal", "Segoe UI", system-ui, sans-serif;
+    font-size: 12.5pt; line-height: 1.9;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    border-bottom: 3px solid #e8b34b; padding-bottom: 14px; margin-bottom: 18px;
+  }
+  .logo {
+    width: 52px; height: 52px; border-radius: 14px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #fdf3dd; color: #b67f2c; font-size: 26px;
+    border: 1px solid #ecd9ae;
+  }
+  h1 { margin: 0; font-size: 19pt; }
+  .sub { margin: 2px 0 0; color: #6b6f7a; font-size: 10.5pt; }
+  h2 {
+    font-size: 13.5pt; margin: 22px 0 8px; color: #8a5a13;
+    border-inline-start: 4px solid #e8b34b; padding-inline-start: 9px;
+  }
+  section { margin-bottom: 6px; }
+  .path {
+    direction: ltr; text-align: left; unicode-bidi: embed;
+    background: #f4f5f7; border: 1px solid #dcdfe5; border-radius: 8px;
+    padding: 7px 11px; margin: 7px 0;
+    font-family: Consolas, monospace; font-size: 10.5pt; color: #1d2a44;
+    display: inline-block; min-width: 40%;
+  }
+  .mono {
+    direction: ltr; unicode-bidi: embed;
+    font-family: Consolas, monospace; font-size: 10pt;
+    background: #f4f5f7; border: 1px solid #dcdfe5; border-radius: 5px;
+    padding: 1px 6px; color: #1d2a44; white-space: nowrap;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 9px 0; }
+  th, td { border: 1px solid #dcdfe5; padding: 7px 10px; text-align: start; font-size: 11pt; }
+  th { background: #fdf3dd; color: #7a5410; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  ol, ul { margin: 7px 0; padding-inline-start: 22px; }
+  li { margin: 3px 0; }
+  .note {
+    background: #fffbe8; border: 1px solid #ecd9ae; border-radius: 8px;
+    padding: 8px 12px; font-size: 10.5pt; color: #6b5413; margin: 9px 0;
+  }
+  footer {
+    margin-top: 22px; padding-top: 10px; border-top: 1px solid #dcdfe5;
+    color: #8a8e98; font-size: 9.5pt; text-align: center;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">✦</div>
+  <div>
+    <h1>آلي — دليل التشغيل السريع</h1>
+    <p class="sub">أين أجد التطبيق؟ كيف أشغّله؟ من سجّل لديّ؟</p>
+  </div>
+</header>
+
+<section>
+  <h2>١. من أين أشغّل آلي؟</h2>
+  <p>مشروع آلي موجود على هذا الجهاز في المجلد:</p>
+  <div class="path">C:\Users\HmamK\OneDrive\Desktop\HWK-Aali-main</div>
+  <p>وكل ما تحتاجه هو تشغيل ملف واحد:</p>
+  <div class="path">scripts\start_app.bat</div>
+  <ol>
+    <li>افتح المجلد أعلاه من مستكشف الملفات.</li>
+    <li>ادخل إلى مجلد <b>scripts</b> ثم شغّل <b>start_app.bat</b> (نقرة مزدوجة).</li>
+    <li>ستظهر نافذة سوداء — <b>اتركها مفتوحة</b>، فهي الخادم الذي يشغّل آلي. إغلاقها يوقف آلي.</li>
+  </ol>
+  <p class="note">خيار إضافي: <b>scripts\start_all.bat</b> يشغّل خدمات متعددة إن كنت تستخدمها.</p>
+</section>
+
+<section>
+  <h2>٢. روابط آلي (بعد التشغيل مباشرة)</h2>
+  <table>
+    <tr><th>ماذا تريد؟</th><th>الرابط</th></tr>
+    <tr><td>المحادثة مع آلي (الواجهة)</td><td><span class="mono">http://127.0.0.1:5055/ui/</span></td></tr>
+    <tr><td>تسجيل مستخدم جديد (يُصدر مفتاحاً)</td><td><span class="mono">http://127.0.0.1:5055/signup</span></td></tr>
+    <tr><td>لوحة تحكم المدير</td><td><span class="mono">http://127.0.0.1:5055/admin</span></td></tr>
+    <tr><td>من الجوال أو جهاز آخر على نفس الشبكة</td><td><span class="mono">http://عنوان-جهازك:5055/ui/</span></td></tr>
+  </table>
+  <p class="note">لمعرفة عنوان جهازك على الشبكة: افتح CMD واكتب <span class="mono">ipconfig</span> ثم خذ رقم <b>IPv4 Address</b> (مثال: <span class="mono">192.168.1.10</span>).</p>
+</section>
+
+<section>
+  <h2>٢.٥ الوصول من الإنترنت + ملفات للتنزيل</h2>
+  <p>صفحة <span class="mono" dir="ltr">http://127.0.0.1:5055/download</span> فيها كل شيء:</p>
+  <ul>
+    <li><b>آلي — Internet:</b> يشغّل نفق Cloudflare مجاني ويعطيك رابطاً عاماً مؤقتاً — أرسله لأي شخص في أي مكان بالعالم (بدون إعدادات راوتر). الرابط صالح ما دامت نافذته مفتوحة.</li>
+    <li><b>آلي — Desktop:</b> ملف واحد يفتح آلي بنافذة تطبيق مستقلة على أي Windows — نقرة مزدوجة بلا تثبيت.</li>
+    <li><b>آلي — Connect:</b> الملف الذي ترسله لأصدقائك — يفتح لهم صفحة التسجيل ثم المحادثة مباشرة.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>٣. لوحة تحكم المدير</h2>
+  <ol>
+    <li>شغّل الخادم (الخطوة ١) ثم افتح <span class="mono">http://127.0.0.1:5055/admin</span>.</li>
+    <li>أدخل <b>مفتاح المدير</b> — وهو قيمة <span class="mono">AALI_API_KEY</span> التي تضعها قبل تشغيل الخادم (متغير بيئة على الجهاز). في وضع المستخدم الواحد بدون مفتاح أضف <span class="mono">?demo=1</span> للرابط للمعاينة.</li>
+  </ol>
+  <p><b>ماذا تفعل من اللوحة؟</b></p>
+  <ul>
+    <li><b>إصدار مفتاح لمستخدم:</b> اكتب اسم العميل في خانة «اسم العميل» واضغط «إصدار» — يظهر المفتاح <b>مرة واحدة فقط</b>، انسخه وسلّمه للمستخدم فوراً.</li>
+    <li><b>إلغاء مفتاح:</b> زر «إلغاء» بجانب أي مستخدم — يصبح مفتاحه غير صالح فوراً.</li>
+    <li><b>متابعة الاستخدام:</b> عدد الطلبات والأحرف وآخر استخدام لكل مفتاح، مع إحصاءات عامة في أعلى اللوحة.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>٤. قائمة المستخدمين — من سجّل لدى آلي ومتى؟</h2>
+  <p>من نفس اللوحة <span class="mono">/admin</span>: الجدول الرئيسي يعرض كل من سجّل لديك:</p>
+  <ul>
+    <li><b>العميل:</b> اسم المستخدم أو التطبيق الذي سجّل.</li>
+    <li><b>تاريخ التسجيل:</b> تاريخ ووقت إنشاء مفتاحه (يُعرض بالعربية).</li>
+    <li><b>الحالة:</b> نشط أو مُلغى، مع عدد الطلبات وآخر استخدام.</li>
+  </ul>
+  <p>يمكن لأي مستخدم التسجيل بنفسه من صفحة <span class="mono">/signup</span> وسيظهر تلقائياً في جدول اللوحة. لمنع التسجيل الذاتي كلياً شغّل الخادم مع <span class="mono">AALI_OPEN_SIGNUP=0</span>.</p>
+  <p class="note">السجل محفوظ في: <span class="mono">file-agent\api_keys.jsonl</span> — المفاتيح مجمّعة (SHA-256) ولا تُخزَّن صريحة أبداً، لذلك لا يمكن استعادتها بعد الإصدار.</p>
+</section>
+
+<section>
+  <h2>٥. مشاكل شائعة وحلولها</h2>
+  <table>
+    <tr><th>المشكلة</th><th>الحل</th></tr>
+    <tr><td>الواجهة تقول «غير متصل»</td><td>تأكد أن نافذة الخادم السوداء ما زالت مفتوحة، ثم حدّث الصفحة</td></tr>
+    <tr><td>المنفذ 5055 مستخدم من برنامج آخر</td><td>شغّل الخادم بمنفذ مختلف: <span class="mono">set AALI_DEFAULT_PORT=5056</span> ثم شغّل التطبيق</td></tr>
+    <tr><td>لا يفتح من الجوال</td><td>استخدم عنوان IPv4 الخاص بالجهاز بدل <span class="mono">127.0.0.1</span>، وتأكد أنكما على نفس الشبكة</td></tr>
+    <tr><td>نسيت مفتاح المدير</td><td>أعد تشغيل الخادم بعد وضع <span class="mono">AALI_API_KEY</span> بقيمة جديدة، أو استخدم <span class="mono">?demo=1</span> للمعاينة المحلية</td></tr>
+  </table>
+</section>
+
+<footer>
+  آلي — عقل يعمل على خادمك · 2026
+</footer>
+</body>
+</html>

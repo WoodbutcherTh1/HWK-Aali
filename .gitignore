@@ -15,3 +15,9 @@ file-agent/api_keys.jsonl
 
 # One-off device-side edit helper scripts (not part of the project)
 _scratch/
+
+# Desktop exe build artifacts (rebuilt via scripts\build_desktop.bat)
+.venv-desktop/
+build-desktop/work/
+build-desktop/dist/
+build-desktop/installer/
