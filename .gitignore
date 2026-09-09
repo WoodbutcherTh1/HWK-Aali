@@ -11,6 +11,8 @@ node_modules/
 file-agent/logs/*.log
 file-agent/sessions.jsonl
 file-agent/api_keys.jsonl
+# user uploads + agent sandbox (runtime data, never commit)
+file-agent/agent_workspace/
 .pytest_cache/
 
 # One-off device-side edit helper scripts (not part of the project)
