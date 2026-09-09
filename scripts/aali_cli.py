@@ -12,9 +12,10 @@ Usage:
     .venv\\Scripts\\python.exe scripts\\aali_cli.py --theme matrix
     .venv\\Scripts\\python.exe scripts\\aali_cli.py --base http://127.0.0.1:5055
 
-Keys: Ctrl+C cancels the current request (or exits on the prompt);
+Keys: ↑/↓ history · ←/→ edit · TAB complete · Ctrl+C cancel
       /exit quits, /new starts a fresh session, /open N resumes,
       /clear clears the screen, /theme switches the colour theme,
+      /tools lists Aali's abilities, /multi pastes multi-line text,
       /help lists commands.
 """
 from __future__ import annotations
@@ -331,8 +332,350 @@ def one_shot(base: str, question: str, api_key: str = "") -> None:
         sys.exit(1)
 
 
+# ----------------------------------------------------------------- line editor
+HISTORY_FILE = Path.home() / ".aali_cli_history"
+HISTORY_MAX = 500
+
+_KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
+_SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear",
+                   "/theme", "/tools", "/multi", "/sid")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _make_completer(base: str):
+    """TAB completion: slash commands, and theme/tool names after those."""
+    tools_cache: list[str] | None = None
+
+    def completer(text: str) -> list[str]:
+        nonlocal tools_cache
+        if text.startswith("/theme "):
+            arg = text[len("/theme "):]
+            return [t for t in THEMES if t.startswith(arg)]
+        if text.startswith("/tools "):
+            arg = text[len("/tools "):]
+            if tools_cache is None:
+                try:
+                    data = http_json(base, "/api/tools", timeout=3)
+                    tools_cache = [t["name"] for t in data.get("tools", [])]
+                except Exception:  # noqa: BLE001
+                    tools_cache = []
+            return [t for t in tools_cache if t.startswith(arg)]
+        if text.startswith("/"):
+            return [c for c in _SLASH_COMMANDS if c.startswith(text)]
+        return []
+
+    return completer
+
+
+class LineEditor:
+    """Raw-mode line editor: ↑/↓ history, ←/→ editing, TAB completion, and
+    paste-safe multi-line input (a fast burst of 40+ chars containing
+    newlines — i.e. a pasted code block — opens continuation lines instead
+    of submitting).
+
+    Standard library only (msvcrt / termios+tty) so the PyInstaller exe
+    stays dependency-free. Falls back to plain input() when stdin is not a
+    TTY, and to injected keys (`read(keys=…)`) for tests.
+    """
+
+    BURST_MIN = 40  # kept for reference: bursts are detected by newline, not size
+
+    def __init__(self, history_path: Path, completer=None):
+        self.path = history_path
+        self.completer = completer
+        self.history: list[str] = []
+        self._load()
+
+    # ---- history storage -------------------------------------------------
+    def _load(self) -> None:
+        try:
+            self.history = [
+                h for h in (l.rstrip("\n") for l in self.path
+                            .read_text(encoding="utf-8", errors="replace")
+                            .splitlines())
+                if h.strip()
+            ][-HISTORY_MAX:]
+        except OSError:
+            self.history = []
+
+    def remember(self, line: str) -> None:
+        if not line.strip() or (self.history and self.history[-1] == line):
+            return
+        self.history = (self.history + [line])[-HISTORY_MAX:]
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text("\n".join(self.history) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    # ---- key readers ------------------------------------------------------
+    @staticmethod
+    def _raw_available() -> bool:
+        try:
+            return sys.stdin.isatty()
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
+    def _reader_windows():
+        import msvcrt
+
+        def read_key() -> str:
+            ch = msvcrt.getwch()
+            if ch in ("\x00", "\xe0"):  # special-key prefix
+                code = msvcrt.getwch()
+                return {"H": "UP", "P": "DOWN", "K": "LEFT", "M": "RIGHT",
+                        "S": "DEL", "G": "HOME", "O": "END"}.get(code, "")
+            if ch == "\t":
+                return "TAB"
+            if ch in ("\r", "\n"):
+                return "ENTER"
+            if ch in ("\x7f", "\x08"):
+                return "BS"
+            if ch == "\x03":
+                raise KeyboardInterrupt
+            return ch
+
+        def poll() -> str:
+            if msvcrt.kbhit():
+                return read_key()
+            time.sleep(0.012)
+            return msvcrt.getwch() if msvcrt.kbhit() else ""
+
+        return read_key, poll
+
+    @staticmethod
+    def _reader_posix():
+        import select
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setcbreak(fd)  # no echo/canonical; ISIG stays on (Ctrl+C works)
+
+        def read_key() -> str:
+            ch = sys.stdin.read(1)
+            if ch == "\x1b":
+                if not select.select([sys.stdin], [], [], 0.05)[0]:
+                    return ""  # bare Escape — ignore
+                seq = sys.stdin.read(2)
+                return {"[A": "UP", "[B": "DOWN", "[D": "LEFT", "[C": "RIGHT",
+                        "[3~": "DEL", "[H": "HOME", "[F": "END"}.get(seq, "")
+            if ch == "\t":
+                return "TAB"
+            if ch in ("\r", "\n"):
+                return "ENTER"
+            if ch in ("\x7f", "\x08"):
+                return "BS"
+            return ch
+
+        def poll() -> str:
+            if select.select([sys.stdin], [], [], 0.012)[0]:
+                return read_key()
+            return ""
+
+        return read_key, poll, lambda: termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+    # ---- rendering ---------------------------------------------------------
+    @staticmethod
+    def _rows(n: int, width: int) -> int:
+        """Terminal rows needed for `n` visible columns (≥1)."""
+        return max(1, -(-n // width))
+
+    def _redraw(self, out, prompt: str, prompt_len: int,
+                lines: list[str], li: int, pos: int, color: bool) -> None:
+        width = shutil.get_terminal_size((100, 24)).columns
+        rows = [self._rows(prompt_len + len(lines[0]), width)]
+        rows += [self._rows(len(l), width) for l in lines[1:]]
+        out.write("\r" + "\x1b[1A" * (sum(rows) - 1) + "\x1b[J")
+        out.write(prompt + lines[0]
+                  + (("\n" + "\n".join(lines[1:])) if len(lines) > 1 else ""))
+        col = pos + (prompt_len if li == 0 else 0)
+        below = sum(rows[i] for i in range(li + 1, len(lines))) \
+            + rows[li] - 1 - col // width
+        if below > 0:
+            out.write("\x1b[1A" * below)
+        out.write("\r\x1b[{}C".format(col % width))
+        out.flush()
+
+    # ---- main read loop -----------------------------------------------------
+    def read(self, prompt: str, color: bool = True,
+             keys: list[str] | None = None) -> str | None:
+        """Read one logical input (single- or multi-line). None = cancelled."""
+        if keys is None and not self._raw_available():
+            return input(prompt) or None
+        out = sys.stdout
+        is_win = os.name == "nt"
+        restore = None
+        if keys is not None:
+            seq = list(keys)
+
+            def read_key() -> str:
+                if not seq:
+                    raise KeyboardInterrupt  # exhausted injection = cancel
+                return seq.pop(0)
+
+            poll = lambda: ""  # noqa: E731
+        elif is_win:
+            read_key, poll = self._reader_windows()
+        else:
+            read_key, poll, restore = self._reader_posix()
+        prompt_len = len(_ANSI_RE.sub("", prompt))
+        lines, li, pos = [""], 0, 0
+        ml = False  # multi-line mode
+        self._hidx, self._draft = len(self.history), ""
+        out.write(prompt)
+        out.flush()
+        try:
+            while True:
+                k = read_key()
+                if k == "":
+                    continue
+                if k in _KEYS:
+                    if k == "ENTER":
+                        if not ml and lines[li].endswith("\\"):
+                            # bash-style continuation: trailing \ opens a line
+                            lines[li] = lines[li][:-1]
+                            lines.insert(li + 1, "")
+                            li, pos = li + 1, 0
+                            ml = True
+                            self._redraw(out, prompt, prompt_len, lines, li, pos, color)
+                            continue
+                        if ml:
+                            if lines[li].strip() == "":
+                                lines.pop(li)
+                                li = max(0, li - 1)
+                                pos = len(lines[li])
+                                break  # submit on empty line
+                            lines.insert(li + 1, "")
+                            li, pos = li + 1, 0
+                        else:
+                            break  # submit
+                    elif k == "BS":
+                        if pos > 0:
+                            lines[li] = lines[li][:pos - 1] + lines[li][pos:]
+                            pos -= 1
+                        elif li > 0:  # merge into previous line
+                            prev = lines[li - 1]
+                            lines[li - 1] = prev + lines[li]
+                            del lines[li]
+                            li, pos = li - 1, len(prev)
+                    elif k == "DEL":
+                        if pos < len(lines[li]):
+                            lines[li] = lines[li][:pos] + lines[li][pos + 1:]
+                        elif li < len(lines) - 1:
+                            lines[li] += lines.pop(li + 1)
+                    elif k == "LEFT":
+                        if pos > 0:
+                            pos -= 1
+                        elif li > 0:
+                            li, pos = li - 1, len(lines[li - 1])
+                    elif k == "RIGHT":
+                        if pos < len(lines[li]):
+                            pos += 1
+                        elif li < len(lines) - 1:
+                            li, pos = li + 1, 0
+                    elif k in ("UP", "DOWN"):
+                        if ml:
+                            li = max(0, li - 1) if k == "UP" \
+                                else min(len(lines) - 1, li + 1)
+                            pos = min(pos, len(lines[li]))
+                        elif k == "UP" and self.history:
+                            if self._hidx == len(self.history):
+                                self._draft = lines[0]
+                            if self._hidx > 0:
+                                self._hidx -= 1
+                                lines[0] = self.history[self._hidx]
+                                pos = len(lines[0])
+                        elif k == "DOWN" and self._hidx < len(self.history):
+                            self._hidx += 1
+                            lines[0] = self.history[self._hidx] \
+                                if self._hidx < len(self.history) else self._draft
+                            pos = len(lines[0])
+                    elif k == "HOME":
+                        pos = 0
+                    elif k == "END":
+                        pos = len(lines[li])
+                    elif k == "TAB" and self.completer and li == 0:
+                        cands = sorted(set(self.completer(lines[0][:pos])))
+                        if cands:
+                            common = os.path.commonprefix(cands)
+                            if len(common) > len(lines[0][:pos]):
+                                lines[0] = common + lines[0][pos:]
+                                pos = len(common)
+                            elif len(cands) > 1:
+                                out.write("\n"
+                                          + paint("  " + "  ".join(cands), "grey",
+                                                  enabled=color) + "\n")
+                                out.write(prompt + lines[0] + "\r\x1b[{}C".format(
+                                    pos + prompt_len))
+                                out.flush()
+                    self._redraw(out, prompt, prompt_len, lines, li, pos, color)
+                    continue
+                # text burst: 1+ printable chars; a paste may contain newlines
+                chunk = k + (poll() or "")
+                if "\n" in chunk or "\r" in chunk:
+                    chunk = chunk.replace("\r\n", "\n").replace("\r", "\n")
+                    parts = chunk.split("\n")
+                    if len(parts) == 2 and parts[1] == "":
+                        # single-line paste with trailing newline → submit it
+                        lines[li] = lines[li][:pos] + parts[0] + lines[li][pos:]
+                        break
+                    ml = True  # real multi-line paste → continuation lines
+                    for i, part in enumerate(parts):
+                        if i:
+                            lines.insert(li + 1, "")
+                            li += 1
+                            pos = 0
+                        lines[li] = lines[li][:pos] + part + lines[li][pos:]
+                        pos += len(part)
+                else:
+                    lines[li] = lines[li][:pos] + chunk + lines[li][pos:]
+                    pos += len(chunk)
+                self._redraw(out, prompt, prompt_len, lines, li, pos, color)
+        except (KeyboardInterrupt, EOFError):
+            out.write("\r" + paint("✻ cancelled", "cyan", enabled=color))
+            return None
+        finally:
+            if restore:
+                restore()
+        text = "\n".join(lines).strip()
+        out.write("\r\x1b[J")  # clear the rendered input; the REPL reprints it
+        out.flush()
+        if text:
+            self.remember(text)
+        return text or None
+
+
 # ----------------------------------------------------------------- REPL
 SLASH = "/\\/_-"  # harmless constant for lint friendliness
+
+# Static fallback when /api/tools is unreachable — keep in sync with the
+# server's tool registry (agent_loop._ollama_core_tools).
+_TOOLS_FALLBACK: list[tuple[str, list[tuple[str, str]]]] = [
+    ("ملفات — files", [
+        ("write_file", "create or overwrite a file"),
+        ("append_file", "append text to a file"),
+        ("read_file", "read a text file"),
+        ("list_files", "list workspace files and folders"),
+        ("search_files", "search text across files"),
+        ("make_directory", "create a folder"),
+        ("move_file", "move or rename files"),
+        ("delete_file", "delete a file"),
+    ]),
+    ("أوامر — commands", [
+        ("run_command", "run allowed commands (python/pytest/node/npm/git)"),
+    ]),
+    ("وسائط — media", [
+        ("read_image", "OCR text inside images"),
+        ("read_document", "read PDF / Word / Excel documents"),
+        ("analyze_video", "analyze video (frame OCR + audio transcript)"),
+    ]),
+    ("أتمتة — automation", [
+        ("make_n8n_workflow", "generate an importable n8n workflow"),
+    ]),
+]
 
 
 def repl(base: str, api_key: str = "") -> None:
@@ -343,6 +686,35 @@ def repl(base: str, api_key: str = "") -> None:
     sid = "cli-" + str(int(time.time()))
     last_suggestions: list[str] = []
     cols = {"user": "gold", "aali": "green", "info": "cyan", "warn": "red"}
+    editor = LineEditor(HISTORY_FILE, _make_completer(base))
+
+    def send(text: str) -> None:
+        """One full chat turn: stream, confirm dangerous actions, render."""
+        nonlocal last_suggestions
+        result = stream_ask(base, text, sid, api_key=api_key)
+        if not result:
+            return
+        reply = str(result.get("reply", ""))
+        if result.get("needs_confirm"):
+            act = result.get("pending_action") or {}
+            print(paint("⚠ ", "red", enabled=color) + paint(
+                f"آلي يطلب إذناً بتنفيذ: {act.get('tool')} {act.get('arguments', {})}",
+                "bold", enabled=color))
+            ans = input(paint("   allow? [y/N] ", "gold", enabled=color)).strip().lower()
+            if ans == "y":
+                result = stream_ask(base, text, sid, confirm=True, api_key=api_key)
+                reply = str(result.get("reply", ""))
+        print()
+        print(paint("● ", "gold", enabled=color) + paint("آلي", "bold", "green", enabled=color))
+        render_reply(reply, color)
+        suggestions = result.get("suggestions") or []
+        if suggestions:
+            last_suggestions = [str(s) for s in suggestions][:3]
+            print()
+            for i, s in enumerate(last_suggestions):
+                print(paint(f"  [{i + 1}] ", "gold", enabled=color)
+                      + paint(s, "cyan", enabled=color))
+        print()
 
     def say(tag: str, text: str, style: str) -> None:
         print(paint(f"{tag} ", style, "bold", enabled=color) + text)
@@ -350,10 +722,7 @@ def repl(base: str, api_key: str = "") -> None:
     while True:
         try:
             prompt = paint("❯ ", "gold", enabled=color)
-            try:
-                message = input(prompt).strip()
-            except EOFError:
-                break
+            message = editor.read(prompt, color)
             if not message:
                 continue
             if message.startswith("/"):
@@ -365,7 +734,9 @@ def repl(base: str, api_key: str = "") -> None:
                 if cmd == "/help":
                     print(paint("  /new new session · /open N resume session N · /clear clear screen", "dim"))
                     print(paint("  /theme switch colours (gold · matrix · ocean) — /theme alone previews", "dim"))
+                    print(paint("  /tools what Aali can do · /multi paste a multi-line block", "dim"))
                     print(paint("  /sid show session id · /exit quit · Ctrl+C cancel current run", "dim"))
+                    print(paint("  TAB completes commands · ↑/↓ history · trailing \\ continues the line", "dim"))
                     continue
                 if cmd == "/theme":
                     if arg.strip():
@@ -425,34 +796,56 @@ def repl(base: str, api_key: str = "") -> None:
                     except Exception as exc:  # noqa: BLE001
                         say("✗", f"session fetch failed: {exc}", "warn")
                     continue
+                if cmd == "/tools":
+                    try:
+                        data = http_json(base, "/api/tools", timeout=4)
+                    except Exception:  # noqa: BLE001
+                        data = None
+                    print()
+                    if data and data.get("tools"):
+                        rows = [(str(t.get("name", "")), str(t.get("description", "")))
+                                for t in data["tools"]]
+                        print(paint(f"  آلي can use {len(rows)} tools (live from the server):",
+                                    "bold", "gold", enabled=color))
+                        for name, desc in rows:
+                            print(paint("  ● ", "green", enabled=color)
+                                  + paint(f"{name:<18}", "bold", enabled=color)
+                                  + paint(desc, "grey", enabled=color))
+                    else:
+                        print(paint("  آلي's tools (server unreachable — built-in list):",
+                                    "bold", "gold", enabled=color))
+                        for gname, items in _TOOLS_FALLBACK:
+                            print(paint(f"  {gname}", "bold", "cyan", enabled=color))
+                            for name, desc in items:
+                                print(paint("    ● ", "green", enabled=color)
+                                      + paint(f"{name:<18}", "bold", enabled=color)
+                                      + paint(desc, "grey", enabled=color))
+                    print()
+                    continue
+                if cmd == "/multi":
+                    say("✻", "multi-line — الصق أو اكتب، وسطر فارغ للإرسال (Ctrl+C إلغاء)", "info")
+                    parts: list[str] = []
+                    while True:
+                        try:
+                            line = input(paint("… ", "gold", enabled=color))
+                        except (EOFError, KeyboardInterrupt):
+                            parts = []
+                            break
+                        if not line.strip():
+                            break
+                        parts.append(line)
+                    if parts:
+                        send("\n".join(parts))
+                    else:
+                        say("✻", "cancelled", "info")
+                    continue
                 say("✗", f"أمر غير معروف: {cmd} — جرّب /help", "warn")
                 continue
 
-            # plain chat turn
-            result = stream_ask(base, message, sid, api_key=api_key)
-            if not result:
-                continue
-            reply = str(result.get("reply", ""))
-            if result.get("needs_confirm"):
-                act = result.get("pending_action") or {}
-                print(paint("⚠ ", "red", enabled=color) + paint(
-                    f"آلي يطلب إذناً بتنفيذ: {act.get('tool')} {act.get('arguments', {})}",
-                    "bold", enabled=color))
-                ans = input(paint("   allow? [y/N] ", "gold", enabled=color)).strip().lower()
-                if ans == "y":
-                    result = stream_ask(base, message, sid, confirm=True, api_key=api_key)
-                    reply = str(result.get("reply", ""))
-            print()
-            print(paint("● ", "gold", enabled=color) + paint("آلي", "bold", "green", enabled=color))
-            render_reply(reply, color)
-            suggestions = result.get("suggestions") or []
-            if suggestions:
-                last_suggestions = [str(s) for s in suggestions][:3]
-                print()
-                for i, s in enumerate(last_suggestions):
-                    print(paint(f"  [{i + 1}] ", "gold", enabled=color)
-                          + paint(s, "cyan", enabled=color))
-            print()
+            # plain chat turn (single- or multi-line input)
+            send(message)
+        except EOFError:
+            break
         except KeyboardInterrupt:
             print(paint("\n✻ (مرتين = خروج) اكتب /exit للمغادرة", "dim"))
             try:

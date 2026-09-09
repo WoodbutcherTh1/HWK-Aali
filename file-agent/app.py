@@ -508,6 +508,14 @@ def api_health():
     return {"ok": True, "service": "aali", "workspace": str(WORKSPACE_ROOT)}
 
 
+@app.route("/api/tools", methods=["GET"])
+def api_tools():
+    """Catalogue of Aali's abilities (name + description) for clients.
+    Rendered by the CLI's /tools command and available to the web UI."""
+    from agent_loop import tool_specs
+    return {"ok": True, "tools": tool_specs()}
+
+
 @app.route("/api/file/<path:relpath>")
 def api_file(relpath: str):
     """Serve a workspace file (images embedded in chat replies) safely.

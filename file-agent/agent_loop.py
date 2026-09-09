@@ -592,6 +592,16 @@ def _ollama_core_tools() -> list[dict[str, Any]]:
     ]
 
 
+def tool_specs() -> list[dict[str, str]]:
+    """Public catalogue of Aali's tools (name + Arabic description) for the
+    /api/tools endpoint — clients (CLI /tools, web) render this list."""
+    return [
+        {"name": spec["function"]["name"],
+         "description": spec["function"]["description"]}
+        for spec in _ollama_core_tools()
+    ]
+
+
 def _normalize_tool_args(tool_name: str, raw_args: dict[str, Any]) -> dict[str, Any]:
     """Mechanical argument repair for small local models.
 
