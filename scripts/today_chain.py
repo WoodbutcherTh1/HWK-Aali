@@ -18,6 +18,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wait_gpu_free import wait_until_safe  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 NIGHT_LOG = Path("D:/hwk-data/soup_pipeline_night.log")
 CHAIN_LOG = Path("D:/hwk-data/morning_chain.log")
@@ -39,26 +42,19 @@ def wait_vram_clear(timeout_s: int = 300) -> None:
     On PROMOTE the pipeline leaves the promoted adapter server running
     (by design - it IS the live brain), which holds several GB. Starting
     Phase B's trainer on top of it would OOM (lesson 2026-09-09 09:50).
+    Delegates to the shared gate (scripts/wait_gpu_free.py) so the check
+    matches every other launcher on this machine.
     """
-    deadline = time.monotonic() + timeout_s
-    last = -1
-    while time.monotonic() < deadline:
-        try:
-            out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=memory.used",
-                 "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=30,
-            ).stdout.strip().splitlines()
-            last = int(out[-1]) if out else 1 << 30
-        except (OSError, ValueError, subprocess.TimeoutExpired):
-            last = 1 << 30
-        if last < 1500:
-            log(f"VRAM clear ({last} MiB) - safe for Phase B")
-            return
-        time.sleep(10)
-    log(f"VRAM still busy after {timeout_s}s ({last} MiB) - Phase B may OOM; "
-        "if the promoted server is up, that is expected - stop it or move "
-        "Phase B to a free window")
+    ok, reason = wait_until_safe(
+        timeout_s=timeout_s,
+        on_wait=lambda why: log(f"VRAM busy: {why}"),
+    )
+    if ok:
+        log(f"VRAM clear - safe for Phase B ({reason})")
+    else:
+        log(f"VRAM still busy after {timeout_s}s ({reason}) - Phase B may OOM; "
+            "if the promoted server is up, that is expected - stop it or move "
+            "Phase B to a free window")
 
 
 def run_stage(name: str, cmd: list[str], out: Path) -> int:

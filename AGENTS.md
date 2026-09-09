@@ -153,6 +153,20 @@ in parallel:
   `web/src` now builds; dist served at `/ui/`), Dockerfile + compose for
   deployment, mock API for GPU-free UI testing (scripts/mock_aali_api.py).
   Docs: docs/desktop_app.md. Tests 46/46.
+- **GPU gate for Phase B launchers (2026-09-09)**: scripts/wait_gpu_free.py is
+  THE shared gate — library (card_is_safe / wait_until_safe /
+  python_compute_pids / vram_used_mib / training_log_idle_minutes) + CLI
+  (fail-closed, exit 2 = NO GO; logs to D:/hwk-data/gpu_gate.log) checking
+  python/soup/ptxas compute processes + VRAM <1500 MiB. Appended to
+  extend_context.bat before the trainer: a caller may run a stale in-memory
+  copy of its own code (the 11:27 today_chain predates its 12:00 VRAM-poll
+  fix) while cmd reads .bat launchers from disk at launch time — so the gate
+  protects every caller, old or new. Proven live 14:24: blocked during the
+  soup train, GO'd only when the card was truly idle, Phase B launched clean.
+  Refactor: soup_pipeline (gpu_free/wait_for_gpu/wait_vram_clear),
+  today_chain (wait_vram_clear) and night_caretaker (gpu_really_free/
+  training_state) now all delegate here — no per-script nvidia-smi polling
+  copies left; pipeline/caretaker keep their extra training-log-idle guard.
 - **Known gaps**: n8n webhook needs one manual activation click in the editor;
   ffmpeg installed but PATH needs refresh in new shells; web-mentor capture
   experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%); chat

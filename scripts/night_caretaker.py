@@ -31,6 +31,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+# Shared GPU gate (scripts/wait_gpu_free.py) - one source of truth for
+# "is the 8GB card free", used by every launcher on this machine.
+import wait_gpu_free as gate  # noqa: E402
+
 TRAINING_LOG = Path("D:/hwk-data/training.log")
 CARETAKER_LOG = Path("D:/hwk-data/caretaker.log")
 MORNING_REPORT = Path("D:/hwk-data/MORNING_REPORT.md")
@@ -73,16 +77,7 @@ def training_state() -> dict:
         state["log_idle_min"] = (time.time() - TRAINING_LOG.stat().st_mtime) / 60
     except OSError:
         pass
-    try:
-        out = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=pid,process_name",
-             "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=30,
-        ).stdout
-        state["process_alive"] = bool(
-            re.search(r"python", out, re.IGNORECASE))
-    except (OSError, subprocess.TimeoutExpired):
-        state["process_alive"] = False
+    state["process_alive"] = bool(gate.python_compute_pids())
     return state
 
 
@@ -130,20 +125,12 @@ def gpu_really_free() -> bool:
     train_scratch process check and its output is captured (not streamed to
     training.log), so the log-idle check alone looked 'free' while the GPU was
     fully busy - the caretaker then stacked jobs and OOM'd the pipeline. The
-    nvidia-smi compute-app list is the source of truth (same as soup_pipeline)."""
-    try:
-        out = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=pid,process_name",
-             "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=30,
-        ).stdout
-        busy = [line for line in out.splitlines()
-                if re.search(r"python|soup|ptxas", line, re.IGNORECASE)]
-        if busy:
-            log(f"GPU busy with: {busy}")
-            return False
-    except (OSError, subprocess.TimeoutExpired):
-        log("could not query GPU compute apps - refusing to assume free")
+    nvidia-smi compute-app list is the source of truth - delegated to the
+    shared gate (scripts/wait_gpu_free.py), same as soup_pipeline.
+    """
+    ok, reason = gate.card_is_safe()
+    if not ok:
+        log(f"GPU not free: {reason}")
         return False
     state = training_state()
     idle = state["log_idle_min"] is None or state["log_idle_min"] >= IDLE_MINUTES

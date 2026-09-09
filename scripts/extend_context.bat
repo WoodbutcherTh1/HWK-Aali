@@ -19,6 +19,18 @@ if not exist "D:\hwk-models\context-4k" mkdir "D:\hwk-models\context-4k"
 if not exist "D:\hwk-models\context-4k\checkpoint.pt" copy /Y "D:\hwk-models\scratch\checkpoint.pt" "D:\hwk-models\context-4k\checkpoint.pt"
 if not exist "D:\hwk-models\context-4k\trainer-state.pt" copy /Y "D:\hwk-models\scratch\trainer-state.pt" "D:\hwk-models\context-4k\trainer-state.pt"
 
+rem ===== GPU gate (2026-09-09): never launch onto a busy card =====
+rem A caller may hold a stale in-memory copy of its own python code
+rem (today_chain.py started 11:27 predates its 12:00 VRAM-poll fix), but cmd
+rem reads THIS file from disk at launch time - so the gate lives here and
+rem protects every caller (today_chain.py, after_phaseA.bat, queue_sft.py).
+rem Fail-closed: any non-zero exit means NO GO - training must not start.
+".venv\Scripts\python.exe" "%~dp0wait_gpu_free.py" --max-wait 7200
+if errorlevel 1 (
+  echo [extend_context] GPU gate BLOCKED Phase B - card not free. See D:\hwk-data\gpu_gate.log
+  exit /b 2
+)
+
 ".venv\Scripts\python.exe" train_scratch.py ^
   --data D:/hwk-data/tokens ^
   --corpora pile,arabic ^

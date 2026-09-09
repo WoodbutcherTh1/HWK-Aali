@@ -40,6 +40,11 @@ try:
 except ImportError:  # pragma: no cover
     psutil = None
 
+# Shared GPU gate (scripts/wait_gpu_free.py) - one source of truth for
+# "is the 8GB card free", used by every launcher on this machine.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import wait_gpu_free as gate  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 SOUP_EXE = Path(os.getenv("SOUP_EXE", "D:/hwk-tools/soup-venv/Scripts/soup.exe"))
 TRAINING_LOG = Path("D:/hwk-data/training.log")
@@ -78,20 +83,13 @@ def gpu_free() -> tuple[bool, str]:
     would never be true - only python-family processes (our trainer) block.
     The log-idle check is the primary signal: the trainer writes every ~1.5 min.
     """
-    try:
-        out = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=pid,process_name",
-             "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=30,
-        ).stdout.strip()
-        python_pids = [
-            line for line in out.splitlines()
-            if re.search(r"python|ptxas|soup", line, re.IGNORECASE)
-        ]
-        if python_pids:
-            return False, f"python-family compute processes on GPU: {python_pids}"
-    except (OSError, subprocess.TimeoutExpired):
-        return False, "could not query GPU state - refusing to assume"
+    # Shared gate (scripts/wait_gpu_free.py): nvidia-smi compute processes +
+    # VRAM level. The training-log-idle guard below stays local - it is this
+    # pipeline's extra protection against a trainer whose CUDA context has
+    # not registered yet.
+    ok, reason = gate.card_is_safe(require_training_log_idle=False)
+    if not ok:
+        return False, reason
     try:
         mtime = TRAINING_LOG.stat().st_mtime
         idle_minutes = (time.time() - mtime) / 60
@@ -110,14 +108,12 @@ def wait_for_gpu(no_wait: bool, timeout_hours: float = 12.0) -> bool:
             return False
         log(f"GPU confirmed free: {reason}")
         return True
-    deadline = time.time() + timeout_hours * 3600
-    while time.time() < deadline:
-        ok, reason = gpu_free()
-        if ok:
-            log(f"GPU confirmed free: {reason}")
-            return True
-        log(f"waiting (recheck in 5 min): {reason}")
-        time.sleep(300)
+    ok, reason = gate.wait_until_safe(
+        timeout_s=int(timeout_hours * 3600), poll_s=300,
+        on_wait=lambda why: log(f"waiting (recheck in 5 min): {why}"))
+    if ok:
+        log(f"GPU confirmed free: {reason}")
+        return True
     log("timed out waiting for a free GPU")
     return False
 
@@ -226,24 +222,14 @@ def wait_vram_clear(timeout_s: int = 240) -> None:
     releases its VRAM asynchronously, and the old fixed 15s sleep still
     OOM'd soup train (2026-09-09 09:50 - the server's ~4GB was still
     held when training started). Poll until the card is actually clear.
+    Delegates to the shared gate (scripts/wait_gpu_free.py).
     """
-    deadline = time.monotonic() + timeout_s
-    last_used = -1
-    while time.monotonic() < deadline:
-        try:
-            out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=memory.used",
-                 "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=30,
-            ).stdout.strip().splitlines()
-            last_used = int(out[-1]) if out else 1 << 30
-        except (OSError, ValueError, subprocess.TimeoutExpired):
-            last_used = 1 << 30
-        if last_used < 1500:
-            log(f"VRAM released ({last_used} MiB used) - ready to train")
-            return
-        time.sleep(10)
-    log(f"VRAM still busy after {timeout_s}s ({last_used} MiB) - training may OOM")
+    ok, reason = gate.wait_until_safe(timeout_s=timeout_s,
+                                      on_wait=lambda why: log(f"VRAM busy: {why}"))
+    if ok:
+        log(f"VRAM released ({reason}) - ready to train")
+    else:
+        log(f"VRAM still busy after {timeout_s}s ({reason}) - training may OOM")
 
 
 def run_training() -> bool:
