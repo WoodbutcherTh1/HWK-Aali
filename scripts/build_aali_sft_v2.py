@@ -47,6 +47,9 @@ DEFAULT_OUT = Path("D:/hwk-data/soup/sft_v2.jsonl")
 
 ALPACA_CAP = 4000          # the English core, capped hard
 MAX_TURNS = 40             # cap very long mentor sessions per episode
+MAX_TOTAL_CHARS = 2200     # drop rows too long for max_length=768 (soup.yaml):
+                           # a prompt that eats the whole window truncates the
+                           # assistant answer away and soup refuses the row.
 UPWEIGHT_FAILURES = 3      # failure episodes appear 3x (owner directive)
 _ARABIC_RE = re.compile(r"[\u0600-\u06FF]")
 
@@ -453,8 +456,13 @@ def build(out_path: Path) -> dict:
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as handle:
+        kept = dropped = 0
         for record in all_records:
+            if sum(len(m["content"]) for m in record.get("messages", [])) > MAX_TOTAL_CHARS:
+                dropped += 1
+                continue
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            kept += 1
 
     counts = Counter(str(record.get("source", "?")) for record in all_records)
     arabic_count = sum(
@@ -462,7 +470,8 @@ def build(out_path: Path) -> dict:
         if _ARABIC_RE.search(_record_text(record)[0])
     )
     report["final"] = {
-        "records": len(all_records),
+        "records": kept,
+        "dropped_too_long": dropped,
         "by_source": dict(counts),
         "arabic_instructions": arabic_count,
         "arabic_share": round(arabic_count / max(1, len(all_records)), 3),
