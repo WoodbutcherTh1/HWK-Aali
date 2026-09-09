@@ -385,11 +385,13 @@ def main() -> int:
         if report_text.startswith("# Soup re-SFT pipeline report") and "Verdict: PROMOTE" in report_text:
             adapter = _adapter_dir()
             try:
-                server = subprocess.Popen(
+                # NOTE: a dedicated variable - reusing `server` made the
+                # finally below terminate the freshly promoted server.
+                promoted = subprocess.Popen(
                     [str(SOUP_EXE), "serve", "--model", str(adapter), "--port", str(PORT)],
                     stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
                 )
-                log(f"serving promoted adapter on :{PORT} (pid {server.pid})")
+                log(f"serving promoted adapter on :{PORT} (pid {promoted.pid})")
             except OSError as exc:
                 log(f"could not serve promoted adapter ({exc}) - Aali falls back")
         return 0
