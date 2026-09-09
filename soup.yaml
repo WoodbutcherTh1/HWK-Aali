@@ -14,7 +14,7 @@ data:
   train: D:/hwk-data/soup/sft_v2.jsonl
   format: chatml
   val_split: 0.05
-  max_length: 1280
+  max_length: 768
 
 training:
   epochs: 3
