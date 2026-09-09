@@ -222,6 +222,15 @@ in parallel:
   profile) firewall rule for 5055, restarts in multi-user mode with
   HWK_ALLOW_COMMANDS=0. (4) aali_tunnel.bat now REFUSES to expose an
   unauthenticated server (verifies key mode via /api/health first).
+  (5) scripts/aali_domain.bat (owner-only, NEW): permanent named-tunnel
+  on your own domain (aali.dpdns.org via DigitalPlat FreeDomain + a free
+  Cloudflare zone) — same key-mode gate as aali_tunnel.bat, one-time
+  `tunnel login` (browser Authorize), creates the named tunnel `aali`,
+  writes config.yml (hostname -> http://127.0.0.1:5055), routes DNS, and
+  runs `tunnel run`. HTTPS automatic, no router ports, PC IP hidden.
+  Prereq (browser steps, per docs/custom_domain.md): add the zone to
+  Cloudflare, set Cloudflare's nameservers as the domain's external
+  nameservers in the DigitalPlat dashboard, wait for propagation.
 - **Attachments (LIVE, 2026-09-09)**: the "designed but not built" gap is
   closed — 📎 Attach button in the web UI (native picker: PC folders on
   desktop, phone files/camera on mobile), up to 4 files, 100MB cap, any mix
@@ -298,5 +307,31 @@ in parallel:
   protocol example moved INSIDE the system prompt — as chat messages the 7b
   brain echoed the example user text back ("ما هي أدواتك؟" → answered the
   example). Capability triggers extended (أدواتك / your tools…).
+- **OpenAI-compatible /v1 + desktop 1.0.3 (2026-09-09)**: آلي يتكلم OpenAI —
+  file-agent/app.py يضيف `GET /v1/models` (يعرض aali, aali-local) و
+  `POST /v1/chat/completions` (متوافق OpenAI: non-stream + stream:true SSE
+  بنفس شكل chunks الرسمي وينتهي بـ data: [DONE])، بنفس المصادقة/سياسة الضيف
+  للـ API العادي؛ فأي عميل OpenAI (n8n، LibreChat، Cline، Open WebUI،
+  HuggingFace clients…) يستخدم آلي كنموذج بـ Base URL
+  `http://<host>:5055/v1`. docs/clients.md §3.5. Desktop overlay أضاف
+  حبّات المنصات (🧩 n8n / 🔄 OpenRouter / 🤗 HuggingFace) تنسخ الإعدادات
+  جاهزة؛ web: عدّاد الثواني يعدّ نبضات (+1/ثانية) بدل recompute فيتأخر
+  عند خلفية التاب؛ نصوص «العقل» أوضح («إشعال عقل آلي…» → «آلي يفكر… N
+  ثانية»). tests/test_openai_compat.py (5). Desktop v1.0.3: exe metadata
+  1.0.3.0 (version_info.txt كان عالقاً على 1.0.0)، مثبّت
+  build-desktop/installer/Aali-Desktop-Setup.exe، والأهم: cloudflared.exe
+  مُدمج داخل الأنبوب (spec يلتقطه من build-desktop/) فزر «شارك آلي»
+  يعمل من الصندوق — نسخة 1.0.2 المثبتة لم تكن تضمه.
+  **بناء الـ exe**: الطريقة المعتمدة `scripts\build_desktop.bat`
+  (venv مخصص `.venv-desktop` gitignored — ينشئه ويجمع exe + cli + installer؛
+  حذفه يعني إعادة تنزيل كل شيء). بدائل يدوية عند الحاجة: PyInstaller ليس
+  في .venv ولا global — استخدم
+  `uv run --no-sync --with pyinstaller pyinstaller Aali-Desktop.spec
+  --noconfirm --distpath build-desktop/dist --workpath build-desktop/work`
+  (--no-sync ضروري وإلا حاول uv مزامنة torch وأفشل البناء)؛ فحص سريع:
+  `uvx --from pyinstaller pyi-archive_viewer -l` يجب أن يظهر webview +
+  cloudflared (بناء uvx خالص يفقد webview ويكسر النافذة؛ بدونه الحجم يقع
+  من ~31MB إلى ~26MB — دليل تحذيري مفيد). ثم انسخ dist/*.exe إلى
+  %LOCALAPPDATA%\Programs\AaliDesktop\ (نمط التحديث المعتمد).
 
-— Last updated: 2026-09-09 (attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; desktop auto-boot 1.0.2; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-09 (attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 OpenAI-compatible surface + desktop auto-boot 1.0.3 (cloudflared bundled); sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)

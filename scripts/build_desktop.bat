@@ -19,6 +19,15 @@ if not exist build-desktop\icon.ico (
   .venv-desktop\Scripts\python.exe scripts\make_hwk_icon.py
 )
 
+rem --- cloudflared (bundled into the exe for the one-click share tunnel) ---
+rem Aali-Setup.iss uses skipifsourcedoesntexist, so a missing file here means
+rem the installer ships WITHOUT the share feature silently. Download if absent.
+if not exist build-desktop\cloudflared.exe (
+  echo [build] downloading cloudflared for the share tunnel...
+  curl -L --fail -o build-desktop\cloudflared.exe https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
+  if errorlevel 1 echo [build] WARNING: cloudflared download failed - share button will be absent from the exe
+)
+
 echo [build] compiling exe...
 .venv-desktop\Scripts\pyinstaller.exe --noconfirm --clean --distpath build-desktop\dist --workpath build-desktop\work Aali-Desktop.spec
 

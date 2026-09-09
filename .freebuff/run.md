@@ -53,3 +53,8 @@ powershell -NoProfile -Command "$env:PORT='5055'; Start-Process -WindowStyle Hid
   order while debugging.
 
 Then register the preview with the server's PID (netstat -ano | findstr 5055).
+
+Port note: 5055 is the default, but when another Freebuff preview thread already
+holds it, pick the next free port (e.g. 5056) via `$env:PORT` — every client
+doc (CLI --base, /v1 Base URL, share links) follows whatever port the server
+actually listens on. Health check on the chosen port before registering.

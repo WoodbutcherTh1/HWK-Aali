@@ -25,6 +25,29 @@ https://aali.موقعك.com/ui/
 
 ---
 
+## نطاق مجاني من DigitalPlat (dpdns.org) — الخطوة الإضافية الوحيدة
+
+إذا كان نطاقك مجانياً من [DigitalPlat FreeDomain](https://dashboard.digitalplat.org)
+(مثل `aali.dpdns.org`)، فالفرق الوحيد عن المسجّل العادي: بدلاً من تغيير
+الـ nameservers عند المسجّل، تغيّرها في **لوحة DigitalPlat نفسها**:
+
+1. **Cloudflare أولاً**: dash.cloudflare.com ← Add a site ← `aali.dpdns.org`
+   (خطة Free) ← انسخ **الـ nameservers الاثنين** اللذين يعيّنهما Cloudflare
+   (مثال: `xxx.ns.cloudflare.com` / `yyy.ns.cloudflare.com`).
+2. **لوحة DigitalPlat**: صفحة نطاقك ← Delegation mode =
+   **external nameservers** ← الصق الاثنين ← حفظ.
+3. انتظر انتشار DNS (دقائق إلى ساعات) — تحقق من
+   [dnschecker.org](https://dnschecker.org) حتى تظهر الـ NS الخاصة
+   بـ Cloudflare في الجواب.
+4. ثم تابع الطريقة الآلية بالأسفل: `scripts\aali_domain.bat`
+   (نفس النفق المسمى `aali`، نفس النتيجة `https://aali.dpdns.org`).
+
+> ملاحظة: لا يمكن لـ DigitalPlat نفسه تحرير سجلات DNS لنطاقك — دوره
+> ينتهي عند تفويض الـ nameservers (حسب توثيقهم الرسمي). سجلات A/CNAME
+> تُدار في Cloudflare (أو أي مزوّد DNS خارجي تختاره).
+
+---
+
 ## الطريقة الآلية (الأسهل)
 
 شغّل `scripts\aali_domain.bat` **كمسؤول** (نقرة يمين ← تشغيل كمسؤول) واتبع:

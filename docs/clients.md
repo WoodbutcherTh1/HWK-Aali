@@ -56,6 +56,32 @@ RTL كامل، لكل رسالة اتجاهها حسب اللغة (عربي RTL�
 أوامر داخلية: `/new` محادثة جديدة، `/quit` خروج. يثبّت الجلسة في `.aali_cli_sid`
 فتكمل نفس المحادثة بين التشغيلات. (ثبّت `rich` للوحة أجمل — يعمل بدونه أيضاً.)
 
+## 3.5) منصات خارجية — n8n / OpenRouter / Hugging Face (OpenAI-compatible)
+
+آلي يكشف واجهة OpenAI-متوافقة على نفس المنفذ، فأي أداة تعرف التحدث مع
+OpenAI تستطيع استخدام آلي كنموذج:
+
+```
+Base URL : http://<عنوان-الحاسوب>:5055/v1
+API Key  : مفتاح آلي حقيقي (من /admin أو /signup)
+Model    : aali   (أو aali-local)
+```
+
+- **n8n:** عقدة HTTP Request → POST `.../v1/chat/completions`،
+  Header `Authorization: Bearer <مفتاح>`، جسم `{"model":"aali","messages":[{"role":"user","content":"..."}]}`.
+  (استخدم أيضاً أداة آلي `make_n8n_workflow` لتوليد سير عمل جاهز للاستيراد.)
+- **أدوات OpenRouter-style (LibreChat، Cline، Open WebUI…):** اضبط
+  Base URL على `http://<host>:5055/v1` والمفتاح على مفتاح آلي.
+- **Hugging Face / أي عميل OpenAI:** نفس Base URL + المفتاح، النموذج `aali`.
+- `GET /v1/models` يعرض النموذجين (`aali`, `aali-local`) للعملاء الذين يكتشفون النماذج.
+- `stream: true` مدعوم (SSE) لنفس العميل، بدون تغيير.
+
+من داخل تطبيق Desktop: اضغط أزرار «🧩 اربط آلي مع n8n» / «🔄 OpenRouter» /
+«🤗 Hugging Face» في الزاوية السفلية لنسخ الإعدادات الجاهزة.
+
+> الأمان: نفس قواعد آلي — لا مفتاح = جهازك فقط؛ وبعيداً عن 127.0.0.1 أي
+> مفتاح غير مدير يُجبر على سياسة الضيف (بدون أوامر/حذف).
+
 ## 4) Desktop — نافذة أصلية
 
 ```bash

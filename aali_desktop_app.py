@@ -20,7 +20,7 @@ import time
 import urllib.request
 from urllib.parse import urlparse
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 
 CFG_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "AaliDesktop")
 CFG_FILE = os.path.join(CFG_DIR, "url.txt")
@@ -322,6 +322,47 @@ EXTRAS_JS = """
       showBox();
       if(res==='error:cloudflared غير موجود في حزمة التطبيق'){}
     });
+  });
+
+  // platform pills — connect Aali as a model on n8n / OpenRouter-style tools /
+  // Hugging Face (all speak the OpenAI-compatible /v1 endpoint).
+  var base=(localStorage.getItem('aali_api')||location.origin).replace(/\\/$/,'');
+  function platformBox(title, lines, copyText){
+    if(box) box.remove();
+    box=document.createElement('div'); box.className='aali-box';
+    box.innerHTML='<b>'+title+'</b><br>'+lines.join('<br>')+
+      '<div class="aali-btns"><button class="aali-copy" id="aalicp">نسخ الإعدادات</button>'+
+      '<button class="aali-hide" id="aalihr">إخفاء</button></div>';
+    wrap.appendChild(box);
+    document.getElementById('aalicp').onclick=function(){
+      api.share_copy(copyText); this.textContent='تم النسخ ✓';
+    };
+    document.getElementById('aalihr').onclick=function(){ box.remove(); box=null; };
+  }
+  pill('🧩 اربط آلي مع n8n','',function(){
+    var lines=[
+      '1. في n8n: أضف عقدة HTTP Request.',
+      '2. Method POST → '+base+'/v1/chat/completions',
+      '3. Header Authorization: Bearer <مفتاح آلي>',
+      '4. Body: {"model":"aali","messages":[{"role":"user","content":"..."}]}',
+      'مفتاحك: من /admin أو /signup (نفس مفتاح الويب).'
+    ];
+    platformBox('🧩 n8n', lines,
+      'POST '+base+'/v1/chat/completions\nAuthorization: Bearer <Aali key>\n{"model":"aali","messages":[{"role":"user","content":""}]}');
+  });
+  pill('🔄 اربط آلي مع OpenRouter','',function(){
+    var lines=[
+      'أي عميل يتكلم OpenAI (مثل أدوات OpenRouter،\nLibreChat، Cline…) اضبط:'
+    ];
+    platformBox('🔄 OpenRouter-style', lines,
+      'Base URL: '+base+'/v1\nAPI Key: <Aali key>\nModel: aali');
+  });
+  pill('🤗 اربط آلي مع Hugging Face','',function(){
+    var lines=[
+      'في أي أداة تدعم Inference/OpenAI:','Base URL → '+base+'/v1','Model → aali'
+    ];
+    platformBox('🤗 Hugging Face', lines,
+      'Base URL: '+base+'/v1\nModel: aali\nAPI Key: <Aali key>');
   });
 })();
 """

@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:/Users/HmamK/OneDrive/Desktop/HWK-Aali-main/build-desktop/icon.ico'],
+    icon=['C:/Users/HmamK/OneDrive/Desktop/HWK-Aali-main/scripts/../build-desktop/icon.ico'],
 )
