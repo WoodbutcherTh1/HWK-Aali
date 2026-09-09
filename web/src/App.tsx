@@ -795,6 +795,9 @@ export default function App() {
               <motion.h1 className="wordmark" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
                 آلي
               </motion.h1>
+              <motion.p className="tagline" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ ...spring, delay: 0.06 }}>
+                مساعدك الشخصي — <em>عربي أولاً</em>، بأدوات حقيقية وذاكرة دائمة
+              </motion.p>
 
               <motion.form
                 className="ask-box"
