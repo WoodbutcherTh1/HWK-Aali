@@ -185,6 +185,43 @@ in parallel:
   genuinely under-learned the tool protocol (file-tool JSON appears, image-tool
   behaviors never took); teacher re-SFT needs a format-heavy mix before the
   next graduation run. Tests: tests/test_soup_smoke_gate.py (25).
+- **Chat guards: no more "{}", echo, or language drift (2026-09-09)**: live
+  owner transcript showed the 7b brain answering with literal "{}" (shapeless
+  JSON surfaced raw), parroting the user's message back, and answering
+  Arabic to English. agent_loop.py now: _parse_local_model_response returns
+  shell-JSON as empty text (content-candidate kept, real protocol object
+  always wins) and the loop RETRIES twice with feedback, then degrades to an
+  honest apology — raw JSON can never reach the user; _is_echo_of_user()
+  rejects verbatim parrots (normalized containment + <50% extra) once with
+  feedback; the language guard NAMES the target language (الإنجليزية
+  فقط/العربية فقط) — "same language as the user" was too abstract for 7b.
+  Verified live against the running brain (EN→EN, AR→AR). Tests:
+  tests/test_agent_guards.py (11).
+- **Desktop auto-boot (2026-09-09, v1.0.2)**: owner request — launching
+  آلي Desktop must start Aali itself. aali_desktop_app.py::_ensure_local_server
+  (daemon thread before the window) runs scripts/start_all.bat hidden when a
+  LOCAL server is down: repo discovery via AALI_HOME → %APPDATA%\AaliDesktop\
+  repo.txt → cwd/exe dir → HWK-Aali* under home/Desktop/Documents/C:/D:,
+  found path remembered; waits up to 120s for /api/health (inject deadline
+  90s). start_all.bat honors AALI_NO_BROWSER (no duplicate tab) and skips
+  n8n when 5678 already LISTENING (no duplicate workers). Installed exes
+  updated in place; installer rebuilt (Aali-Desktop-Setup.exe 1.0.2).
+  Proven live: server down → installed app launch → up in ~4s.
+- **Sharing hardening (2026-09-09)**: friends-as-users done safely.
+  (1) Fail-safe bind: an unauthenticated server (no AALI_API_KEY) binds
+  127.0.0.1 only — it can never silently face the LAN again (was always
+  0.0.0.0); key mode binds 0.0.0.0; AALI_BIND overrides.
+  (2) Server-enforced guest policy: remote non-admin keys (loopback + no
+  X-Forwarded-For = local; spoof-proof) are forced to policy=guest in both
+  /api/ask and /api/ask/stream — run_command/machine_ops/delete_file/
+  move_file/memory hard-blocked with guest_forbidden regardless of
+  client-sent policy/confirm (confirm is client-supplied, NOT a security
+  boundary; cloudflared sets X-Forwarded-For so tunnel guests are gated).
+  (3) scripts/aali_share.bat (owner-only): generates the master key to
+  D:/hwk-data/aali_master_key.txt, adds a LAN-only (localsubnet, private
+  profile) firewall rule for 5055, restarts in multi-user mode with
+  HWK_ALLOW_COMMANDS=0. (4) aali_tunnel.bat now REFUSES to expose an
+  unauthenticated server (verifies key mode via /api/health first).
 - **Known gaps**: n8n webhook needs one manual activation click in the editor;
   ffmpeg installed but PATH needs refresh in new shells; web-mentor capture
   experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%); chat
@@ -198,10 +235,18 @@ in parallel:
   owner-only deploy menu + docs/publish_aali.md. UI: warm-black #252523 theme,
   gold HWK icon (web/icon.svg + make_hwk_icon.py), shareable ?sid= deep links.
   Model: Phase A complete (90k steps / 2.95B tokens); Phase B context-4096
-  extension running under the night caretaker; soup graduation pipeline queued
-  behind it (baseline→QLoRA→exam→auto-promote, VRAM-safe staging fixed).
+  extension was accidentally closed by the owner at step 42,475 (20:08,
+  ~7.7h left) and relaunched the same evening via extend_context.bat
+  (resumes from trainer-state; GPU gate holds it until the card frees);
+  soup graduation pipeline queued behind it (baseline→QLoRA→exam→
+  auto-promote, VRAM-safe staging fixed).
   Guide: scripts/make_aali_guide.py renders Aali-Guide-<date>.pdf to the
   Desktop from docs/assets screenshots; docs/assets/aali_tour.gif in README.
+- **Web client v2 (2026-09-09)**: dark/sepia theme switch (html[data-theme],
+  CSS vars, localStorage), time-aware Arabic greeting empty-state
+  (صباح/نهارك/مساء الخير), markdown tables, language-colored code fences
+  (GitHub palette dot), plus the earlier streaming/sessions/chips work.
+  web/src builds clean (tsc + vite); dist rebuilt and served at /ui/.
 - **Terminal client (2026-09-09)**: scripts/aali_cli.py — Claude Code-style
   colorful REPL (● tool traces via /api/ask/stream SSE, spinner, /new /open
   /clear /theme gold|matrix|ocean (saved in ~/.aali_cli_theme, --theme/AALI_THEME
@@ -212,7 +257,33 @@ in parallel:
   (pasted newlines open continuation lines; trailing \ = typed
   continuation); /api/tools endpoint + agent_loop.tool_specs(); ships as
   build-desktop/dist/aali-cli.exe inside the installer with a Start-Menu
-  «آلي — Terminal» entry (Aali-Setup.iss [Icons]); docs/assets/aali_cli_demo.gif
+  «آلي — Terminal» entry (Aali-Setup.iss [Icons]);  docs/assets/aali_cli_demo.gif
   + README CLI section; auto-starts the server via start_app.bat when absent.
+- **CLI Arabic display fix / bidi (2026-09-09)**: classic conhost has no bidi
+  or shaping — Arabic printed disconnected+mirrored (owner screenshot:
+  "آلي — مساعدك المحلي" → "يلآ .زهاج ،يلحلا ديسم"). scripts/aali_cli.py now
+  ships stdlib-only shape_arabic (contextual presentation forms, lam-alef
+  ligatures, harakat pass-through) + reorder_visual (RTL runs reversed with
+  marks kept attached, brackets mirrored, latin/digits/URLs kept LTR) behind
+  fx() — idempotent (presentation forms ⇒ passthrough), applied at paint() +
+  render_reply + /open bodies; auto-detects bidi-capable terminals
+  (WT_SESSION/ConEmu/ANSION/vscode/mintty…) so it never double-reverses;
+  /bidi on|off|auto (+ --bidi/AALI_BIDI) persisted in ~/.aali_cli_bidi.
+  Tests: tests/test_cli_bidi.py (18).
+- **CLI bidi v2 (2026-09-09)**: two upgrades from the owner. (1) Width-aware
+  fx: overlong lines wrap at the terminal width (word-aware, in LOGICAL
+  order) BEFORE shape+reorder, so terminal-wrapped Arabic stays readable —
+  fx(text, width) with paint/render_reply/say passing _term_width();
+  (2) extended Arabic-script letters (Persian/Urdu پ چ ژ ک گ ی …) derived
+  from Unicode decomposition tags at import time — typo-proof, complete,
+  core Arabic table stays canonical; reh-family classified right-joining.
+- **Agent honesty guards scoped to real tasks (2026-09-09)**: the
+  success-claim and narrated-plan guards in agent_loop.py fired on pure chat
+  ("قل لي فقط: جواب اختبار ٤٢" contains تم) and the brain parroted the guard
+  lecture as its answer; now gated by _task_request() (AR/EN task-verb
+  matcher, bias-True) so only real "do X" requests are policed. The few-shot
+  protocol example moved INSIDE the system prompt — as chat messages the 7b
+  brain echoed the example user text back ("ما هي أدواتك؟" → answered the
+  example). Capability triggers extended (أدواتك / your tools…).
 
-— Last updated: 2026-09-09 (owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; Phase A done, Phase B 4096 running, soup graduation queued; earlier: Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, Phase A restart bf16 + watchdog, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-09 (chat guards: no {} / echo / meta-leak / language naming + guest policy; desktop auto-boot 1.0.2; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)

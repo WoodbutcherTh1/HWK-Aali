@@ -10,6 +10,7 @@ pywebview (WebView2) window around Aali's web UI + native extras:
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import subprocess
@@ -19,7 +20,7 @@ import time
 import urllib.request
 from urllib.parse import urlparse
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 
 CFG_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "AaliDesktop")
 CFG_FILE = os.path.join(CFG_DIR, "url.txt")
@@ -87,6 +88,74 @@ def _find_cloudflared() -> str:
 def _is_local(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
     return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def _looks_like_repo(base: str) -> bool:
+    return (os.path.isfile(os.path.join(base, "scripts", "start_all.bat"))
+            and os.path.isfile(os.path.join(base, "file-agent", "app.py")))
+
+
+def _find_repo() -> str:
+    """Locate the Aali checkout that can boot the local server.
+
+    Order: AALI_HOME env → remembered location (repo.txt) → the exe/source
+    directory → common home/DRIVE locations. Found paths are remembered so
+    later launches skip the search.
+    """
+    candidates = [os.environ.get("AALI_HOME", "")]
+    try:
+        with open(os.path.join(CFG_DIR, "repo.txt"), encoding="utf-8") as fh:
+            candidates.append(fh.read().strip())
+    except OSError:
+        pass
+    here = os.path.dirname(os.path.abspath(__file__))
+    exe_dir = (os.path.dirname(sys.executable)
+               if getattr(sys, "frozen", False) else "")
+    candidates.extend([os.getcwd(), here, exe_dir, os.path.dirname(here)])
+    home = os.path.expanduser("~")
+    for pat in ("OneDrive/Desktop/HWK-Aali*", "Desktop/HWK-Aali*",
+                "Documents/HWK-Aali*", "HWK-Aali*"):
+        candidates.extend(sorted(glob.glob(os.path.join(home, pat))))
+    for drive in ("C:", "D:"):
+        candidates.extend(sorted(glob.glob(drive + "/HWK-Aali*")))
+        candidates.extend(sorted(glob.glob(drive + "/hwk-projects/HWK-Aali*")))
+    for cand in candidates:
+        if cand and _looks_like_repo(cand):
+            try:
+                os.makedirs(CFG_DIR, exist_ok=True)
+                with open(os.path.join(CFG_DIR, "repo.txt"), "w",
+                          encoding="utf-8") as fh:
+                    fh.write(cand)
+            except OSError:
+                pass
+            return cand
+    return ""
+
+
+def _ensure_local_server() -> None:
+    """Auto-run scripts/start_all.bat when a local server is not up yet
+    (owner request 2026-09-09): launching the app must bring Aali up on its
+    own — no manual .bat step. Hidden window, no extra browser tab
+    (AALI_NO_BROWSER=1), then we wait for /api/health."""
+    if not _is_local(SERVER) or _server_ready(SERVER):
+        return
+    repo = _find_repo()
+    if not repo:
+        return
+    flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    env = dict(os.environ, AALI_NO_BROWSER="1")
+    try:
+        subprocess.Popen(  # noqa: S603
+            ["cmd", "/c", "start", "", "/min",
+             os.path.join(repo, "scripts", "start_all.bat")],
+            cwd=repo, env=env, creationflags=flags)
+    except OSError:
+        return
+    deadline = time.time() + 120  # cold boot: venv python + Flask + n8n probe
+    while time.time() < deadline:
+        if _server_ready(SERVER):
+            return
+        time.sleep(1)
 
 
 class Bridge:
@@ -259,7 +328,7 @@ EXTRAS_JS = """
 
 
 def _wait_and_inject(window) -> None:
-    deadline = time.time() + 25
+    deadline = time.time() + 90  # covers a cold auto-boot of the server
     while time.time() < deadline and not _server_ready(SERVER):
         time.sleep(1)
     try:
@@ -298,6 +367,9 @@ def main() -> None:
             pass
 
     SERVER = _pick_url()
+
+    if _is_local(SERVER):
+        threading.Thread(target=_ensure_local_server, daemon=True).start()
 
     import webview
 

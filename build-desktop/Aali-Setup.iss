@@ -4,7 +4,7 @@
 
 #define MyAppName "Aali Desktop"
 #define MyAppNameAr "آلي — Desktop"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppExeName "Aali-Desktop.exe"
 
 [Setup]
