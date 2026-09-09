@@ -11,9 +11,16 @@ node_modules/
 file-agent/logs/*.log
 file-agent/sessions.jsonl
 file-agent/api_keys.jsonl
+# Account store (emails + password hashes) — runtime data, never commit
+file-agent/accounts.jsonl
 # user uploads + agent sandbox (runtime data, never commit)
 file-agent/agent_workspace/
 .pytest_cache/
+
+# Freebuff agent-workspace runtime (preview logs, scratch scripts)
+.freebuff/*.log*
+.freebuff/*.ps1
+.freebuff/*.py
 
 # One-off device-side edit helper scripts (not part of the project)
 _scratch/
@@ -23,3 +30,4 @@ _scratch/
 build-desktop/work/
 build-desktop/dist/
 build-desktop/installer/
+build-desktop/cloudflared.exe

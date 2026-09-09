@@ -3,8 +3,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   askStream,
   attach,
+  authLogout,
+  authMe,
   compactSession,
   deleteSession,
+  defaultApiBase,
   getApiBase,
   getSession,
   getSid,
@@ -15,10 +18,12 @@ import {
   setToken,
   type ActivityEvent,
   type Attachment,
+  type MeInfo,
   type PendingAction,
   type Policy,
   type SessionRow,
 } from "./api";
+import AuthDialog from "./Auth";
 import {
   fetchGithubRepos,
   fetchGithubUser,
@@ -101,7 +106,7 @@ function activityRow(ev: ActivityEvent): {
 } {
   // provider/model names never surface — the brain is always "آلي"
   if (ev.event === "provider_selected") {
-    return { icon: "🧠", label: "العقل: آلي جاهز", doneLabel: "آلي جاهز" };
+    return { icon: "🧠", label: "إشعال عقل آلي…", doneLabel: "عقل آلي جاهز ✓" };
   }
   const args = ev.arguments ?? {};
   const detail =
@@ -268,6 +273,9 @@ export default function App() {
   const [ghError, setGhError] = useState("");
 
   const [slashOpen, setSlashOpen] = useState(false);
+  // ————— account (users | builders & team): null until /api/auth/me answers —————
+  const [me, setMe] = useState<MeInfo | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
   const slashQuery =
     slashOpen && draft.startsWith("/") && !draft.includes(" ")
       ? draft.slice(1).toLowerCase()
@@ -287,6 +295,11 @@ export default function App() {
     const t = setInterval(ping, 15000);
     return () => clearInterval(t);
   }, [ping]);
+
+  // Who am I? (account session — users | builders & team, one app)
+  useEffect(() => {
+    authMe().then(setMe);
+  }, []);
 
   useEffect(() => {
     if (atBottom) chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" });
@@ -355,11 +368,12 @@ export default function App() {
     el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden";
   }, [draft, chatMode]);
 
-  // elapsed-seconds ticker while waiting
+  // elapsed-seconds ticker while waiting — counts +1 per tick instead of
+  // recomputing from Date.now(), so background tabs / busy loops can never
+  // make the number jump (e.g. 99 → 103): it always advances one second at a time.
   useEffect(() => {
     if (!waiting) { setElapsed(0); return; }
-    const started = Date.now();
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [waiting]);
 
@@ -404,17 +418,32 @@ export default function App() {
                     : x
                 );
               }
+              // The brain row completes the moment real work starts: tools only
+              // run after the brain answered, so the first tool request means
+              // "عقل آلي جاهز ✓" (nothing on the wire ever completes it).
+              const doneBrain =
+                ev.event === "tool_requested" || ev.event === "tool_result";
               return [
-                ...a,
-                {
-                  id: nextMsgId() + Math.random(),
-                  icon: row.icon,
-                  label: maskProviders(row.label),
-                  detail: row.detail ? maskProviders(row.detail) : undefined,
-                  done: false,
-                  tool: row.tool,
-                  term: row.term,
-                },
+                ...a.map((x) =>
+                  doneBrain && !x.tool && !x.done
+                    ? { ...x, done: true, label: "عقل آلي جاهز ✓" }
+                    : x
+                ),
+                // tool_result only completes existing rows; every other event
+                // paints a new one (provider_selected → brain, tool_requested → tool).
+                ...(ev.event !== "tool_result"
+                  ? [
+                      {
+                        id: nextMsgId() + Math.random(),
+                        icon: row.icon,
+                        label: maskProviders(row.label),
+                        detail: row.detail ? maskProviders(row.detail) : undefined,
+                        done: false,
+                        tool: row.tool,
+                        term: row.term,
+                      },
+                    ]
+                  : []),
               ];
             });
             return undefined;
@@ -587,7 +616,7 @@ export default function App() {
   };
 
   const saveSettings = () => {
-    setApiBase(apiInput.trim() || "http://127.0.0.1:5055");
+    setApiBase(apiInput.trim() || defaultApiBase());
     setToken(tokenInput.trim());
     localStorage.removeItem("aali_sid");
     setActiveSid("");
@@ -700,8 +729,8 @@ export default function App() {
         </div>
       ))}
       <div className="activity-row">
-        <span className="spin">✦</span>
-        <span>آلي يعمل… {elapsed > 0 ? `${elapsed} ثانية` : ""}</span>
+        <span className="spin">🧠</span>
+        <span>آلي يفكر… {elapsed > 0 ? `${elapsed} ثانية` : ""}</span>
       </div>
     </div>
   );
@@ -875,6 +904,23 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              {/* account: users | builders & team — one app, roles differ */}
+              {me ? (
+                <button
+                  type="button"
+                  className="upgrade-pill"
+                  style={{ padding: "7px 14px" }}
+                  title={me.is_admin ? "لوحة الفريق: /admin" : "حسابك"}
+                  onClick={() => (me.is_admin ? window.open(getApiBase() + "/admin", "_blank") : setAuthOpen(true))}
+                >
+                  <span>✦</span> {me.email.split("@")[0]}
+                  {me.is_admin && <span className="admin-chip">فريق</span>}
+                </button>
+              ) : (
+                <button type="button" className="upgrade-pill" style={{ padding: "7px 14px" }} onClick={() => setAuthOpen(true)}>
+                  <span>✦</span> دخول
+                </button>
+              )}
             </div>
 
             <div className="hero">
@@ -1168,13 +1214,29 @@ export default function App() {
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
                 </button>
               </form>
-              <p className="hint">
-                يتصل بـ <code>{getApiBase()}</code> — غيّره من ⚙︎ الإعدادات
-              </p>
+              {/* connection internals are a builder/owner concern — users never see them */}
+              {me?.is_admin && (
+                <p className="hint">
+                  يتصل بـ <code>{getApiBase()}</code> — غيّره من ⚙︎ الإعدادات
+                </p>
+              )}
             </footer>
           </motion.main>
         )}
       </div>
+
+      {/* ACCOUNT AUTH — users | builders & team */}
+      <AnimatePresence>
+        {authOpen && (
+          <AuthDialog
+            onClose={() => setAuthOpen(false)}
+            onSignedIn={(email, role) => {
+              setMe({ email, role: role as "user" | "admin", is_admin: role === "admin" });
+              showToast(role === "admin" ? "أهلاً بعودتك يا صاحب السموّ ✦" : `أهلاً ${email} ✦`);
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* SETTINGS */}
       {showSettings && (

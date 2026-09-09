@@ -1,6 +1,20 @@
 /* آلي API client — plain /api/ask plus the SSE streaming endpoint the desktop
    app uses (live tool activity), and the sessions sidebar API. */
-let apiBase = localStorage.getItem("aali_api") || "http://127.0.0.1:5055";
+
+/* Default API base: when the UI is served by the Aali server itself (any port —
+   5055, a busy-port fallback, a LAN address), talk to the same origin instead
+   of a hardcoded 5055, so every deployment follows its real port. The classic
+   http://127.0.0.1:5055 default stays for vite dev (port 5173, no proxy),
+   https static hosting (GitHub Pages → visitor's localhost), and file:// —
+   behavior unchanged there. */
+export function defaultApiBase(): string {
+  if (location.protocol === "http:" && location.port !== "5173") {
+    return location.origin;
+  }
+  return "http://127.0.0.1:5055";
+}
+
+let apiBase = localStorage.getItem("aali_api") || defaultApiBase();
 
 export function getApiBase() {
   return apiBase;
@@ -34,7 +48,75 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...extra };
   const t = getToken();
   if (t) h["X-API-Key"] = t;
+  const s = getSessionToken();
+  if (s) h["X-Session-Token"] = s;
   return h;
+}
+
+/* ————— Account auth (users | builders & team) —————
+   The session token comes from /api/auth/login and lives per-browser. */
+const SESSION_KEY = "aali_session";
+export interface MeInfo { email: string; role: "user" | "admin"; is_admin: boolean }
+export function getSessionToken(): string {
+  return localStorage.getItem(SESSION_KEY) || "";
+}
+export function setSessionToken(t: string) {
+  if (t) localStorage.setItem(SESSION_KEY, t);
+  else localStorage.removeItem(SESSION_KEY);
+}
+export async function authSignup(email: string, password: string): Promise<{ ok: boolean; error?: string; dev_code?: string; role?: string }> {
+  const res = await fetch(`${apiBase}/api/auth/signup`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  return res.json();
+}
+export async function authVerify(email: string, code: string): Promise<{ ok: boolean; error?: string; role?: string }> {
+  const res = await fetch(`${apiBase}/api/auth/verify`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code }),
+  });
+  return res.json();
+}
+export async function authLogin(email: string, password: string): Promise<{ ok: boolean; error?: string; token?: string; role?: string }> {
+  const res = await fetch(`${apiBase}/api/auth/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json();
+  if (data.ok && data.token) setSessionToken(data.token);
+  return data;
+}
+export async function authResetRequest(email: string): Promise<{ ok: boolean; error?: string; dev_code?: string }> {
+  const res = await fetch(`${apiBase}/api/auth/reset-request`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  return res.json();
+}
+export async function authResetConfirm(email: string, code: string, newPassword: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${apiBase}/api/auth/reset-confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code, new_password: newPassword }),
+  });
+  return res.json();
+}
+export async function authMe(): Promise<MeInfo | null> {
+  const t = getSessionToken();
+  if (!t) return null;
+  try {
+    const res = await fetch(`${apiBase}/api/auth/me`, { headers: { "X-Session-Token": t } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.ok ? { email: data.email, role: data.role, is_admin: data.is_admin } : null;
+  } catch {
+    return null;
+  }
+}
+export function authLogout() {
+  const t = getSessionToken();
+  if (t) void fetch(`${apiBase}/api/auth/logout`, { method: "POST", headers: { "X-Session-Token": t } });
+  setSessionToken("");
 }
 
 export type Policy = "auto" | "aggressive" | "always_ask";

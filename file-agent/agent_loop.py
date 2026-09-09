@@ -71,6 +71,33 @@ PROMOTED_FILE = Path(os.getenv("AALI_PROMOTED_FILE", "D:/hwk-data/soup/promoted.
 OWN_MODEL_URL = os.getenv("AALI_OWN_MODEL_URL", "").strip()
 OWN_MODEL_NAME = os.getenv("AALI_OWN_MODEL_NAME", "aali-own")
 OWN_MODEL_API_KEY = os.getenv("AALI_OWN_MODEL_KEY", "aali-self")
+# Remote brain — another Aali server acting as THE brain (the Pi hosting setup:
+# Pi's Aali uses the PC's Aali /v1 as its brain; Aali as a provider, no
+# third-party AI). Empty = disabled (default, avoids self-loops on one box).
+REMOTE_BRAIN_URL = os.getenv("AALI_REMOTE_BRAIN_URL", "").strip().rstrip("/")
+REMOTE_BRAIN_KEY = os.getenv("AALI_REMOTE_BRAIN_KEY", "").strip()
+REMOTE_BRAIN_MODEL = os.getenv("AALI_REMOTE_BRAIN_MODEL", "aali").strip()
+
+
+def _remote_brain_available() -> tuple[str, str, str] | None:
+    """Return (base_url, key, model) when a remote Aali brain is configured AND
+    answering (1.5s probe), else None. Never loops: the URL must point at a
+    DIFFERENT machine — leaving AALI_REMOTE_BRAIN_URL unset disables it."""
+    if not REMOTE_BRAIN_URL or os.getenv("AALI_REMOTE_BRAIN", "1") == "0":
+        return None
+    if "127.0.0.1" in REMOTE_BRAIN_URL or "localhost" in REMOTE_BRAIN_URL:
+        return None  # a remote brain can never be this very process
+    try:
+        r = requests.get(
+            REMOTE_BRAIN_URL + "/models",
+            headers={"Authorization": f"Bearer {REMOTE_BRAIN_KEY}"} if REMOTE_BRAIN_KEY else {},
+            timeout=1.5,
+        )
+        if r.status_code == 200:
+            return REMOTE_BRAIN_URL, REMOTE_BRAIN_KEY, REMOTE_BRAIN_MODEL
+    except Exception:
+        pass
+    return None
 
 
 def promoted_own_model() -> dict | None:
@@ -536,7 +563,51 @@ def _ollama_available() -> bool:
     try:
         return requests.get(f"{OLLAMA_URL}/api/tags", timeout=3).ok
     except Exception:  # noqa: BLE001 - connection refused etc.
-        return False
+        # The brain process dying must never disable Aali silently: try to
+        # revive `ollama serve` once, then re-probe. (2026-09-10: the owner hit
+        # the canned no-brain reply because Ollama had exited unnoticed.)
+        _revive_ollama()
+        try:
+            return requests.get(f"{OLLAMA_URL}/api/tags", timeout=3).ok
+        except Exception:  # noqa: BLE001
+            return False
+
+
+_OLLAMA_REVIVE_LOCK = False
+
+
+def _revive_ollama() -> None:
+    """Best-effort restart of `ollama serve` on Windows/Linux. Runs at most
+    once per minute (module-level guard), never raises."""
+    global _OLLAMA_REVIVE_LOCK
+    if _OLLAMA_REVIVE_LOCK:
+        return
+    globals()["_OLLAMA_REVIVE_LOCK"] = True
+
+    def _release() -> None:
+        globals()["_OLLAMA_REVIVE_LOCK"] = False
+
+    import threading
+    threading.Timer(60.0, _release).start()
+    try:
+        if os.name == "nt":
+            exe = Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
+            if exe.is_file():
+                import subprocess
+                subprocess.Popen(  # noqa: S603 - fixed path, no shell
+                    [str(exe), "serve"],
+                    creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+        else:
+            import subprocess
+            subprocess.Popen(  # noqa: S603
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    except Exception:  # noqa: BLE001 - best effort only
+        pass
 
 
 def _ollama_chat(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
@@ -1031,16 +1102,21 @@ def _local_agent_loop(
         else "[FALLBACK: deterministic local command mode]"
     )
     if tool_call is None:
+        # No canned "I can't chat" walls (owner 2026-09-10: that text shamed
+        # Aali). The deterministic mode is for COMMANDS; for anything that is
+        # not a command it answers briefly, warmly, in the user's language and
+        # shows its real state — never meta-talk about training or Ollama.
+        is_ar = bool(re.search(r"[\u0600-\u06FF]", message))
         response = (
-            "أنا آلي 🌟\n"
-            "دماغي المحادثاتي ما زال يتدرّب على هذا الحاسوب — الوضع الحالي: "
-            "أوامر مباشرة فقط بدون نموذج لغوي.\n\n"
-            "جرّب مثلاً:\n"
-            "• اعرض الملفات\n"
-            "• أنشئ ملف notes/today.txt واكتب بداخله أهلاً\n"
-            "• اقرأ notes/today.txt\n\n"
-            "ولتفعيل المحادثة الطبيعية الآن: شغّل Ollama على الحاسوب "
-            "(وسيعمل تلقائياً مع الجلسة القادمة)."
+            "أنا آلي ✦ — تحت أمرك الآن بوضع الأوامر المباشرة. "
+            "قل لي مثلاً: «اعرض الملفات» أو «أنشئ ملفاً واكتب فيه…»، "
+            "وسأنفّذ فوراً. دماغي المحادثة سيتولى الحوار الكامل تلقائياً "
+            "حين يعود للعمل."
+            if is_ar
+            else "Aali here ✦ — I'm running in direct-command mode right now. "
+            "Tell me things like “list the files” or “create a file and write…”, "
+            "and I'll execute them immediately. Full conversation mode resumes "
+            "automatically as soon as my chat brain is back."
         )
         log_event(request_id, "local_mode_help", response=response)
         return response
@@ -1390,6 +1466,28 @@ def _agent_loop(
         raise AgentLoopError("max_iterations must be at least 1")
     root = _workspace_path(workspace_root)
     if mode == "local":
+        # Remote-brain provider (Aali as a provider, literally): the Pi server
+        # uses THIS PC's Aali /v1 as its conversational brain. No third-party
+        # AI — Aali talking to Aali. Falls through to the usual local chain
+        # (own model / ollama / scratch / direct commands) when the PC is off.
+        remote = _remote_brain_available()
+        if remote:
+            base, key, model = remote
+            log_event(request_id, "provider_selected", provider="aali_remote", model=model)
+            try:
+                response = _openai_compat_loop(
+                    user_message, root, request_id,
+                    base_url=base, api_key=key, model=model,
+                    max_iterations=max_iterations, history=history,
+                    policy=policy, confirmed=confirmed, gate_state=gate_state,
+                    provider_label="aali_remote",
+                )
+                if print_final:
+                    print(response)
+                return response
+            except Exception as e:
+                log_event(request_id, "tool_result", tool="aali_remote",
+                          result=f"remote brain unreachable ({e.__class__.__name__}) — falling back to local")
         own = promoted_own_model()
         if own:
             log_event(request_id, "provider_selected", provider="aali_own", model=own["model"])

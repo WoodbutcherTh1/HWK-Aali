@@ -39,6 +39,7 @@ app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
 # people sharing one server never see each other's conversations.
 # Unset (default): local single-user mode, unchanged behaviour.
 from file_agent import apikeys
+from file_agent import accounts
 
 # The ADMIN key. Aali is the provider: clients authenticate with either this
 # master key (admin) or a per-user key issued via the key platform. User keys
@@ -59,7 +60,9 @@ def _client_key() -> str:
 
 def _auth_state(presented: str | None = None) -> dict:
     """Resolve the caller's key: returns {is_admin, key_id, key} or None if
-    unauthenticated. Admin = master AALI_API_KEY; user = an issued key."""
+    unauthenticated. Admin = master AALI_API_KEY; user = an issued key.
+    Account sessions (X-Session-Token) authenticate as their linked key;
+    admin emails get is_admin — one app, builders just see more."""
     key = presented if presented is not None else _client_key()
     if not key:
         return None
@@ -69,6 +72,27 @@ def _auth_state(presented: str | None = None) -> dict:
     if not rec:
         return None
     return {"is_admin": False, "key_id": rec["key_id"], "key": key}
+
+
+def _account_session() -> dict | None:
+    """Resolve X-Session-Token (account login) -> {email, role, is_admin,
+    key_id, auth dict-compatible} or None. The linked API key carries usage
+    metering; admin-role emails get the admin surface of the SAME app."""
+    token = request.headers.get("X-Session-Token", "")
+    if not token:
+        return None
+    sess = accounts.session(token)
+    if not sess:
+        return None
+    key_id = sess.get("key_id")
+    return {
+        "email": sess["email"],
+        "role": sess["role"],
+        "is_admin": sess["is_admin"],
+        "key_id": key_id,
+        # compatible with _auth_state consumers when a key exists
+        "key": None,
+    }
 
 
 def _user_ns(sid: str | None) -> str:
@@ -95,7 +119,17 @@ def _require_api_key():
         return None  # local single-user mode: open
     if request.path.startswith("/api/register"):
         return None  # self-serve signup is public (rate-limited inside)
+    if request.path.startswith("/api/auth/"):
+        return None  # account auth (signup/verify/login/reset) is public
     if not request.path.startswith("/api/"):
+        return None
+    # Account sessions (X-Session-Token) authenticate too: resolve to the
+    # account's linked key so metering/isolation keep working.
+    sess = _account_session()
+    if sess:
+        if apikeys.over_daily_cap(sess["key_id"]):
+            return make_response({"ok": False, "error": "daily request cap reached for this key"}, 429)
+        apikeys.record_usage(sess["key_id"])
         return None
     auth = _auth_state()
     if not auth:
@@ -756,9 +790,14 @@ def api_desktop_version():
 # ————— Aali as a provider: key platform + admin —————
 
 def _require_admin():
-    """Return None when the caller presented the admin master key, else a 401."""
+    """Return None when the caller is admin (master key OR account session with
+    an admin-role email), else a 401. One app: builders sign in like users and
+    simply see more."""
     if not API_KEY:
         return None  # local single-user mode: open admin (localhost tooling)
+    sess = _account_session()
+    if sess and sess["is_admin"]:
+        return None
     auth = _auth_state()
     if not auth or not auth["is_admin"]:
         return make_response({"ok": False, "error": "admin key required"}, 401)
@@ -777,6 +816,105 @@ def api_register():
         return make_response({"ok": False, "error": err}, 429)
     return {"ok": True, "key_id": key_id, "api_key": plaintext,
             "note": "احفظ هذا المفتاح — يُعرض مرة واحدة فقط"}
+
+
+# ————— Accounts: users | builders & team (one app, roles) —————
+
+def _issue_account_key(email: str) -> str | None:
+    """Give the verified account its own provider key (linked for metering)."""
+    try:
+        key_id, _plaintext = apikeys.issue_key(label=f"account:{email}", created_by="signup")
+        accounts.link_key(email, key_id)
+        return key_id
+    except Exception:  # noqa: BLE001 - metering must never block a login
+        return None
+
+
+@app.route("/api/auth/signup", methods=["POST"])
+def api_auth_signup():
+    """POST {"email", "password"} -> {ok, dev_code?} (code until SMTP wired)."""
+    payload = request.get_json(silent=True) or {}
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "")
+    res = accounts.signup(str(payload.get("email", "")), str(payload.get("password", "")), ip)
+    status = 200 if res.get("ok") else 400
+    return make_response(res, status)
+
+
+@app.route("/api/auth/verify", methods=["POST"])
+def api_auth_verify():
+    """POST {"email", "code"} -> {ok, role}; issues the account's API key."""
+    payload = request.get_json(silent=True) or {}
+    res = accounts.verify(str(payload.get("email", "")), str(payload.get("code", "")))
+    if res.get("ok"):
+        _issue_account_key(res["email"])
+    return make_response(res, 200 if res.get("ok") else 400)
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_auth_login():
+    """POST {"email", "password"} -> {ok, token, role}; admins by list."""
+    payload = request.get_json(silent=True) or {}
+    res = accounts.login(str(payload.get("email", "")), str(payload.get("password", "")))
+    if res.get("ok"):
+        rec = accounts.account(res["email"])
+        if rec and not rec.get("key_id"):
+            _issue_account_key(res["email"])
+    return make_response(res, 200 if res.get("ok") else 401)
+
+
+@app.route("/api/auth/reset-request", methods=["POST"])
+def api_auth_reset_request():
+    payload = request.get_json(silent=True) or {}
+    res = accounts.reset_request(str(payload.get("email", "")))
+    return make_response(res, 200)
+
+
+@app.route("/api/auth/reset-confirm", methods=["POST"])
+def api_auth_reset_confirm():
+    payload = request.get_json(silent=True) or {}
+    res = accounts.reset_confirm(
+        str(payload.get("email", "")),
+        str(payload.get("code", "")),
+        str(payload.get("new_password", "")),
+    )
+    return make_response(res, 200 if res.get("ok") else 400)
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def api_auth_me():
+    """Who am I: {email, role, is_admin} for the current session token."""
+    sess = _account_session()
+    if not sess:
+        return make_response({"ok": False, "error": "not signed in"}, 401)
+    return {"ok": True, "email": sess["email"], "role": sess["role"], "is_admin": sess["is_admin"]}
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_auth_logout():
+    accounts.logout(request.headers.get("X-Session-Token", ""))
+    return {"ok": True}
+
+
+@app.route("/api/admin/accounts", methods=["GET"])
+def api_admin_accounts():
+    """Admin/builder view of all accounts (no password material)."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    return {"ok": True, "accounts": accounts.list_accounts()}
+
+
+@app.route("/api/admin/accounts", methods=["DELETE"])
+def api_admin_accounts_delete():
+    """Admin removes an account: DELETE /api/admin/accounts?email=..."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    email = (request.args.get("email") or "").strip().lower()
+    if not email:
+        return make_response({"ok": False, "error": "email required"}, 400)
+    ok = accounts.remove_account(email)
+    return make_response({"ok": ok}, 200 if ok else 404)
 
 
 @app.route("/api/admin/keys", methods=["GET"])
@@ -1314,69 +1452,186 @@ def signup_page():
     return response
 
 
-@app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
-def openai_compat():
-    """OpenAI-compatible chat endpoint so popular coding tools etc.
-    can use Aali as their model: point the tool at
-      base_url = http://<pc-ip>:5055/v1   (api_key: a real Aali-issued key)
-    Runs the full agent loop with tools; returns an OpenAI-shaped response.
+@app.route("/v1/models", methods=["GET", "OPTIONS"])
+def openai_models():
+    """OpenAI-compatible model list so n8n / OpenRouter-style clients / Hugging
+    Face tools can discover Aali: GET http://<host>:5055/v1/models.
     """
     if request.method == "OPTIONS":
         return make_response(("", 204))
-    # Aali is the provider: this public endpoint accepts ONLY real keys —
-    # the admin master key or an issued per-user key — never "anything".
+    body = {
+        "object": "list",
+        "data": [
+            {"id": "aali", "object": "model", "created": 1700000000, "owned_by": "aali"},
+            {"id": "aali-local", "object": "model", "created": 1700000000, "owned_by": "aali"},
+        ],
+    }
+    response = make_response(body)
+    response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return response
+
+
+def _openai_auth() -> dict | None:
+    """Shared auth for the OpenAI-compatible surface: only real Aali keys
+    (admin master or issued per-user) pass; never "anything" (matches the
+    old /api contract — an unauthenticated LAN server stays open on purpose)."""
+    if not API_KEY:
+        return {"is_admin": True, "key_id": None}
     bearer = ""
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         bearer = auth_header[7:].strip()
     presented = bearer or _client_key()
-    if API_KEY:
-        auth = _auth_state(presented) if presented else None
-        if not auth:
-            return make_response({"error": {"message": "invalid API key", "type": "auth_error", "code": "invalid_api_key"}}, 401)
-        if not auth["is_admin"] and apikeys.over_daily_cap(auth["key_id"]):
-            return make_response({"error": {"message": "daily request cap reached", "type": "quota_error", "code": "rate_limit"}}, 429)
-        apikeys.record_usage(auth["key_id"])
+    auth = _auth_state(presented) if presented else None
+    if not auth:
+        return None
+    if not auth["is_admin"] and apikeys.over_daily_cap(auth["key_id"]):
+        return {"error": "daily request cap reached"}
+    apikeys.record_usage(auth["key_id"])
+    return auth
+
+
+def _openai_payload():
+    """Parse an OpenAI-style request into (message, history, model, stream, sid)."""
     payload = request.get_json(silent=True) or {}
     messages = payload.get("messages") or []
     user_msgs = [str(m.get("content", "")) for m in messages if m.get("role") == "user"]
-    if not user_msgs:
-        return make_response({"error": {"message": "messages with a user turn are required"}}, 400)
-    # Flatten multi-turn inputs into one agent request with history context.
     history = [
         {"role": str(m.get("role")), "content": str(m.get("content", ""))}
         for m in messages[:-1]
         if m.get("role") in ("user", "assistant")
     ]
-    message = user_msgs[-1]
-    sid = request.headers.get("X-Session-Id") or uuid.uuid4().hex
+    return {
+        "message": user_msgs[-1] if user_msgs else "",
+        "history": history,
+        "model": str(payload.get("model", "aali")),
+        "stream": bool(payload.get("stream", False)),
+        "sid": request.headers.get("X-Session-Id") or uuid.uuid4().hex,
+    }
+
+
+@app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
+def openai_compat():
+    """OpenAI-compatible chat endpoint so n8n, OpenRouter-style clients,
+    Hugging Face tools etc. can use Aali as their model:
+      base_url = http://<pc-ip>:5055/v1   (api_key: a real Aali-issued key)
+    Runs the full agent loop with tools; returns an OpenAI-shaped response,
+    or SSE chunks when stream=true (same machinery as /api/ask/stream).
+    """
+    if request.method == "OPTIONS":
+        return make_response(("", 204))
+    auth = _openai_auth()
+    if auth is None:
+        return make_response({"error": {"message": "invalid API key", "type": "auth_error", "code": "invalid_api_key"}}, 401)
+    if isinstance(auth, dict) and auth.get("error"):
+        return make_response({"error": {"message": auth["error"], "type": "quota_error", "code": "rate_limit"}}, 429)
+
+    parsed = _openai_payload()
+    message, history = parsed["message"], parsed["history"]
+    if not message:
+        return make_response({"error": {"message": "messages with a user turn are required"}}, 400)
+    sid = parsed["sid"]
     record = _get_session(sid)
     if sid not in _sessions:
         _save_session(record)
-    try:
-        reply = agent_loop(message, WORKSPACE_ROOT, mode="local", print_final=False, history=history)
-        ok = True
-    except AgentLoopError as exc:
-        reply = f"[خطأ] {exc}"
-        ok = False
-    _append_turn(record, "user", message)
-    _append_turn(record, "assistant", reply)
-    _meter_chars(len(message), len(reply))
-    import time as _time
 
-    body = {
-        "id": f"chatcmpl-{sid[:12]}",
-        "object": "chat.completion",
-        "created": int(_time.time()),
-        "model": payload.get("model", "aali-local"),
-        "choices": [{"index": 0,
-                     "message": {"role": "assistant", "content": reply},
-                     "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
-    response = make_response(body, 200 if ok else 500)
-    response.headers["Content-Type"] = "application/json; charset=utf-8"
-    return response
+    # Remote guests over a tunnel are forced to the server-enforced guest
+    # policy, exactly like /api/ask/stream — a remote key never gets commands.
+    remote_addr = request.remote_addr or ""
+    is_local = (remote_addr in {"127.0.0.1", "::1", "localhost"}
+                and not request.headers.get("X-Forwarded-For"))
+    policy = "auto"
+    if not is_local and auth and not auth["is_admin"]:
+        policy = "guest"
+
+    _append_turn(record, "user", message)
+
+    def _body(reply: str, ok: bool) -> dict:
+        return {
+            "id": f"chatcmpl-{sid[:12]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": parsed["model"],
+            "choices": [{"index": 0,
+                         "message": {"role": "assistant", "content": reply},
+                         "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+
+    if not parsed["stream"]:
+        try:
+            reply = agent_loop(message, WORKSPACE_ROOT, mode="local",
+                               print_final=False, history=history, policy=policy)
+            ok = True
+        except AgentLoopError as exc:
+            reply = f"[خطأ] {exc}"
+            ok = False
+        _append_turn(record, "assistant", reply)
+        _meter_chars(len(message), len(reply))
+        response = make_response(_body(reply, ok), 200 if ok else 500)
+        response.headers["Content-Type"] = "application/json; charset=utf-8"
+        return response
+
+    # ---- streaming: SSE chunks shaped like OpenAI's wire format ----
+    request_id = new_request_id()
+    events = agent_log.subscribe(request_id)
+    result: dict[str, object] = {}
+    gate_state: dict[str, object] = {}
+
+    def _run() -> None:
+        try:
+            reply = agent_loop(
+                message, WORKSPACE_ROOT, mode="local", print_final=False,
+                history=history, policy=policy,
+                gate_state=gate_state, request_id=request_id,
+            )
+            result["ok"], result["reply"] = True, reply
+        except AgentLoopError as exc:
+            result["ok"], result["reply"] = False, f"[خطأ] {exc}"
+        except Exception as exc:  # noqa: BLE001
+            result["ok"], result["reply"] = False, f"[خطأ] {exc}"
+        _append_turn(record, "assistant", str(result.get("reply", "")))
+        result["done"] = True
+
+    worker = threading.Thread(target=_run, name=f"aali-v1-{request_id}", daemon=True)
+    worker.start()
+
+    def _generate():
+        last_beat = time.time()
+        try:
+            while True:
+                try:
+                    event = events.get(timeout=1.0)
+                except queue.Empty:
+                    now = time.time()
+                    if now - last_beat >= 15:
+                        last_beat = now
+                        yield ": keep-alive\n\n"
+                    if result.get("done"):
+                        break
+                    continue
+                if result.get("done") and events.empty():
+                    break
+            reply = str(result.get("reply", ""))
+            chunk = {
+                "id": f"chatcmpl-{sid[:12]}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": parsed["model"],
+                "choices": [{"index": 0,
+                             "delta": {"role": "assistant", "content": reply},
+                             "finish_reason": "stop"}],
+            }
+            yield "data: " + json.dumps(chunk, ensure_ascii=False) + "\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            agent_log.unsubscribe(request_id)
+
+    return Response(
+        _generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.route("/new", methods=["POST"])
