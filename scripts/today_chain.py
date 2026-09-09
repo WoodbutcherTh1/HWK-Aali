@@ -49,6 +49,20 @@ def main() -> int:
             pass
     log("morning chain start: graduation pipeline -> Phase B resume (strictly serial)")
 
+    # Standing owner rule (2026-09-08): snapshot the Obsidian brain vault to
+    # X: before every GPU training run. Non-fatal on failure, like the
+    # caretaker's version.
+    try:
+        vault = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "build_brain_vault.py"),
+             "--out", "X:/hwk-backups/aali-brain-vault"],
+            capture_output=True, text=True, timeout=120,
+        )
+        log(f"vault export -> X:/hwk-backups/aali-brain-vault "
+            f"(exit {vault.returncode})")
+    except Exception as exc:  # noqa: BLE001
+        log(f"vault export failed (non-fatal): {exc}")
+
     code = run_stage(
         "graduation pipeline",
         [str(ROOT / ".venv" / "Scripts" / "python.exe"),
