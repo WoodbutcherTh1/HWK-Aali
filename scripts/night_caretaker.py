@@ -77,6 +77,9 @@ def training_state() -> dict:
         state["log_idle_min"] = (time.time() - TRAINING_LOG.stat().st_mtime) / 60
     except OSError:
         pass
+    # None (query failed) reads as not-alive here for display, but the
+    # safety decision in gpu_really_free() still blocks via card_is_safe's
+    # fail-closed process check.
     state["process_alive"] = bool(gate.python_compute_pids())
     return state
 

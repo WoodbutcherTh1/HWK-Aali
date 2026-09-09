@@ -80,13 +80,15 @@ def vram_used_mib() -> int | None:
         return None
 
 
-def python_compute_pids() -> list[int]:
+def python_compute_pids() -> list[int] | None:
     """PIDs of python/soup/ptxas processes holding a CUDA context (trainers,
-    servers). Browsers/DWM also hold contexts on Windows - not trainers, so
-    only python-family names block."""
+    servers) - None when the query itself fails (callers must treat that as
+    'cannot verify' and refuse, never as 'no processes'). Browsers/DWM also
+    hold contexts on Windows - not trainers, so only python-family names
+    block."""
     out = _run(QUERY_APPS)
     if out is None:
-        return []
+        return None
     pids: list[int] = []
     for line in out.splitlines():
         parts = [p.strip() for p in line.split(",")]
@@ -124,6 +126,9 @@ def card_is_safe(
     if used is None:
         return False, "nvidia-smi unavailable - cannot verify VRAM"
     pids = python_compute_pids()
+    if pids is None:
+        return False, ("nvidia-smi compute-apps unavailable - "
+                       "cannot verify processes")
     if pids:
         return False, f"python/soup compute on GPU: pids {pids}"
     if used >= threshold_mib:
