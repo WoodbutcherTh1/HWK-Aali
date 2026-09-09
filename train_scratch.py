@@ -342,7 +342,13 @@ def mirror_checkpoints(output_dir: Path, mirror_dir: Path | None) -> None:
         source = output_dir / name
         if source.exists():
             destination = mirror_dir / name
-            if not destination.exists() or destination.stat().st_size != source.stat().st_size:
+            # Size equality is not freshness: torch.save files are fixed-size
+            # (same tensor shapes every step), so a re-saved checkpoint keeps
+            # its byte count while its contents advance - compare mtimes too
+            # (copy2 preserves mtime, keeping this test stable across runs).
+            if (not destination.exists()
+                    or destination.stat().st_size != source.stat().st_size
+                    or destination.stat().st_mtime != source.stat().st_mtime):
                 shutil.copy2(source, destination)
 
 
