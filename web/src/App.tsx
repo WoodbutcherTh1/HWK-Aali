@@ -127,6 +127,33 @@ function nextMsgId() {
   return _nextMsgId++;
 }
 
+/* ————— theme: dark (default) / sepia — per-browser via localStorage,
+   applied as <html data-theme> so every color flows from CSS vars. ————— */
+type ThemeName = "dark" | "sepia";
+const THEME_KEY = "aali_theme";
+const THEMES: { id: ThemeName; icon: string; label: string }[] = [
+  { id: "dark", icon: "☾", label: "داكن" },
+  { id: "sepia", icon: "◕", label: "سيبيا" },
+];
+
+function loadTheme(): ThemeName {
+  const saved = localStorage.getItem(THEME_KEY);
+  return saved === "sepia" ? "sepia" : "dark";
+}
+
+/* greeting follows the clock: morning (5–12), afternoon (12–17), evening else */
+function greetingFor(now = new Date()): string {
+  const h = now.getHours();
+  if (h >= 5 && h < 12) return "صباح الخير";
+  if (h >= 12 && h < 17) return "نهارك سعيد";
+  return "مساء الخير";
+}
+
+function applyTheme(t: ThemeName) {
+  if (t === "sepia") document.documentElement.setAttribute("data-theme", "sepia");
+  else document.documentElement.removeAttribute("data-theme");
+}
+
 /* ————— sidebar nav (Aali-flavored mirror of the reference layout) ————— */
 type NavItem = {
   icon: string;
@@ -212,6 +239,11 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false); // sidebar as overlay on small screens
   const [railCollapsed, setRailCollapsed] = useState(() => localStorage.getItem("aali_rail") === "1");
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeName>(() => {
+    const t = loadTheme();
+    applyTheme(t);
+    return t;
+  });
   const chatRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastUserMessage = useRef<string>("");
@@ -261,6 +293,12 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("aali_rail", railCollapsed ? "1" : "0");
   }, [railCollapsed]);
+
+  const switchTheme = useCallback((t: ThemeName) => {
+    setTheme(t);
+    applyTheme(t);
+    localStorage.setItem(THEME_KEY, t);
+  }, []);
 
   useEffect(() => {
     const saved = getGithubToken();
@@ -789,9 +827,27 @@ export default function App() {
                 <span>✦</span> طوّر خطتك
               </motion.button>
               <span className="home-top-spacer" />
+              <div className="theme-toggle" role="group" aria-label="المظهر">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={theme === t.id ? "active" : ""}
+                    title={`مظهر ${t.label}`}
+                    onClick={() => switchTheme(t.id)}
+                  >
+                    {t.icon}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="hero">
+              <motion.div className="empty-state" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ ...spring, delay: 0.02 }}>
+                <span className="es-orb" aria-hidden="true">✦</span>
+                <span className="es-title">{greetingFor()} — كيف أساعدك اليوم؟</span>
+                <span className="es-sub">اكتب طلبك، أو جرّب أحد الاقتراحات بالأسفل</span>
+              </motion.div>
               <motion.h1 className="wordmark" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
                 آلي
               </motion.h1>
@@ -913,6 +969,19 @@ export default function App() {
               </span>
               <span className={`conn-dot ${connected === null ? "" : connected ? "ok" : "bad"}`} title={connected ? "متصل" : "غير متصل"} />
               <div className="chat-head-actions">
+                <div className="theme-toggle" role="group" aria-label="المظهر">
+                  {THEMES.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={theme === t.id ? "active" : ""}
+                      title={`${t.label} — ${t.id === "dark" ? "الليل" : "ورق دافئ"}`}
+                      onClick={() => switchTheme(t.id)}
+                    >
+                      {t.icon}
+                    </button>
+                  ))}
+                </div>
                 <button type="button" className="ghost-btn" title="الإعدادات" onClick={() => setShowSettings(true)}>⚙︎</button>
                 <button type="button" className="ghost-btn" title="محادثة جديدة (Ctrl K)" onClick={newChat}>＋</button>
               </div>
@@ -1044,6 +1113,21 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2>⚙︎ الإعدادات</h2>
+            <label>
+              المظهر
+              <div className="theme-toggle" style={{ marginTop: 6 }} role="group" aria-label="المظهر">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={theme === t.id ? "active" : ""}
+                    onClick={() => switchTheme(t.id)}
+                  >
+                    {t.icon} {t.label}
+                  </button>
+                ))}
+              </div>
+            </label>
             <label>
               عنوان الخادم (API)
               <input

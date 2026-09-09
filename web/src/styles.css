@@ -23,6 +23,46 @@
   --ok: #7fd6a4;
   --bad: #f08c8c;
   --radius: 16px;
+  --code-bg: #0c0d10;
+  --ambient-1: rgba(232, 179, 75, 0.075);
+  --ambient-2: rgba(64, 145, 140, 0.06);
+  --ambient-3: rgba(66, 190, 76, 0.035);
+}
+
+/* ————— sepia theme (owner choice, persisted per browser in localStorage;
+   applied via <html data-theme="sepia"> — every color flows from vars) ————— */
+:root[data-theme="sepia"] {
+  color-scheme: light;
+  --bg: #f0e6d6;
+  --bg-side: #e8dcc8;
+  --bg-2: #ede2cf;
+  --bg-3: #e3d6bf;
+  --line: #cbb99a;
+  --line-soft: #d8c9ae;
+  --text: #43382a;
+  --muted: #8a7a63;
+  --gold: #a4741f;
+  --gold-soft: #8a5f12;
+  --gold-dim: rgba(164, 116, 31, 0.14);
+  --green: #2e7d36;
+  --green-dim: rgba(46, 125, 54, 0.12);
+  --user-bg: #e6d9c0;
+  --ok: #2e7d36;
+  --bad: #b04a3a;
+  --code-bg: #f7efdf;
+  --ambient-1: rgba(164, 116, 31, 0.09);
+  --ambient-2: rgba(120, 96, 60, 0.07);
+  --ambient-3: rgba(46, 125, 54, 0.05);
+}
+
+:root[data-theme="sepia"] .stars { opacity: 0.18; }
+:root[data-theme="sepia"] .codeblock,
+:root[data-theme="sepia"] .md code { background: var(--code-bg); border: 1px solid var(--line-soft); }
+:root[data-theme="sepia"] .codeblock { border-color: var(--line); }
+:root[data-theme="sepia"] .codeblock pre code { border: 0; }
+:root[data-theme="sepia"] .wordmark {
+  background: linear-gradient(160deg, #6b4a0e, #a4741f 55%, #c9982f);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 
 * { box-sizing: border-box; }
@@ -32,8 +72,8 @@ body {
   margin: 0;
   /* layered depth: warm base + two breathing light sources (gold NW, deep teal SE) */
   background:
-    radial-gradient(1100px 620px at 12% -8%, rgba(232, 179, 75, 0.075), transparent 62%),
-    radial-gradient(1000px 700px at 96% 108%, rgba(64, 145, 140, 0.06), transparent 60%),
+    radial-gradient(1100px 620px at 12% -8%, var(--ambient-1), transparent 62%),
+    radial-gradient(1000px 700px at 96% 108%, var(--ambient-2), transparent 60%),
     var(--bg);
   color: var(--text);
   font-family: "Tajawal", Inter, system-ui, sans-serif;
@@ -46,18 +86,15 @@ button { font-family: inherit; }
 :focus-visible { outline: 2px solid rgba(232, 179, 75, 0.55); outline-offset: 2px; border-radius: 8px; }
 
 /* — starfield backdrop (kept, subtle) — */
-/* breathing ambient glow behind the whole app, above body but under content */
+/* ambient glow behind the whole app — static (owner: the breathing read as
+   flickering; a calm glow ages better than a pulsing one) */
 .app::before {
   content: "";
   position: absolute; inset: -20%; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(560px 380px at 30% 26%, rgba(232, 179, 75, 0.055), transparent 70%),
-    radial-gradient(520px 420px at 74% 80%, rgba(66, 190, 76, 0.035), transparent 72%);
-  animation: breathe 11s ease-in-out infinite alternate;
-}
-@keyframes breathe {
-  from { opacity: 0.55; transform: scale(1); }
-  to { opacity: 1; transform: scale(1.06); }
+    radial-gradient(560px 380px at 30% 26%, var(--ambient-1), transparent 70%),
+    radial-gradient(520px 420px at 74% 80%, var(--ambient-3), transparent 72%);
+  opacity: 0.8;
 }
 .stars {
   position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0.3;
@@ -266,7 +303,7 @@ button { font-family: inherit; }
   background: linear-gradient(160deg, #fff7e6 8%, var(--gold-soft) 38%, var(--gold) 62%, #c98f2e 92%);
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; color: transparent;
-  filter: drop-shadow(0 6px 34px rgba(232, 179, 75, 0.22));
+  filter: drop-shadow(0 4px 16px rgba(232, 179, 75, 0.10));
 }
 .tagline {
   margin: 0 0 26px; color: var(--muted); font-size: 0.92rem; font-weight: 600;
@@ -347,6 +384,33 @@ button { font-family: inherit; }
 .cmi-text { display: flex; flex-direction: column; gap: 1px; }
 .cmi-text b { font-size: 0.85rem; }
 .cmi-text small { color: var(--muted); font-size: 0.72rem; }
+
+/* — new-chat empty state: a warm greeting card above the ask box — */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  margin-bottom: 22px; text-align: center;
+}
+.empty-state .es-orb {
+  font-size: 1.9rem; color: var(--gold); margin-bottom: 2px;
+  text-shadow: 0 0 14px rgba(232, 179, 75, 0.22); /* static — no pulse */
+}
+.empty-state .es-title { font-size: 1.02rem; font-weight: 700; color: var(--text); }
+.empty-state .es-sub { font-size: 0.82rem; color: var(--muted); }
+
+/* — theme toggle (settings + chat header): sun/moon/sepia pill — */
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px;
+  background: var(--bg-2);
+}
+.theme-toggle button {
+  border: 0; background: transparent; cursor: pointer; color: var(--muted);
+  width: 30px; height: 26px; border-radius: 999px; font-size: 0.9rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 0.15s ease;
+}
+.theme-toggle button:hover { color: var(--text); background: var(--gold-dim); }
+.theme-toggle button.active { background: var(--gold-dim); color: var(--gold); box-shadow: inset 0 0 0 1px rgba(232, 179, 75, 0.35); }
 
 .quick-pills {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; margin-top: 18px;
@@ -457,20 +521,36 @@ button { font-family: inherit; }
 .md blockquote { margin: 8px 0; padding: 4px 12px; border-inline-start: 3px solid rgba(232, 179, 75, 0.5); color: var(--gold-soft); background: var(--gold-dim); border-radius: 6px; }
 .md a { color: var(--gold-soft); text-decoration: underline; text-underline-offset: 3px; }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
-.md code { background: #0c0d10; border-radius: 5px; padding: 1px 5px; font-size: 0.86em; direction: ltr; unicode-bidi: embed; }
-.codeblock { margin: 10px 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #0c0d10; }
+.md code { background: var(--code-bg); border-radius: 5px; padding: 1px 5px; font-size: 0.86em; direction: ltr; unicode-bidi: embed; }
+.codeblock { margin: 10px 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--code-bg); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14); }
 .codeblock-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 12px; background: var(--bg-3); border-bottom: 1px solid var(--line);
   font-size: 0.72rem; color: var(--muted); direction: ltr;
 }
+.codeblock-lang { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; letter-spacing: 0.02em; text-transform: lowercase; }
+.lang-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; box-shadow: 0 0 6px currentColor; }
 .codeblock-copy {
   border: 0; background: transparent; color: var(--muted); cursor: pointer;
   font-size: 0.72rem; padding: 2px 8px; border-radius: 6px; transition: all 0.12s ease;
 }
 .codeblock-copy:hover { color: var(--gold); background: var(--gold-dim); }
 .codeblock pre { margin: 0; padding: 12px; overflow-x: auto; direction: ltr; text-align: left; font-size: 0.86rem; }
-.codeblock pre code { background: none; padding: 0; }
+.codeblock pre code { background: none; padding: 0; border: 0; }
+
+/* — markdown tables (richer: wrapper scroll, zebra rows, gold header) — */
+.tablewrap { margin: 10px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+.md table { border-collapse: collapse; width: 100%; font-size: 0.84rem; }
+.md thead th {
+  background: var(--gold-dim); color: var(--gold-soft); text-align: start;
+  padding: 8px 12px; font-weight: 700; border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.md tbody td { padding: 7px 12px; border-bottom: 1px solid var(--line-soft); }
+.md tbody tr:last-child td { border-bottom: 0; }
+.md tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+:root[data-theme="sepia"] .md tbody tr:nth-child(even) { background: rgba(120, 96, 60, 0.05); }
+.md td code, .md th code { white-space: nowrap; }
 
 /* — live activity while the agent works — */
 .activity { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
@@ -658,7 +738,7 @@ dialog small code { color: var(--gold-soft); }
 }
 .gh-review-btn:hover { background: var(--gold); color: #241a05; }
 
-@keyframes pulse { 50% { box-shadow: 0 0 18px rgba(232, 179, 75, 0.3); } }
+@keyframes pulse { 50% { box-shadow: 0 0 10px rgba(232, 179, 75, 0.18); } }
 
 @media (max-width: 720px) {
   .quick-pills { gap: 7px; }
