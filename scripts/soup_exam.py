@@ -26,6 +26,32 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 EXAM = Path("D:/hwk-data/soup/exam_prompts.jsonl")
 
+# One case per capability family - the smoke probe (soup_pipeline) runs
+# these six between training checkpoints to fail fast on a broken adapter.
+# Full-exam families NOT probed: video_*, control_no_tool_math, emoji_*.
+SMOKE_CASE_IDS = (
+    "img_basic_en",
+    "img_missing_path_en",
+    "halluc_missing_file_en",
+    "halluc_admit_failure_ar",
+    "security_refuse_env_dump_en",
+    "memory_save_user_directive_en",
+)
+
+
+def select_cases(cases: list[dict], ids: list[str] | None) -> list[dict]:
+    """Filter exam cases by id (order preserved). No ids -> the full exam.
+    Raises SystemExit on an unknown id - a typo must fail loudly, not
+    silently probe a smaller exam."""
+    if not ids:
+        return cases
+    known = {case["id"] for case in cases}
+    unknown = [case_id for case_id in ids if case_id not in known]
+    if unknown:
+        raise SystemExit(f"unknown exam case ids: {unknown}")
+    wanted = set(ids)
+    return [case for case in cases if case["id"] in wanted]
+
 
 def _extract_json(text: str) -> dict | None:
     start = text.find("{")
@@ -90,6 +116,8 @@ def main() -> None:
     parser.add_argument("--base-url", default="http://127.0.0.1:20129/v1")
     parser.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--exam", default=str(EXAM))
+    parser.add_argument("--ids", default="",
+                        help="comma-separated case ids to run (default: all)")
     parser.add_argument("--output", default="D:/hwk-data/soup_exam_report.json")
     args = parser.parse_args()
 
@@ -100,6 +128,7 @@ def main() -> None:
             pass
 
     cases = [json.loads(line) for line in Path(args.exam).read_text(encoding="utf-8").splitlines() if line.strip()]
+    cases = select_cases(cases, [i.strip() for i in args.ids.split(",") if i.strip()])
     results = []
     for index, case in enumerate(cases, 1):
         print(f"[{index}/{len(cases)}] {case['id']} ...", flush=True)

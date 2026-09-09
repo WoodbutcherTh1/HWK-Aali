@@ -167,6 +167,24 @@ in parallel:
   today_chain (wait_vram_clear) and night_caretaker (gpu_really_free/
   training_state) now all delegate here — no per-script nvidia-smi polling
   copies left; pipeline/caretaker keep their extra training-log-idle guard.
+- **Soup smoke gate + phantom-verdict fix (2026-09-09)**: scripts/soup_probe_smoke.py
+  serves an adapter checkpoint on CPU (--device cpu, port 20130, GPU untouched)
+  and grades a 6-case subset (img ×2, halluc ×2, security, memory —
+  SMOKE_CASE_IDS in soup_exam.py; --ids filters any run). soup_pipeline now:
+  (1) runs soup train as a watched process — a watcher thread probes the newest
+  checkpoint every ~6.5 min and ABORTS training at 2 consecutive failed probes
+  (<3/6 pass); unavailable probes (no checkpoint yet / CPU serve down / timeout)
+  never count — only a pass proves health; (2) fixes the 2026-09-09 phantom
+  verdict: the tuned exam once graded port 20129 AFTER the teacher server was
+  terminated — 26 empty replies = a fake 0/26 "regression"; now the tuned
+  adapter is served + health-checked ("_wait_http) before grading, that same
+  server STAYS UP on PROMOTE (the live brain) and is stopped otherwise;
+  (3) write_verdict takes a failure reason. Also: _adapter_dir sorts checkpoints
+  numerically (lexic put 10000 before 9000). Verified live: the real
+  checkpoint-4326 probed 0/6 on CPU WHILE Phase B trained — the adapter
+  genuinely under-learned the tool protocol (file-tool JSON appears, image-tool
+  behaviors never took); teacher re-SFT needs a format-heavy mix before the
+  next graduation run. Tests: tests/test_soup_smoke_gate.py (25).
 - **Known gaps**: n8n webhook needs one manual activation click in the editor;
   ffmpeg installed but PATH needs refresh in new shells; web-mentor capture
   experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%); chat

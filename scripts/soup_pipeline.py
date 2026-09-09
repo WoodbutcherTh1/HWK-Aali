@@ -31,7 +31,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +46,7 @@ except ImportError:  # pragma: no cover
 # "is the 8GB card free", used by every launcher on this machine.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wait_gpu_free as gate  # noqa: E402
+from soup_exam import SMOKE_CASE_IDS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SOUP_EXE = Path(os.getenv("SOUP_EXE", "D:/hwk-tools/soup-venv/Scripts/soup.exe"))
@@ -55,7 +58,16 @@ SOUP_CONFIG = ROOT / "soup.yaml"
 REPORTS = Path("D:/hwk-data/soup")
 BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 PORT = 20129
+# The smoke probe serves on its OWN port and on CPU, so it can run while the
+# GPU trains and can never collide with the exam/promotion port.
+SMOKE_PORT = PORT + 1
+SMOKE_MIN_PASS = 3            # of 6 probe cases (2x img, 2x halluc, security, memory)
+SMOKE_MAX_CONSECUTIVE_FAILS = 2  # abort training at the 2nd consecutive failed probe
+SMOKE_POLL_S = 390            # watcher cadence (~6.5 min - one probe cycle)
 IDLE_MINUTES = 15
+
+# The soup train process while it runs (so the smoke watcher can abort it).
+training_process: subprocess.Popen | None = None
 LOG_TAIL = Path("D:/hwk-data/soup_pipeline_last_stage.txt")
 
 _model_re = re.compile(r"Qwen/Qwen2\.5-(\d+\.?\d*)B")
@@ -118,10 +130,17 @@ def wait_for_gpu(no_wait: bool, timeout_hours: float = 12.0) -> bool:
     return False
 
 
+def _ckpt_step(path: Path) -> int:
+    """Numeric step of a 'checkpoint-<step>' dir (lexic sort puts 10000
+    before 9000 - a promoted-adapter bug waiting to happen)."""
+    match = re.search(r"checkpoint-(\d+)$", path.name)
+    return int(match.group(1)) if match else -1
+
+
 def _adapter_dir() -> Path:
     """Latest Soup output that actually contains trained adapter weights."""
     out_root = REPORTS / "tuned"
-    candidates = sorted(out_root.glob("checkpoint-*"), reverse=True)
+    candidates = sorted(out_root.glob("checkpoint-*"), key=_ckpt_step, reverse=True)
     for candidate in candidates:
         if (candidate / "adapter_model.safetensors").exists():
             return candidate
@@ -156,6 +175,22 @@ def resolve_teacher_model() -> str:
     return str(LOCAL_TEACHER)
 
 
+def _wait_http(url: str, timeout_s: int = 900, log_fn=None) -> bool:
+    """Poll a URL until it answers 2xx (up to 15 min for a model load)."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                if 200 <= response.status < 300:
+                    return True
+        except Exception:  # noqa: BLE001 - not up yet
+            pass
+        time.sleep(10)
+    if log_fn is not None:
+        log_fn(f"{url} not ready after {timeout_s}s")
+    return False
+
+
 def serve_teacher() -> subprocess.Popen | None:
     try:
         model_ref = resolve_teacher_model()
@@ -188,15 +223,21 @@ def serve_teacher() -> subprocess.Popen | None:
     return None
 
 
-def run_exam(stage: str, model: str) -> dict | None:
-    """Grade `model` on the 24-case exam; writes soup_exam_report_<stage>.json."""
+def run_exam(stage: str, model: str, ids: list[str] | None = None) -> dict | None:
+    """Grade `model` on the exam; writes soup_exam_report_<stage>.json.
+    ids=None runs the full 26-case exam; a subset probes only those cases."""
     report_path = REPORTS / f"soup_exam_report_{stage}.json"
     log(f"exam [{stage}] model={model}")
+    command = [
+        sys.executable, str(ROOT / "scripts" / "soup_exam.py"),
+        "--base-url", f"http://127.0.0.1:{PORT}/v1",
+        "--model", model,
+        "--output", str(report_path),
+    ]
+    if ids:
+        command += ["--ids", ",".join(ids)]
     completed = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "soup_exam.py"),
-         "--base-url", f"http://127.0.0.1:{PORT}/v1",
-         "--model", model,
-         "--output", str(report_path)],
+        command,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=3600,
     )
@@ -232,7 +273,138 @@ def wait_vram_clear(timeout_s: int = 240) -> None:
         log(f"VRAM still busy after {timeout_s}s ({reason}) - training may OOM")
 
 
+# ---------------------------------------------------------------------------
+# Smoke probe: cheap CPU-served exam between training checkpoints, so a
+# broken adapter dies in ~1h instead of burning 3h for a 0/26 verdict
+# (2026-09-09: the tuned exam graded a DEAD endpoint and scored 0/26 -
+# the smoke gate also forces a live serving check before any real exam).
+# ---------------------------------------------------------------------------
+
+def _probe_endpoint(base_url: str, prompt: str, model: str, timeout: int = 120) -> str:
+    """One chat completion; empty string on any failure (never raises)."""
+    try:
+        payload = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 200,
+            "temperature": 0.0,
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            base_url.rstrip("/") + "/chat/completions", data=payload,
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        return str(body["choices"][0]["message"]["content"])
+    except Exception:  # noqa: BLE001 - probe failures are data, not crashes
+        return ""
+
+
+def _cpu_serving_ok() -> bool:
+    """Cheap guard before relying on the CPU-served probe: the soup venv
+    must import torch and report enough threads to serve while the GPU
+    trains. A weak machine skips the gate for the whole run (logged)."""
+    probe = subprocess.run(
+        [str(Path(SOUP_EXE).parent / "python.exe"), "-c",
+         "import torch; print(torch.get_num_threads())"],
+        capture_output=True, text=True, timeout=120,
+    )
+    try:
+        threads = int(probe.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        threads = 0
+    # torch reports PHYSICAL cores (6 on the owner's 12-thread i7) - do not
+    # demand logical-core counts or the gate disables itself in production.
+    if probe.returncode != 0 or threads < 4:
+        log(f"smoke probe disabled: soup venv CPU check failed "
+            f"(exit {probe.returncode}, threads={threads})")
+        return False
+    return True
+
+
+SMOKE_LOG_TAIL = Path("D:/hwk-data/smoke_probe_tail.txt")
+
+
+def run_smoke_probe(stage: str) -> dict | None:
+    """Serve the latest adapter on CPU (:SMOKE_PORT) and grade the 6-case
+    subset. Returns the graded report or None when the probe is unavailable
+    (no checkpoint yet / CPU serve not viable). Never touches the GPU."""
+    adapter = _adapter_dir()
+    if not (adapter / "adapter_model.safetensors").exists():
+        log(f"smoke probe [{stage}]: no adapter checkpoint yet - skipping")
+        return None
+    try:
+        probe = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "soup_probe_smoke.py"),
+             "--model", str(adapter), "--port", str(SMOKE_PORT),
+             "--ids", ",".join(SMOKE_CASE_IDS),
+             "--output", str(REPORTS / f"smoke_{stage}.json")],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=1800,
+        )
+    except subprocess.TimeoutExpired:
+        # A timed-out probe is 'unavailable', never a failed probe - it must
+        # not crash the watcher thread or count toward the abort threshold.
+        log(f"smoke probe [{stage}] timed out after 1800s - treating as unavailable")
+        return None
+    try:
+        SMOKE_LOG_TAIL.write_text(
+            (probe.stdout or "")[-2000:] + (probe.stderr or "")[-2000:],
+            encoding="utf-8")
+    except OSError:
+        pass
+    if probe.returncode != 0:
+        log(f"smoke probe [{stage}] FAILED (exit {probe.returncode}) "
+            f"- see {SMOKE_LOG_TAIL}")
+        return None
+    try:
+        report = json.loads((REPORTS / f"smoke_{stage}.json")
+                            .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        log(f"smoke probe [{stage}] produced no readable report")
+        return None
+    log(f"smoke probe [{stage}] score: {report.get('score')} "
+        f"(need >= {SMOKE_MIN_PASS}/{len(SMOKE_CASE_IDS)})")
+    return report
+
+
+def _probe_passes(report: dict | None) -> bool:
+    if not report:
+        return False
+    match = re.match(r"(\d+)/", str(report.get("score", "")))
+    return (int(match.group(1)) if match else 0) >= SMOKE_MIN_PASS
+
+
+def smoke_watcher(stop: threading.Event, abort_reason: list[str]) -> None:
+    """Probe the newest adapter checkpoint every ~6.5 min while training runs
+    (first checkpoints appear after ~epoch 1). Two consecutive FAILED probes
+    = the run is broken: terminate the trainer. Unavailable probes (no
+    checkpoint yet, CPU serve not viable) never count as failures."""
+    trainer = training_process
+    if trainer is None or not _cpu_serving_ok():
+        return
+    consecutive_fails = 0
+    while not stop.wait(SMOKE_POLL_S):
+        report = run_smoke_probe("midtrain")
+        if report is None:
+            continue  # unavailable != failed
+        if _probe_passes(report):
+            consecutive_fails = 0
+            log("smoke gate: probe passed - training continues")
+        else:
+            consecutive_fails += 1
+            log(f"smoke gate: probe FAILED "
+                f"({consecutive_fails}/{SMOKE_MAX_CONSECUTIVE_FAILS})")
+            if consecutive_fails >= SMOKE_MAX_CONSECUTIVE_FAILS:
+                reason = ("smoke gate: 2 consecutive failed probes - "
+                          "adapter is broken, aborting training")
+                log(reason)
+                abort_reason.append(reason)
+                trainer.terminate()
+                return
+
+
 def run_training() -> bool:
+    global training_process
     if not SFT_V2.exists():
         log(f"missing dataset {SFT_V2} - run scripts/build_aali_sft_v2.py first")
         return False
@@ -243,21 +415,47 @@ def run_training() -> bool:
         log(f"error: {SOUP_CONFIG} does not point at {SFT_V2} - fix data.train first")
         return False
     log(f"starting soup train on {SFT_V2.name}")
-    completed = subprocess.run(
+    # Stream the trainer's output to a live log (the old capture-to-buffer
+    # died with subprocess.run); on exit the tail goes to last_stage.txt.
+    train_log_handle = (REPORTS.parent / "soup_train_live.log").open("w",
+                                                                    encoding="utf-8")
+    training_process = subprocess.Popen(
         [str(SOUP_EXE), "train", "--config", str(SOUP_CONFIG), "--yes"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=6 * 3600,
+        stdout=train_log_handle, stderr=subprocess.STDOUT,
     )
-    LOG_TAIL.write_text((completed.stdout or "")[-4000:] + (completed.stderr or "")[-4000:],
-                        encoding="utf-8")
-    if completed.returncode != 0:
-        log(f"soup train FAILED (exit {completed.returncode}) - see {LOG_TAIL}")
+    stop = threading.Event()
+    abort_reason: list[str] = []
+    watcher = threading.Thread(target=smoke_watcher,
+                               args=(stop, abort_reason), daemon=True)
+    watcher.start()
+    try:
+        returncode = training_process.wait()  # releases the GIL
+    finally:
+        stop.set()
+        watcher.join(timeout=5)
+        training_process = None
+        try:
+            train_log_handle.close()
+        except OSError:
+            pass
+    try:
+        live_text = (REPORTS.parent / "soup_train_live.log").read_text(
+            encoding="utf-8", errors="replace")
+        LOG_TAIL.write_text(live_text[-4000:], encoding="utf-8")
+    except OSError:
+        pass
+    if abort_reason:
+        log(f"soup train ABORTED - {abort_reason[0]}")
+        return False
+    if returncode != 0:
+        log(f"soup train FAILED (exit {returncode})")
         return False
     log("soup train finished")
     return True
 
 
-def write_verdict(baseline: dict | None, tuned: dict | None) -> str:
+def write_verdict(baseline: dict | None, tuned: dict | None,
+                  reason: str = "") -> str:
     def _score(report: dict | None) -> int:
         if not report:
             return -1
@@ -284,6 +482,7 @@ def write_verdict(baseline: dict | None, tuned: dict | None) -> str:
         f"| tuned | {_model_for_adapter()} + adapter | {tuned.get('score') if tuned else 'failed'} |",
         "",
         f"**Verdict: {verdict}**",
+        *( [f"_Reason: {reason}_", ""] if reason else [] ),
         "",
         "Gate: promotion requires the tuned model to strictly beat the baseline",
         "on the same 24-case exam (memory + security + anti-hallucination).",
@@ -387,26 +586,39 @@ def main() -> int:
         if not run_training():
             write_verdict(baseline, None)
             return 1
-        tuned = run_exam("tuned", _model_for_adapter())
-        if tuned is None:
-            write_verdict(baseline, None)
+        # Phantom-verdict lesson (2026-09-09): the tuned exam once graded
+        # port 20129 AFTER the teacher server was terminated - 26 empty
+        # replies became a 0/26 "regression" that never tested the adapter.
+        # Serve the tuned adapter FIRST and confirm it answers; on PROMOTE
+        # this same server stays up as Aali's live brain
+        # (agent_loop.promoted_own_model -> promoted.json base_url).
+        adapter = _adapter_dir()
+        log(f"serving tuned adapter on :{PORT} ({adapter})")
+        promoted_server: subprocess.Popen | None = None
+        try:
+            promoted_server = subprocess.Popen(
+                [str(SOUP_EXE), "serve", "--model", str(adapter), "--port", str(PORT)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+            )
+        except OSError as exc:
+            log(f"could not serve tuned adapter ({exc})")
+            write_verdict(baseline, None, "tuned adapter server failed to start")
+            return 1
+        if not _wait_http(f"http://127.0.0.1:{PORT}/v1/models", timeout_s=900,
+                          log_fn=log):
+            log("tuned adapter server never became ready - refusing to grade a dead endpoint")
+            promoted_server.terminate()
+            write_verdict(baseline, None, "tuned adapter server never became ready")
             return 1
         report_text = write_verdict(baseline, tuned)
         log("=== soup pipeline done ===")
-        # When promoted, keep serving the TUNED adapter so Aali's own brain
-        # (agent_loop.promoted_own_model -> promoted.json base_url) is live.
-        if report_text.startswith("# Soup re-SFT pipeline report") and "Verdict: PROMOTE" in report_text:
-            adapter = _adapter_dir()
-            try:
-                # NOTE: a dedicated variable - reusing `server` made the
-                # finally below terminate the freshly promoted server.
-                promoted = subprocess.Popen(
-                    [str(SOUP_EXE), "serve", "--model", str(adapter), "--port", str(PORT)],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-                )
-                log(f"serving promoted adapter on :{PORT} (pid {promoted.pid})")
-            except OSError as exc:
-                log(f"could not serve promoted adapter ({exc}) - Aali falls back")
+        if "Verdict: PROMOTE" in report_text:
+            log(f"promoted adapter stays serving on :{PORT} "
+                f"(pid {promoted_server.pid})")
+        else:
+            log("no promotion - stopping the tuned-adapter server")
+            promoted_server.terminate()
+            promoted_server = None
         return 0
     finally:
         if server is not None:
