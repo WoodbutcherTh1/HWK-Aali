@@ -219,6 +219,33 @@ def run_exam(stage: str, model: str) -> dict | None:
     return report
 
 
+def wait_vram_clear(timeout_s: int = 240) -> None:
+    """Wait until used VRAM drops to desktop-idle levels (<1.5 GB).
+
+    Terminating the exam server is not enough on Windows: the driver
+    releases its VRAM asynchronously, and the old fixed 15s sleep still
+    OOM'd soup train (2026-09-09 09:50 - the server's ~4GB was still
+    held when training started). Poll until the card is actually clear.
+    """
+    deadline = time.monotonic() + timeout_s
+    last_used = -1
+    while time.monotonic() < deadline:
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.used",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=30,
+            ).stdout.strip().splitlines()
+            last_used = int(out[-1]) if out else 1 << 30
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            last_used = 1 << 30
+        if last_used < 1500:
+            log(f"VRAM released ({last_used} MiB used) - ready to train")
+            return
+        time.sleep(10)
+    log(f"VRAM still busy after {timeout_s}s ({last_used} MiB) - training may OOM")
+
+
 def run_training() -> bool:
     if not SFT_V2.exists():
         log(f"missing dataset {SFT_V2} - run scripts/build_aali_sft_v2.py first")
@@ -369,8 +396,8 @@ def main() -> int:
         log("stopping exam server to free VRAM for training")
         server.terminate()
         server.wait(timeout=60)
-        time.sleep(15)  # driver async release
         server = None
+        wait_vram_clear()
         if not run_training():
             write_verdict(baseline, None)
             return 1
