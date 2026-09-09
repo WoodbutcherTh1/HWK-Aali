@@ -172,7 +172,9 @@ in parallel:
   Desktop from docs/assets screenshots; docs/assets/aali_tour.gif in README.
 - **Terminal client (2026-09-09)**: scripts/aali_cli.py — Claude Code-style
   colorful REPL (● tool traces via /api/ask/stream SSE, spinner, /new /open
-  /clear /sid /help, y/N danger confirm, UTF-8 forced for exe use); ships as
+  /clear /theme gold|matrix|ocean (saved in ~/.aali_cli_theme, --theme/AALI_THEME
+  flag, live swatch preview) /sid /help, y/N danger confirm, UTF-8 forced for
+  exe use); ships as
   build-desktop/dist/aali-cli.exe inside the installer with a Start-Menu
   «آلي — Terminal» entry (Aali-Setup.iss [Icons]); docs/assets/aali_cli_demo.gif
   + README CLI section; auto-starts the server via start_app.bat when absent.

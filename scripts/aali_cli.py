@@ -9,11 +9,13 @@ Usage:
     .venv\\Scripts\\python.exe scripts\\aali_cli.py              # interactive
     .venv\\Scripts\\python.exe scripts\\aali_cli.py -q "2+2?"    # one-shot
     .venv\\Scripts\\python.exe scripts\\aali_cli.py --markdown   # pipe file
+    .venv\\Scripts\\python.exe scripts\\aali_cli.py --theme matrix
     .venv\\Scripts\\python.exe scripts\\aali_cli.py --base http://127.0.0.1:5055
 
 Keys: Ctrl+C cancels the current request (or exits on the prompt);
       /exit quits, /new starts a fresh session, /open N resumes,
-      /clear clears the screen, /help lists commands.
+      /clear clears the screen, /theme switches the colour theme,
+      /help lists commands.
 """
 from __future__ import annotations
 
@@ -48,17 +50,85 @@ except Exception:  # noqa: BLE001
     pass
 
 # ----------------------------------------------------------------- palette
+# Role-based themes: every paint(…, "gold") call really means "primary
+# accent" — each theme decides which colour that is, so switching themes
+# never touches a call site.
+THEMES: dict[str, dict[str, str]] = {
+    "gold": {  # the warm HWK brand look (default)
+        "gold": "38;5;179",
+        "green": "38;5;114",
+        "cyan": "38;5;80",
+        "red": "38;5;203",
+        "grey": "38;5;245",
+        "white": "97",
+    },
+    "matrix": {  # phosphor terminal green on black
+        "gold": "38;5;118",
+        "green": "38;5;46",
+        "cyan": "38;5;50",
+        "red": "38;5;196",
+        "grey": "38;5;250",
+        "white": "97",
+    },
+    "ocean": {  # deep-sea blues and teal
+        "gold": "38;5;81",
+        "green": "38;5;79",
+        "cyan": "38;5;117",
+        "red": "38;5;210",
+        "grey": "38;5;245",
+        "white": "97",
+    },
+}
+DEFAULT_THEME = "gold"
+THEME_FILE = Path.home() / ".aali_cli_theme"
+theme_name = DEFAULT_THEME
+
 C = {
-    "gold": "\033[38;5;179m",
-    "green": "\033[38;5;114m",
-    "cyan": "\033[38;5;80m",
-    "red": "\033[38;5;203m",
-    "grey": "\033[38;5;245m",
-    "white": "\033[97m",
     "bold": "\033[1m",
     "dim": "\033[2m",
     "reset": "\033[0m",
 }
+
+
+def set_theme(name: str) -> bool:
+    """Activate a theme by (fuzzy) name; repaint the global palette C."""
+    global theme_name
+    wanted = name.strip().lower()
+    match = None
+    for key in THEMES:
+        if wanted == key or key.startswith(wanted) or wanted.startswith(key):
+            match = key
+            break
+    if match is None:
+        return False
+    theme_name = match
+    for role, code in THEMES[match].items():
+        C[role] = f"\033[{code}m"
+    return True
+
+
+def load_saved_theme() -> str:
+    """Apply the theme saved by /theme (defaults to gold when none/invalid)."""
+    try:
+        saved = THEME_FILE.read_text(encoding="utf-8").strip().lower()
+        if saved in THEMES:
+            set_theme(saved)
+            return saved
+    except OSError:
+        pass
+    set_theme(DEFAULT_THEME)
+    return DEFAULT_THEME
+
+
+def save_theme(name: str) -> None:
+    """Persist the chosen theme across sessions (best effort)."""
+    try:
+        THEME_FILE.write_text(name + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+set_theme(DEFAULT_THEME)
 
 # BRB spinner — the "moving" element (straight ASCII, terminal-safe)
 SPINNER = ["|", "/", "-", "\\"]
@@ -118,10 +188,12 @@ def banner(width: int) -> None:
         return
     inner = 38
     g, d, r = C["gold"], C["dim"], C["reset"]
+    l1 = "  AALI · agent on your machine".ljust(inner)
+    l2 = f"  local · private · own model · {theme_name}".ljust(inner)
     print()
     print(f"{g}╭{'─' * inner}╮{r}")
-    print(f"{g}│{r}  AALI · agent on your machine        {g}│{r}")
-    print(f"{g}│{r}{d}  local · private · your own model    {r}{g}│{r}")
+    print(f"{g}│{r}{l1}{g}│{r}")
+    print(f"{g}│{r}{d}{l2}{r}{g}│{r}")
     print(f"{g}╰{'─' * inner}╯{r}")
     print(paint("  آلي — مساعدك المحلي، جاهز.", "gold"))
     print(paint("  /help commands · Ctrl+C cancel · /exit quit", "dim"))
@@ -292,7 +364,29 @@ def repl(base: str, api_key: str = "") -> None:
                     break
                 if cmd == "/help":
                     print(paint("  /new new session · /open N resume session N · /clear clear screen", "dim"))
+                    print(paint("  /theme switch colours (gold · matrix · ocean) — /theme alone previews", "dim"))
                     print(paint("  /sid show session id · /exit quit · Ctrl+C cancel current run", "dim"))
+                    continue
+                if cmd == "/theme":
+                    if arg.strip():
+                        if set_theme(arg):
+                            save_theme(theme_name)
+                            say("✻", f"theme → {theme_name} (saved)", "gold")
+                            os.system("cls" if os.name == "nt" else "clear")
+                            banner(width)
+                        else:
+                            say("✗", f"unknown theme “{arg.strip()}” — /theme lists them", "warn")
+                    else:
+                        print(paint("  themes:", "dim", enabled=color))
+                        for key in THEMES:
+                            sw = "".join(
+                                paint("●", role, enabled=color)
+                                for role in ("gold", "green", "cyan", "red")
+                            )
+                            cur = paint("  ● current", "grey", enabled=color) if key == theme_name else ""
+                            print(paint(f"  {sw} ", "bold", enabled=color)
+                                  + f"{key:<8}" + cur)
+                        print(paint("  switch with /theme gold | matrix | ocean", "dim", enabled=color))
                     continue
                 if cmd == "/new":
                     sid = "cli-" + str(int(time.time()))
@@ -375,7 +469,17 @@ def main() -> None:
     ap.add_argument("--markdown", help="send a file's text content to Aali")
     ap.add_argument("--base", default=os.environ.get("AALI_BASE", "http://127.0.0.1:5055"))
     ap.add_argument("--key", default=os.environ.get("AALI_API_KEY", ""), help="X-API-Key")
+    ap.add_argument("--theme", default=os.environ.get("AALI_THEME", ""),
+                    help="colour theme: gold | matrix | ocean "
+                         "(default: saved theme from ~/.aali_cli_theme)")
     args = ap.parse_args()
+
+    if args.theme:
+        if not set_theme(args.theme):
+            print(paint(f"✗ unknown theme {args.theme!r} — choose one of: {', '.join(THEMES)}", "red"))
+            sys.exit(2)
+    else:
+        load_saved_theme()
 
     if args.markdown:
         text = Path(args.markdown).read_text(encoding="utf-8", errors="replace")
