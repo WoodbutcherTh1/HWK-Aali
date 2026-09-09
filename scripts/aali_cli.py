@@ -50,6 +50,259 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
+# ------------------------------------------------- Arabic display (bidi/shaping)
+# Classic Windows consoles (conhost) have NO bidi reordering and NO Arabic
+# shaping: logical-order Arabic prints disconnected and mirrored (owner
+# screenshot 2026-09-09: "آلي — مساعدك المحلي" came out as
+# "يلآ .زهاج ،يلحلا ديسم"). We shape into Unicode presentation forms and
+# reorder runs for display ourselves — stdlib-only so the exe stays free.
+# Windows Terminal (WT_SESSION) and friends do bidi natively: there the
+# transform must stay OFF or letters get double-reversed. /bidi toggles.
+
+# base letter -> (isolated, final, initial, medial) presentation forms
+_ARABIC_FORMS: dict[str, tuple[int | None, int | None, int | None, int | None]] = {
+    "ء": (0xFE80, None, None, None),
+    "آ": (0xFE81, 0xFE82, None, None),
+    "أ": (0xFE83, 0xFE84, None, None),
+    "ؤ": (0xFE85, 0xFE86, None, None),
+    "إ": (0xFE87, 0xFE88, None, None),
+    "ئ": (0xFE89, 0xFE8A, 0xFE8B, 0xFE8C),
+    "ا": (0xFE8D, 0xFE8E, None, None),
+    "ب": (0xFE8F, 0xFE90, 0xFE91, 0xFE92),
+    "ة": (0xFE93, 0xFE94, None, None),
+    "ت": (0xFE95, 0xFE96, 0xFE97, 0xFE98),
+    "ث": (0xFE99, 0xFE9A, 0xFE9B, 0xFE9C),
+    "ج": (0xFE9D, 0xFE9E, 0xFE9F, 0xFEA0),
+    "ح": (0xFEA1, 0xFEA2, 0xFEA3, 0xFEA4),
+    "خ": (0xFEA5, 0xFEA6, 0xFEA7, 0xFEA8),
+    "د": (0xFEA9, 0xFEAA, None, None),
+    "ذ": (0xFEAB, 0xFEAC, None, None),
+    "ر": (0xFEAD, 0xFEAE, None, None),
+    "ز": (0xFEAF, 0xFEB0, None, None),
+    "س": (0xFEB1, 0xFEB2, 0xFEB3, 0xFEB4),
+    "ش": (0xFEB5, 0xFEB6, 0xFEB7, 0xFEB8),
+    "ص": (0xFEB9, 0xFEBA, 0xFEBB, 0xFEBC),
+    "ض": (0xFEBD, 0xFEBE, 0xFEBF, 0xFEC0),
+    "ط": (0xFEC1, 0xFEC2, 0xFEC3, 0xFEC4),
+    "ظ": (0xFEC5, 0xFEC6, 0xFEC7, 0xFEC8),
+    "ع": (0xFEC9, 0xFECA, 0xFECB, 0xFECC),
+    "غ": (0xFECD, 0xFECE, 0xFECF, 0xFED0),
+    "ف": (0xFED1, 0xFED2, 0xFED3, 0xFED4),
+    "ق": (0xFED5, 0xFED6, 0xFED7, 0xFED8),
+    "ك": (0xFED9, 0xFEDA, 0xFEDB, 0xFEDC),
+    "ل": (0xFEDD, 0xFEDE, 0xFEDF, 0xFEE0),
+    "م": (0xFEE1, 0xFEE2, 0xFEE3, 0xFEE4),
+    "ن": (0xFEE5, 0xFEE6, 0xFEE7, 0xFEE8),
+    "ه": (0xFEE9, 0xFEEA, 0xFEEB, 0xFEEC),
+    "و": (0xFEED, 0xFEEE, None, None),
+    "ى": (0xFEEF, 0xFEF0, None, None),
+    "ي": (0xFEF1, 0xFEF2, 0xFEF3, 0xFEF4),
+}
+
+
+# Extended Arabic-script letters (Persian/Urdu/Kurdish: پ چ ژ ک گ ی …) are
+# derived from Unicode itself at import time: every codepoint in the Arabic
+# Presentation Forms blocks carries a decomposition tag (<isolated>/<final>/
+# <initial>/<medial>) plus its base letter. Typo-proof and complete — owner
+# request 2026-09-09.
+import unicodedata as _ud
+
+for _cp in range(0xFB50, 0xFE00):
+    _decomp = _ud.decomposition(chr(_cp))
+    if not _decomp.startswith("<"):
+        continue
+    _tag, _, _rest = _decomp.partition(" ")
+    _parts = _rest.split()
+    if len(_parts) != 1:  # lam-alef ligatures decompose to 2 letters — skip
+        continue
+    _base = chr(int(_parts[0], 16))
+    if _base not in _ARABIC_FORMS:  # core Arabic table above stays canonical
+        _ARABIC_FORMS[_base] = (None, None, None, None)
+    _idx = {"<isolated>": 0, "<final>": 1, "<initial>": 2, "<medial>": 3}[_tag]
+    _forms = list(_ARABIC_FORMS[_base])
+    if _forms[_idx] is None:
+        _forms[_idx] = _cp
+    _ARABIC_FORMS[_base] = tuple(_forms)
+#
+# (right-joining classification for the derived letters is appended right
+# after _RIGHT_JOINING is defined below — reh-family never joins forward.)
+# lam + alef-variant ligatures: pair -> (isolated, final)
+_LAM_ALEF = {"لا": (0xFEFB, 0xFEFC), "لأ": (0xFEF7, 0xFEF8),
+             "لإ": (0xFEF9, 0xFEFA), "لآ": (0xFEF5, 0xFEF6)}
+# letters that connect only to the PREVIOUS letter (no initial/medial form)
+_RIGHT_JOINING = set("ءآأؤإاةدذرزوى")
+# derived extended letters that join only backward too (reh-family: ژ ڈ ڑ ں ے)
+_RIGHT_JOINING.update({"ژ", "ڈ", "ڑ", "ں", "ے"})
+# combining marks (harakat): pass through, never affect joining
+_MARKS = set(chr(c) for c in range(0x064B, 0x0660)) | {chr(0x0670)}
+_HAS_ARABIC_RE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
+# presentation forms never occur in logical source text — seeing one means
+# the string was already display-processed (fx must be idempotent)
+_PRESENTATION_RE = re.compile(r"[\uFB50-\uFDFF\uFE70-\uFEFF]")
+# runs that must stay LTR inside RTL text: latin, digits, urls, numbers
+_LTR_RUN = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+\-/%:#@]*")
+_MIRROR = str.maketrans("()[]{}<>«»", ")(][}{><»«")
+
+
+def shape_arabic(text: str) -> str:
+    """Logical Arabic -> contextual presentation forms (lam-alef ligatures,
+    initial/medial/final/isolated selection). Non-Arabic passes through."""
+    out: list[str] = []
+    prev_connects = False  # previous Arabic letter connects forward to this one
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in _MARKS:
+            out.append(ch)
+            i += 1
+            continue
+        pair = text[i:i + 2]
+        if ch == "ل" and pair in _LAM_ALEF:
+            iso, fin = _LAM_ALEF[pair]
+            out.append(chr(fin if prev_connects else iso))
+            prev_connects = False
+            i += 2
+            continue
+        if ch in _ARABIC_FORMS:
+            iso, fin, ini, med = _ARABIC_FORMS[ch]
+            joins_fwd = (ch not in _RIGHT_JOINING and i + 1 < n
+                         and (text[i + 1] in _ARABIC_FORMS or text[i + 1] in _MARKS
+                              and i + 2 < n and text[i + 2] in _ARABIC_FORMS))
+            if prev_connects and joins_fwd and med is not None:
+                out.append(chr(med))
+            elif prev_connects and fin is not None:
+                out.append(chr(fin))
+            elif joins_fwd and ini is not None:
+                out.append(chr(ini))
+            elif iso is not None:
+                out.append(chr(iso))
+            else:
+                out.append(ch)
+            prev_connects = joins_fwd
+            i += 1
+            continue
+        out.append(ch)
+        prev_connects = False
+        i += 1
+    return "".join(out)
+
+
+def _reverse_rtl(chunk: str) -> str:
+    """Reverse one RTL run for visual order; keep harakat attached to their
+    base letter and mirror paired brackets."""
+    units: list[str] = []
+    i = 0
+    while i < len(chunk):
+        unit = chunk[i]
+        i += 1
+        while i < len(chunk) and chunk[i] in _MARKS:
+            unit += chunk[i]
+            i += 1
+        units.append(unit)
+    units.reverse()
+    return "".join(units).translate(_MIRROR)
+
+
+def reorder_visual(text: str) -> str:
+    """Shaped logical order -> visual order for an LTR terminal: RTL runs
+    are reversed, LTR runs (latin/digits/urls) kept intact, run order
+    reversed so the sentence reads right-to-left on screen."""
+    tokens: list[tuple[bool, str]] = []
+    i, n = 0, len(text)
+    while i < n:
+        m = _LTR_RUN.match(text, i)
+        if m:
+            tokens.append((True, m.group(0)))
+            i = m.end()
+            continue
+        j = i + 1
+        while j < n and not _LTR_RUN.match(text, j):
+            j += 1
+        tokens.append((False, text[i:j]))
+        i = j
+    parts: list[str] = []
+    for is_ltr, chunk in reversed(tokens):
+        parts.append(chunk if is_ltr else _reverse_rtl(chunk))
+    return "".join(parts)
+
+
+def _wrap_logical(text: str, width: int) -> list[str]:
+    """Word-aware wrap of LOGICAL-order text before shaping: the terminal
+    breaks a long line into screen rows, and since the reorder is per-row,
+    each wrapped row must be a coherent logical slice — else the second row
+    reads backwards."""
+    lines: list[str] = []
+    for raw in text.splitlines() or [""]:
+        words = raw.split(" ")
+        cur = ""
+        for word in words:
+            candidate = f"{cur} {word}" if cur else word
+            if len(candidate) > width and cur:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = candidate
+            while len(cur) > width:  # single word longer than the row
+                lines.append(cur[:width])
+                cur = cur[width:]
+        lines.append(cur)
+    return lines
+
+
+def fx(text: str, width: int = 0) -> str:
+    """Display fix: shape + reorder Arabic. With `width` set, overlong lines
+    are wrapped at that many cells FIRST (logical order), so terminal-wrapped
+    Arabic stays readable (owner report 2026-09-09). Idempotent (an
+    already-shaped string is returned unchanged) and a no-op on pure-Latin."""
+    if _PRESENTATION_RE.search(text) or not _HAS_ARABIC_RE.search(text):
+        return text
+    if width and len(text) > width:
+        return "\n".join(
+            reorder_visual(shape_arabic(line)) for line in _wrap_logical(text, width))
+    return reorder_visual(shape_arabic(text))
+
+
+BIDI_FILE = Path.home() / ".aali_cli_bidi"
+BIDI_MODE = False  # display transform active? (set by apply_bidi_pref)
+
+
+def _terminal_bidi_capable() -> bool:
+    """Terminals that do bidi/shaping themselves — where our transform would
+    double-reverse the text."""
+    if os.environ.get("WT_SESSION"):  # Windows Terminal
+        return True
+    if os.environ.get("TERM_PROGRAM") in {
+            "vscode", "iTerm.app", "WezTerm", "Apple_Terminal", "mintty"}:
+        return True
+    if os.environ.get("ANSICON") or os.environ.get("ConEmuANSI") == "ON":
+        return True
+    return False
+
+
+def load_bidi_pref() -> str:
+    try:
+        saved = BIDI_FILE.read_text(encoding="utf-8").strip().lower()
+        if saved in {"on", "off", "auto"}:
+            return saved
+    except OSError:
+        pass
+    return "auto"
+
+
+def save_bidi_pref(value: str) -> None:
+    try:
+        BIDI_FILE.write_text(value + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def apply_bidi_pref() -> None:
+    global BIDI_MODE
+    pref = load_bidi_pref()
+    BIDI_MODE = (pref == "on" or (pref == "auto" and not _terminal_bidi_capable()))
+
+
 # ----------------------------------------------------------------- palette
 # Role-based themes: every paint(…, "gold") call really means "primary
 # accent" — each theme decides which colour that is, so switching themes
@@ -141,7 +394,16 @@ def _supports_color() -> bool:
     return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
 
+def _term_width() -> int:
+    try:
+        return max(20, shutil.get_terminal_size().columns - 1)
+    except Exception:  # noqa: BLE001
+        return 100
+
+
 def paint(text: str, *styles: str, enabled: bool = True) -> str:
+    if enabled and BIDI_MODE:
+        text = fx(text, _term_width())  # shape + reorder (single choke point)
     if not enabled:
         return text
     return "".join(C.get(s, "") for s in styles) + text + C["reset"]
@@ -228,19 +490,23 @@ def render_reply(text: str, color: bool) -> None:
             m = pat.match(line)
             if not m:
                 continue
-            body = m.group(1)
+            # fx is idempotent, so paint may shape again (a no-op) when colour
+            # is on — applying it here keeps headings/bullets fixed even with
+            # colour disabled (BIDI_MODE is a terminal property, not a colour one).
+            body = fx(m.group(1)) if BIDI_MODE else m.group(1)
             if kind == "h":
                 print(paint(body, "bold", "gold", enabled=color))
             elif kind == "li":
                 print(paint("  • ", "green", enabled=color) + body)
             elif kind == "oli":
-                print(paint(f"  {m.group(1)}. ", "green", enabled=color) + m.group(2))
+                tail = fx(m.group(2)) if BIDI_MODE else m.group(2)
+                print(paint(f"  {m.group(1)}. ", "green", enabled=color) + tail)
             break
         else:
             out = line
             out = re.sub(r"\*\*(.+?)\*\*", lambda mm: mm.group(1), out)
             out = re.sub(r"`([^`]+)`", lambda mm: f"{mm.group(1)}", out)
-            print(out)
+            print(fx(out, _term_width()) if BIDI_MODE else out)
 
 
 # ----------------------------------------------------------------- streaming
@@ -338,7 +604,7 @@ HISTORY_MAX = 500
 
 _KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
 _SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear",
-                   "/theme", "/tools", "/multi", "/sid")
+                   "/theme", "/tools", "/multi", "/sid", "/bidi")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -717,7 +983,8 @@ def repl(base: str, api_key: str = "") -> None:
         print()
 
     def say(tag: str, text: str, style: str) -> None:
-        print(paint(f"{tag} ", style, "bold", enabled=color) + text)
+        body = fx(text, _term_width()) if BIDI_MODE else text
+        print(paint(f"{tag} ", style, "bold", enabled=color) + body)
 
     while True:
         try:
@@ -735,8 +1002,22 @@ def repl(base: str, api_key: str = "") -> None:
                     print(paint("  /new new session · /open N resume session N · /clear clear screen", "dim"))
                     print(paint("  /theme switch colours (gold · matrix · ocean) — /theme alone previews", "dim"))
                     print(paint("  /tools what Aali can do · /multi paste a multi-line block", "dim"))
-                    print(paint("  /sid show session id · /exit quit · Ctrl+C cancel current run", "dim"))
+                    print(paint("  /sid show session id · /bidi Arabic display fix (on/off/auto) · /exit quit", "dim"))
                     print(paint("  TAB completes commands · ↑/↓ history · trailing \\ continues the line", "dim"))
+                    continue
+                if cmd == "/bidi":
+                    arg = arg.strip().lower()
+                    if arg in {"on", "off", "auto"}:
+                        save_bidi_pref(arg)
+                        apply_bidi_pref()
+                        state = "ACTIVE" if BIDI_MODE else "inactive"
+                        say("✻", "arabic display fix → " + arg + " (" + state + " here)", "info")
+                    else:
+                        state = "on" if BIDI_MODE else "off"
+                        print(paint(f"  arabic display fix: {state} "
+                                    f"(pref: {load_bidi_pref()})", "dim", enabled=color))
+                        print(paint("  use when Arabic shows disconnected/backwards "
+                                    "(classic conhost) — /bidi on | off | auto", "dim", enabled=color))
                     continue
                 if cmd == "/theme":
                     if arg.strip():
@@ -791,8 +1072,10 @@ def repl(base: str, api_key: str = "") -> None:
                             content = str(turn.get("content", ""))
                             who = "you" if role == "user" else "آلي"
                             style = cols["user"] if role == "user" else cols["aali"]
-                            print(paint(f"{who} ", style, "bold", enabled=color)
-                                  + content[:400].replace("\n", " "))
+                            body = content[:400].replace("\n", " ")
+                            if BIDI_MODE:
+                                body = fx(body)
+                            print(paint(f"{who} ", style, "bold", enabled=color) + body)
                     except Exception as exc:  # noqa: BLE001
                         say("✗", f"session fetch failed: {exc}", "warn")
                     continue
@@ -865,7 +1148,17 @@ def main() -> None:
     ap.add_argument("--theme", default=os.environ.get("AALI_THEME", ""),
                     help="colour theme: gold | matrix | ocean "
                          "(default: saved theme from ~/.aali_cli_theme)")
+    ap.add_argument("--bidi", default=os.environ.get("AALI_BIDI", ""),
+                    help="Arabic display fix: on | off | auto "
+                         "(default: saved pref from ~/.aali_cli_bidi)")
     args = ap.parse_args()
+
+    if args.bidi:
+        if args.bidi.lower() not in {"on", "off", "auto"}:
+            print(paint(f"✗ --bidi must be on | off | auto, got {args.bidi!r}", "red"))
+            sys.exit(2)
+        save_bidi_pref(args.bidi.lower())
+    apply_bidi_pref()
 
     if args.theme:
         if not set_theme(args.theme):
