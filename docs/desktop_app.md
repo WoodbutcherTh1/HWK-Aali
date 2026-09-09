@@ -8,9 +8,9 @@ talk to him via web, desktop app, CLI, terminal."*
 ```
                 ┌────────────────────────────┐
    web/PWA ────▶│                            │
-   desktop ────▶│   Aali server (Flask)      │──▶ brains: scratch model /
-   CLI ────────▶│   /api/* + SSE streaming   │    Ollama / OpenRouter /
-   terminal ───▶│   per-user sessions        │    Anthropic / Gemini / a major AI vendor
+   desktop ────▶│   Aali server (Flask)      │──▶ brains: Aali's own trained
+   CLI ────────▶│   /api/* + SSE streaming   │    model (soup) / local chat
+   terminal ───▶│   per-user sessions        │    brain / direct-command mode
                 └────────────────────────────┘
 ```
 

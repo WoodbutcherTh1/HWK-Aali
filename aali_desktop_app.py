@@ -324,8 +324,8 @@ EXTRAS_JS = """
     });
   });
 
-  // platform pills — connect Aali as a model on n8n / OpenRouter-style tools /
-  // Hugging Face (all speak the OpenAI-compatible /v1 endpoint).
+  // platform pills — connect Aali as a model in external tools
+  // (all speak the standard /v1 model wire protocol).
   var base=(localStorage.getItem('aali_api')||location.origin).replace(/\\/$/,'');
   function platformBox(title, lines, copyText){
     if(box) box.remove();
@@ -350,18 +350,18 @@ EXTRAS_JS = """
     platformBox('🧩 n8n', lines,
       'POST '+base+'/v1/chat/completions\nAuthorization: Bearer <Aali key>\n{"model":"aali","messages":[{"role":"user","content":""}]}');
   });
-  pill('🔄 اربط آلي مع OpenRouter','',function(){
+  pill('🔄 اربط آلي مع أدوات المحادثة','',function(){
     var lines=[
-      'أي عميل يتكلم OpenAI (مثل أدوات OpenRouter،\nLibreChat، Cline…) اضبط:'
+      'أي عميل نماذج (مثل أدوات المحادثة المفتوحة،\nLibreChat، Cline…) اضبط:'
     ];
-    platformBox('🔄 OpenRouter-style', lines,
+    platformBox('🔄 أدوات المحادثة', lines,
       'Base URL: '+base+'/v1\nAPI Key: <Aali key>\nModel: aali');
   });
-  pill('🤗 اربط آلي مع Hugging Face','',function(){
+  pill('🤗 اربط آلي مع منصات الاستضافة','',function(){
     var lines=[
-      'في أي أداة تدعم Inference/OpenAI:','Base URL → '+base+'/v1','Model → aali'
+      'في أي أداة تدعم واجهة النماذج:','Base URL → '+base+'/v1','Model → aali'
     ];
-    platformBox('🤗 Hugging Face', lines,
+    platformBox('🤗 منصات النماذج', lines,
       'Base URL: '+base+'/v1\nModel: aali\nAPI Key: <Aali key>');
   });
 })();

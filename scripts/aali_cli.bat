@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  آلي في الترمينال — Claude Code-style client
+rem  آلي في الترمينال — عميل طرفية حي يعرض الأدوات لحظة بلحظة
 rem  Double-click me: colorful animated chat with Aali.
 rem ============================================================
 setlocal

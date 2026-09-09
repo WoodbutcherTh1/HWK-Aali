@@ -1,4 +1,4 @@
-# نشر آلي للعالم — Hugging Face · Ollama · OpenRouter
+# نشر آلي للعالم — منصات النشر
 
 *للمالك: Hmam Kaadna — أُضيف 2026-09-09 بناءً على طلبه: "أريد رفع نموذج آلي
 إلى Hugging Face وأمثالها ليجرب المستخدمون آلي كأي نموذج آخر".*
@@ -63,14 +63,14 @@ ollama create aali -f D:\hwk-models\aali-merged\Modelfile
 ollama run aali
 ```
 
-## 5) OpenRouter (قائمة النشر)
+## 5) قائمة النشر لمنصات النماذج
 
 ```bat
 .venv\Scripts\python scripts\publish_aali.py --openrouter
 ```
 
 يكتب `D:\hwk-data\soup\openrouter_checklist.md`: خطوات تقديم النموذج،
-والتحقق الحي من نقطة `/v1` المتوافقة (خادم آلي يدعمها أصلًا على
+والتحقق الحي من نقطة `/v1` القياسية (خادم آلي يدعمها أصلًا على
 `/v1/chat/completions`). بيانات الحساب والأرباح تُدخلها أنت بنفسك.
 
 ## الحدود الصادقة

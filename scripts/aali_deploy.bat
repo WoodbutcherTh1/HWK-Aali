@@ -21,7 +21,7 @@ echo   [2] تدريب + امتحان الترقية  (soup pipeline - GPU)
 echo   [3] دمج المحوّل بالنموذج    (merge adapter)
 echo   [4] نشر على Hugging Face    (private أولاً)
 echo   [5] تجهيز Ollama            (Modelfile + GGUF steps)
-echo   [6] قائمة OpenRouter        (checklist + probe)
+echo   [6] قائمة النشر للمنصات     (checklist + probe)
 echo   [7] دفع التحديثات إلى GitHub (commit + push)
 echo   [8] خروج
 echo.

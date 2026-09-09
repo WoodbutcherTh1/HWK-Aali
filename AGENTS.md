@@ -269,7 +269,7 @@ in parallel:
   (صباح/نهارك/مساء الخير), markdown tables, language-colored code fences
   (GitHub palette dot), plus the earlier streaming/sessions/chips work.
   web/src builds clean (tsc + vite); dist rebuilt and served at /ui/.
-- **Terminal client (2026-09-09)**: scripts/aali_cli.py — Claude Code-style
+- **Terminal client (2026-09-09)**: scripts/aali_cli.py — pro-CLI-style
   colorful REPL (● tool traces via /api/ask/stream SSE, spinner, /new /open
   /clear /theme gold|matrix|ocean (saved in ~/.aali_cli_theme, --theme/AALI_THEME
   flag, live swatch preview) /tools (live from /api/tools) /multi /sid /help,
@@ -307,14 +307,14 @@ in parallel:
   protocol example moved INSIDE the system prompt — as chat messages the 7b
   brain echoed the example user text back ("ما هي أدواتك؟" → answered the
   example). Capability triggers extended (أدواتك / your tools…).
-- **OpenAI-compatible /v1 + desktop 1.0.3 (2026-09-09)**: آلي يتكلم OpenAI —
+- **/v1 provider surface + desktop 1.0.3 (2026-09-09)**: آلي يصبح موفّراً —
   file-agent/app.py يضيف `GET /v1/models` (يعرض aali, aali-local) و
-  `POST /v1/chat/completions` (متوافق OpenAI: non-stream + stream:true SSE
-  بنفس شكل chunks الرسمي وينتهي بـ data: [DONE])، بنفس المصادقة/سياسة الضيف
-  للـ API العادي؛ فأي عميل OpenAI (n8n، LibreChat، Cline، Open WebUI،
-  HuggingFace clients…) يستخدم آلي كنموذج بـ Base URL
+  `POST /v1/chat/completions` (بالمخطط النمطي المتّبع في واجهات النماذج:
+  non-stream + stream:true SSE وينتهي بـ data: [DONE])، بنفس المصادقة/سياسة
+  الضيف للـ API العادي؛ فأي عميل يتكلم هذا المخطط (n8n، أدوات المحادثة
+  المفتوحة…) يستخدم آلي كنموذج بـ Base URL
   `http://<host>:5055/v1`. docs/clients.md §3.5. Desktop overlay أضاف
-  حبّات المنصات (🧩 n8n / 🔄 OpenRouter / 🤗 HuggingFace) تنسخ الإعدادات
+  حبّات ربط المنصات تنسخ الإعدادات
   جاهزة؛ web: عدّاد الثواني يعدّ نبضات (+1/ثانية) بدل recompute فيتأخر
   عند خلفية التاب؛ نصوص «العقل» أوضح («إشعال عقل آلي…» → «آلي يفكر… N
   ثانية»). tests/test_openai_compat.py (5). Desktop v1.0.3: exe metadata
@@ -334,4 +334,4 @@ in parallel:
   من ~31MB إلى ~26MB — دليل تحذيري مفيد). ثم انسخ dist/*.exe إلى
   %LOCALAPPDATA%\Programs\AaliDesktop\ (نمط التحديث المعتمد).
 
-— Last updated: 2026-09-09 (attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 OpenAI-compatible surface + desktop auto-boot 1.0.3 (cloudflared bundled); sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-10 (attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)

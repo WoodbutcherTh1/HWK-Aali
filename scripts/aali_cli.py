@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Aali CLI — a Claude Code-style terminal client for the Aali server.
+"""Aali CLI — a pro-style terminal client for the Aali server.
 
 Colorful, animated, Linux-terminal look: banner box, gold prompt, live spinner
-while Aali thinks, tool lines streaming as he works (like Claude Code's tool
+while Aali thinks, tool lines streaming as he works (live tool traces
 traces), markdown-ish rendering, follow-up suggestion chips, slash commands.
 
 Usage:
@@ -514,7 +514,7 @@ def stream_ask(base: str, message: str, sid: str, confirm: bool = False,
                api_key: str = "") -> dict:
     """POST /api/ask/stream and consume the SSE events with a live spinner.
 
-    Activity events render as Claude Code-style tool traces; the `done`
+    Activity events render as live tool traces; the `done`
     event carries the reply. Returns the done body ({} on cancellation).
     """
     if not sys.stdout.isatty():

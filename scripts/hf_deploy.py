@@ -184,7 +184,7 @@ def main() -> int:
     print(f"API:      https://{username}-{args.space}.hf.space/api/ask  (X-API-Key: the AALI_API_KEY secret)")
     print(f"AALI_API_KEY (save it, give it to your clients): {api_key}")
     print("Build takes ~3-5 min. NOTE: the Space has no model brain yet —")
-    print("add an OPENROUTER_API_KEY secret (or wait for the re-SFT upload) to bring it alive.")
+    print("add the provider API-key secret (or wait for the re-SFT upload) to bring it alive.")
     return 0
 
 

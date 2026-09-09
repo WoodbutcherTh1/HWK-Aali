@@ -41,7 +41,7 @@ powershell -NoProfile -Command "$env:PORT='5055'; Start-Process -WindowStyle Hid
   master `AALI_API_KEY` is env-only and not stored.
 - Admin dashboard at `/admin` (full control: issue / list / revoke / usage
   stats). Admin endpoints require the master key.
-- `/v1/chat/completions` (OpenAI-compatible) now REQUIRES a real key
+- `/v1/chat/completions` (standard model wire protocol) now REQUIRES a real key
   (`Authorization: Bearer <key>` or `X-API-Key`) — it no longer accepts
   "anything".
 - Config env: `AALI_OPEN_SIGNUP` (1=open self-serve, 0=admin-only),
