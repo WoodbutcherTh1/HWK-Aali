@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import threading
 import time
 import uuid
@@ -122,6 +123,134 @@ SESSIONS_FILE = Path(__file__).resolve().parent / "sessions.jsonl"
 MAX_TURNS = 100  # long conversation history kept on disk and shown in chat
 SESSION_TTL_SECONDS = 30 * 24 * 3600  # sessions last 30 days
 SID_COOKIE = "hwk_sid"
+
+# ---- attachments (2026-09-09): users send files/photos/videos with a chat ----
+UPLOAD_DIR = "uploads"  # inside the sandboxed workspace; served via /api/file
+UPLOAD_MAX_BYTES = 100 * 1024 * 1024  # 100 MB cap (videos)
+
+
+def _safe_upload_name(name: str) -> str:
+    """Keep the visible name readable but filesystem-safe (no paths/odd chars)."""
+    base = re.sub(r"[^\w\u0600-\u06FF. ()\[\]-]+", "_", (name or "file").strip())
+    base = base.replace("..", "_").lstrip(".") or "file"  # no dotfiles, no traversal
+    return base[:120]
+
+
+def _kind_of(suffix: str) -> str:
+    s = suffix.lower()
+    if s in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}:
+        return "image"
+    if s in {".mp4", ".avi", ".mkv", ".mov", ".webm"}:
+        return "video"
+    if s in {".mp3", ".wav", ".m4a", ".ogg", ".flac"}:
+        return "audio"
+    if s in {".pdf", ".docx", ".xlsx"}:
+        return "document"
+    return "text"
+
+
+def _analyze_upload(path: Path) -> dict[str, object]:
+    """Analyze-first: extract what Aali can KNOW about the file before he's
+    asked anything — OCR for images, parser for documents, Whisper transcript
+    + frame OCR for videos/audio. Returns a compact content summary dict."""
+    from file_agent import file_tools
+
+    rel = str(path.relative_to(WORKSPACE_ROOT)).replace("\\", "/")
+    root = str(WORKSPACE_ROOT)
+    kind = _kind_of(path.suffix)
+    try:
+        if kind == "image":
+            out = file_tools.read_image(rel, root)
+            return {"kind": kind, "text": str(out.get("text", ""))[:6000],
+                    "note": str(out.get("note", ""))[:200]}
+        if kind == "document":
+            out = file_tools.read_document(rel, root)
+            return {"kind": kind, "text": str(out.get("text", ""))[:12000],
+                    "pages": out.get("pages")}
+        if kind in {"video", "audio"}:
+            return _analyze_media_upload(path)
+        # text-like: read directly (code, md, csv, txt …), never binary
+        if kind == "text" and path.suffix.lower() not in {".zip", ".exe", ".dll"}:
+            raw = path.read_bytes()[:200_000]
+            try:
+                return {"kind": "text", "text": raw.decode("utf-8")[:12000]}
+            except UnicodeDecodeError:
+                return {"kind": "binary", "note": "ملف ثنائي — لا يمكن قراءته نصياً"}
+    except Exception as exc:  # noqa: BLE001
+        return {"kind": kind, "error": f"{type(exc).__name__}: {exc}"[:300]}
+    return {"kind": kind}
+
+
+def _analyze_media_upload(path: Path) -> dict[str, object]:
+    """Video/audio understanding via the same subprocess bridge analyze_video uses."""
+    import subprocess
+    import sys as _sys
+
+    kind = _kind_of(path.suffix)
+    script = Path(__file__).resolve().parent.parent / "scripts" / "video_tools.py"
+    try:
+        if kind == "audio":
+            # audio: transcribe only — feed it through the video tool's audio path
+            proc = subprocess.run(
+                [_sys.executable, "-u", str(script), str(path), "--interval", "9999",
+                 "--max-frames", "1", "--transcript"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=900)
+        else:
+            proc = subprocess.run(
+                [_sys.executable, "-u", str(script), str(path), "--interval", "5",
+                 "--max-frames", "12", "--transcript"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=900)
+        if proc.returncode != 0:
+            return {"kind": kind, "error": (proc.stderr or proc.stdout or "")[-300:]}
+        import json as _json
+        data = _json.loads(proc.stdout or "{}")
+        ocr = data.get("frames_ocr") or []
+        text = " ".join(str(f.get("text", "")) for f in ocr)[:6000]
+        return {"kind": kind,
+                "duration_sec": data.get("duration_sec"),
+                "frames_text": text,
+                "transcript": str(data.get("transcript") or "")[:12000]}
+    except Exception as exc:  # noqa: BLE001
+        return {"kind": kind, "error": f"{type(exc).__name__}: {exc}"[:300]}
+
+
+def _load_attachments(stored_names: list[str]) -> list[dict[str, object]]:
+    """Re-validate + re-analyze stored uploads at ask time. The client only
+    sends names; the server never trusts client-supplied analysis."""
+    out: list[dict[str, object]] = []
+    for name in stored_names[:4]:  # cap: 4 attachments per message
+        path = WORKSPACE_ROOT / UPLOAD_DIR / name
+        try:
+            path.resolve().relative_to((WORKSPACE_ROOT / UPLOAD_DIR).resolve())
+        except ValueError:
+            continue
+        if not path.is_file():
+            continue
+        out.append({"name": name, "stored": name, "analysis": _analyze_upload(path)})
+    return out
+
+
+def _attachment_context(attachments: list[dict[str, object]]) -> str:
+    """Build the context block injected into the user's message for /api/ask."""
+    if not attachments:
+        return ""
+    parts = ["\n\n[أرفق المستخدم ملفات مع رسالته — حلّلها واستخدمها في إجابتك:"]
+    for att in attachments:
+        info = att.get("analysis") or {}
+        parts.append(
+            f"- ملف: {att.get('name')} (نوع: {info.get('kind', '؟')}) "
+            f"المسار داخل مجلد العمل: uploads/{att.get('stored')}"
+        )
+        text = str(info.get("text") or info.get("transcript") or info.get("frames_text") or "").strip()
+        if text:
+            parts.append(f"  محتوى مستخرج: {text[:4000]}")
+        for key in ("note", "error"):
+            if info.get(key):
+                parts.append(f"  {key}: {str(info[key])[:200]}")
+    parts.append("")
+    return "\n".join(parts)
 
 _sessions: dict[str, dict[str, object]] = {}
 
@@ -231,6 +360,14 @@ def api_ask():
     # each connector reads its API key from an env var on this machine, so
     # picking one here never means sending a key through the chat.
     provider = str(payload.get("provider", "auto"))
+
+    # Attachments: stored names are re-derived on the server (never trust the
+    # client-supplied analysis) and their extracted context prepended.
+    stored_names = [str(s) for s in (payload.get("attachments") or [])
+                    if re.fullmatch(r"[\w\u0600-\u06FF. ()\[\]-]{1,140}", str(s))
+                    and ".." not in str(s)]
+    attachments = _load_attachments(stored_names)
+    message = message + _attachment_context(attachments)
 
     # Remote guests: force the server-enforced guest policy for non-admin
     # keys arriving from outside 127.0.0.1 (see /api/ask/stream for notes).
@@ -352,6 +489,14 @@ def api_ask_stream():
     policy = str(payload.get("policy", "auto"))
     confirmed = bool(payload.get("confirm", False))
     provider = str(payload.get("provider", "auto"))
+
+    # Attachments (same contract as /api/ask): validate stored names, load
+    # fresh analysis from disk, append context to the message.
+    stored_names = [str(s) for s in (payload.get("attachments") or [])
+                    if re.fullmatch(r"[\w\u0600-\u06FF. ()\[\]-]{1,140}", str(s))
+                    and ".." not in str(s)]
+    attachments = _load_attachments(stored_names)
+    message = message + _attachment_context(attachments)
 
     # Remote guests: a non-admin key arriving from outside 127.0.0.1 is forced
     # into the server-enforced guest policy — dangerous tools stay blocked no
@@ -540,6 +685,35 @@ def api_tools():
     Rendered by the CLI's /tools command and available to the web UI."""
     from agent_loop import tool_specs
     return {"ok": True, "tools": tool_specs()}
+
+
+@app.route("/api/attach", methods=["POST"])
+def api_attach():
+    """Upload an attachment for the next ask: multipart file -> uploads/ inside
+    the sandboxed workspace, analyzed immediately (OCR / document parser /
+    Whisper). Returns {ok, stored, name, kind, analysis} — the client then
+    sends `attachments:[stored names]` with the next /api/ask."""
+    try:
+        up = request.files.get("file")
+        if up is None or not up.filename:
+            return make_response({"ok": False, "error": "file is required"}, 400)
+        safe = _safe_upload_name(up.filename)
+        updir = WORKSPACE_ROOT / UPLOAD_DIR
+        updir.mkdir(parents=True, exist_ok=True)
+        stamp = uuid.uuid4().hex[:6]
+        stored = f"{stamp}_{safe}"
+        target = updir / stored
+        up.save(target)
+        if target.stat().st_size > UPLOAD_MAX_BYTES:
+            target.unlink(missing_ok=True)
+            return make_response({"ok": False, "error": "file too large (cap 100MB)"}, 413)
+        analysis = _analyze_upload(target)
+        return make_response({
+            "ok": True, "stored": stored, "name": safe,
+            "kind": analysis.get("kind", "file"), "analysis": analysis,
+        })
+    except Exception as exc:  # noqa: BLE001
+        return make_response({"ok": False, "error": f"{type(exc).__name__}: {exc}"[:300]}, 500)
 
 
 @app.route("/api/file/<path:relpath>")

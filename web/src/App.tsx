@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   askStream,
+  attach,
   compactSession,
   deleteSession,
   getApiBase,
@@ -13,6 +14,7 @@ import {
   setApiBase,
   setToken,
   type ActivityEvent,
+  type Attachment,
   type PendingAction,
   type Policy,
   type SessionRow,
@@ -36,6 +38,7 @@ interface Msg {
   thinking?: boolean;
   pending?: PendingAction;
   suggestions?: string[];
+  files?: Attachment[]; // attachments the user sent with this message
 }
 
 interface Activity {
@@ -239,6 +242,9 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false); // sidebar as overlay on small screens
   const [railCollapsed, setRailCollapsed] = useState(() => localStorage.getItem("aali_rail") === "1");
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [files, setFiles] = useState<Attachment[]>([]); // composer attachments
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [theme, setTheme] = useState<ThemeName>(() => {
     const t = loadTheme();
     applyTheme(t);
@@ -358,11 +364,15 @@ export default function App() {
   }, [waiting]);
 
   const send = useCallback(
-    async (text: string, opts?: { confirm?: boolean }) => {
+    async (text: string, opts?: { confirm?: boolean; withFiles?: Attachment[] }) => {
       const clean = text.trim();
-      if (!clean || waiting) return;
-      lastUserMessage.current = clean;
+      const withFiles = opts?.withFiles;
+      if ((!clean && !(withFiles && withFiles.length)) || waiting) return;
+      const outgoing = withFiles && withFiles.length ? withFiles : undefined;
+      const sendText = clean || (outgoing ? "حلّل الملفات المرفقة وحاول إفادتي منها." : "");
+      lastUserMessage.current = sendText;
       setDraft("");
+      setFiles([]);
       setSlashOpen(false);
       setWaiting(true);
       setActivities([]);
@@ -370,7 +380,7 @@ export default function App() {
       const thinkId = nextMsgId();
       const thinkMsg: Msg = { id: thinkId, role: "assistant", text: "", thinking: true, ts: Date.now() / 1000 };
       setMessages((m) => [
-        ...(opts?.confirm ? m : [...m, { id: uid, role: "user", text: clean, ts: Date.now() / 1000 } as Msg]),
+        ...(opts?.confirm ? m : [...m, { id: uid, role: "user", text: sendText, ts: Date.now() / 1000, files: outgoing } as Msg]),
         thinkMsg,
       ]);
       setAtBottom(true);
@@ -378,9 +388,10 @@ export default function App() {
       abortRef.current = controller;
       let sawActivity = false;
       try {
-        const data = await askStream(clean, {
+        const data = await askStream(sendText, {
           policy,
           confirm: opts?.confirm,
+          attachments: outgoing?.map((f) => f.stored),
           signal: controller.signal,
           onActivity: (ev) => {
             sawActivity = true;
@@ -455,6 +466,30 @@ export default function App() {
   const confirmPending = useCallback(() => {
     void send(lastUserMessage.current, { confirm: true });
   }, [send]);
+
+  /* — attachments: the picker opens the OS dialog (PC folders on desktop,
+     phone files/camera on mobile); images preview locally, all kinds upload
+     immediately and Aali analyzes them server-side (OCR/parser/Whisper). — */
+  const pickFiles = () => fileRef.current?.click();
+  const onFilesChosen = async (list: FileList | null) => {
+    if (!list || !list.length) return;
+    setUploading(true);
+    try {
+      for (const f of Array.from(list).slice(0, 4)) {
+        const att: Attachment = await attach(f);
+        if (f.type.startsWith("image/")) att.preview = URL.createObjectURL(f);
+        setFiles((cur) => [...cur, att]);
+      }
+    } catch (err) {
+      setToast(`فشل رفع الملف: ${err instanceof Error ? err.message : ""}`);
+      setTimeout(() => setToast(""), 4000);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+  const removeFile = (stored: string) =>
+    setFiles((cur) => cur.filter((f) => f.stored !== stored));
 
   const newChat = () => {
     localStorage.removeItem("aali_sid");
@@ -1002,6 +1037,22 @@ export default function App() {
                         {m.role === "user" ? "أنت" : "آلي"}
                         {m.ts ? <span className="ts">{timeOf(m.ts)}</span> : null}
                       </span>
+                      {m.files && m.files.length > 0 && (
+                        <div className="msg-files">
+                          {m.files.map((f) =>
+                            f.preview ? (
+                              <a key={f.stored} href={`${getApiBase()}/api/file/uploads/${encodeURIComponent(f.stored)}`} target="_blank" rel="noreferrer">
+                                <img src={f.preview} alt={f.name} className="msg-img" />
+                              </a>
+                            ) : (
+                              <a key={f.stored} className="attach-chip" href={`${getApiBase()}/api/file/uploads/${encodeURIComponent(f.stored)}`} target="_blank" rel="noreferrer">
+                                <span className="attach-ico">{{ video: "🎬", audio: "🎵", document: "📄", text: "📝", binary: "📦" }[f.kind] ?? "📎"}</span>
+                                <em>{f.name}</em>
+                              </a>
+                            )
+                          )}
+                        </div>
+                      )}
                       {m.thinking ? <ThinkingOrbit /> : <Markdown text={m.text} />}
                       {m.thinking && <div style={{ marginTop: 10 }}>{ActivityPanel}</div>}
                       {!m.thinking && m.role === "assistant" && (
@@ -1070,11 +1121,34 @@ export default function App() {
             </div>
 
             <footer className="composer">
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                accept="image/*,video/*,audio/*,.pdf,.docx,.xlsx,.txt,.md,.csv,.json,.py,.js,.ts,.tsx,.html,.css,.zip"
+                style={{ display: "none" }}
+                onChange={(e) => void onFilesChosen(e.target.files)}
+              />
+              {(files.length > 0 || uploading) && (
+                <div className="attach-row">
+                  {uploading && <span className="attach-chip uploading">⏳ جارٍ الرفع والتحليل…</span>}
+                  {files.map((f) => (
+                    <span key={f.stored} className="attach-chip" title={f.name}>
+                      {f.preview
+                        ? <img src={f.preview} alt="" className="attach-thumb" />
+                        : <span className="attach-ico">{{ video: "🎬", audio: "🎵", document: "📄", text: "📝", binary: "📦" }[f.kind] ?? "📎"}</span>}
+                      <em>{f.name.length > 26 ? f.name.slice(0, 24) + "…" : f.name}</em>
+                      <button type="button" className="attach-x" title="إزالة" onClick={() => removeFile(f.stored)}>×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <form
-                onSubmit={(e) => { e.preventDefault(); void send(draft); }}
+                onSubmit={(e) => { e.preventDefault(); void send(draft, files.length ? { withFiles: files } : undefined); }}
                 className="composer-form"
               >
                 {SlashMenu}
+                <button type="button" className="attach-btn" title="إرفاق ملف أو صورة أو فيديو" onClick={pickFiles} disabled={waiting || uploading}>📎</button>
                 <textarea
                   ref={inputRef}
                   rows={1}
@@ -1090,7 +1164,7 @@ export default function App() {
                 ) : (
                   <button type="button" className={`mic-btn ${listening ? "listening" : ""}`} title="إدخال صوتي" onClick={startVoice}>🎙</button>
                 )}
-                <button type="submit" className="send-btn" disabled={waiting || !draft.trim()} aria-label="إرسال">
+                <button type="submit" className="send-btn" disabled={waiting || uploading || (!draft.trim() && !files.length)} aria-label="إرسال">
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
                 </button>
               </form>

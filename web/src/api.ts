@@ -39,6 +39,28 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
 
 export type Policy = "auto" | "aggressive" | "always_ask";
 
+/* — attachments: upload a file, then send its stored name with the next ask — */
+export interface Attachment {
+  stored: string;   // server-side name inside uploads/ (sent back with ask)
+  name: string;     // friendly original name
+  kind: string;     // image | video | audio | document | text | binary
+  analysis?: Record<string, unknown>; // server-side extract (OCR, transcript…)
+  preview?: string; // client-side object URL for image previews
+}
+
+export async function attach(file: File): Promise<Attachment> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${apiBase}/api/attach`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: form,
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data as Attachment;
+}
+
 export interface PendingAction {
   tool: string;
   arguments: Record<string, unknown>;
@@ -72,7 +94,7 @@ async function persistSid(data: AskResult) {
 
 export async function ask(
   message: string,
-  opts?: { policy?: Policy; confirm?: boolean }
+  opts?: { policy?: Policy; confirm?: boolean; attachments?: string[] }
 ): Promise<AskResult> {
   const res = await fetch(`${apiBase}/api/ask`, {
     method: "POST",
@@ -82,6 +104,7 @@ export async function ask(
       sid: sid || undefined,
       policy: opts?.policy ?? "auto",
       confirm: opts?.confirm ?? false,
+      attachments: opts?.attachments,
     }),
   });
   const data: AskResult = await res.json();
@@ -97,6 +120,7 @@ export async function askStream(
   opts?: {
     policy?: Policy;
     confirm?: boolean;
+    attachments?: string[];
     onActivity?: (ev: ActivityEvent) => void;
     signal?: AbortSignal;
   }
@@ -111,6 +135,7 @@ export async function askStream(
         sid: sid || undefined,
         policy: opts?.policy ?? "auto",
         confirm: opts?.confirm ?? false,
+        attachments: opts?.attachments,
       }),
       signal: opts?.signal,
     });

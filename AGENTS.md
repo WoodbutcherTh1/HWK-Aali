@@ -222,10 +222,23 @@ in parallel:
   profile) firewall rule for 5055, restarts in multi-user mode with
   HWK_ALLOW_COMMANDS=0. (4) aali_tunnel.bat now REFUSES to expose an
   unauthenticated server (verifies key mode via /api/health first).
-- **Known gaps**: n8n webhook needs one manual activation click in the editor;
+- **Attachments (LIVE, 2026-09-09)**: the "designed but not built" gap is
+  closed — 📎 Attach button in the web UI (native picker: PC folders on
+  desktop, phone files/camera on mobile), up to 4 files, 100MB cap, any mix
+  of images / mp4+videos / audio / pdf+docx+xlsx / text+code. Server:
+  POST /api/attach saves into uploads/ inside the sandboxed workspace
+  (name sanitized, traversal-proof) and ANALYZES IMMEDIATELY (analyze-first:
+  Windows OCR for images, doc parser for documents, Whisper transcript +
+  frame OCR for video/audio) so the ask never waits on analysis; the client
+  sends attachments:[stored names] and the ask routes re-validate + load
+  fresh analysis server-side (client analysis never trusted), appending an
+  Arabic context block with the extracted text + workspace-relative path to
+  the message — Aali answers from real content. UI: upload chips with image
+  thumbnails, image previews in the user bubble (served via /api/file),
+  send enabled with files-only (no text). Verified live: recipe.txt Q&A and
+  PNG OCR against the running brain.- **Known gaps**: n8n webhook needs one manual activation click in the editor;
   ffmpeg installed but PATH needs refresh in new shells; web-mentor capture
-  experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%); chat
-  attachments (photo/file analyze-first loop) designed but not built yet.
+  experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 - **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
   + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);
   Obsidian vault export (scripts/build_brain_vault.py, hooked into the night
@@ -286,4 +299,4 @@ in parallel:
   brain echoed the example user text back ("ما هي أدواتك؟" → answered the
   example). Capability triggers extended (أدواتك / your tools…).
 
-— Last updated: 2026-09-09 (chat guards: no {} / echo / meta-leak / language naming + guest policy; desktop auto-boot 1.0.2; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-09 (attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; desktop auto-boot 1.0.2; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
