@@ -231,6 +231,18 @@ def api_ask():
     # each connector reads its API key from an env var on this machine, so
     # picking one here never means sending a key through the chat.
     provider = str(payload.get("provider", "auto"))
+
+    # Remote guests: force the server-enforced guest policy for non-admin
+    # keys arriving from outside 127.0.0.1 (see /api/ask/stream for notes).
+    # "Local" = loopback AND no spoofable X-Forwarded-For header.
+    remote_addr = request.remote_addr or ""
+    is_local = (remote_addr in {"127.0.0.1", "::1", "localhost"}
+                and not request.headers.get("X-Forwarded-For"))
+    auth = _auth_state()
+    if not is_local and auth and not auth["is_admin"]:
+        policy = "guest"
+        confirmed = False
+
     record = _get_session(sid)
     if sid not in _sessions:
         _save_session(record)
@@ -340,6 +352,20 @@ def api_ask_stream():
     policy = str(payload.get("policy", "auto"))
     confirmed = bool(payload.get("confirm", False))
     provider = str(payload.get("provider", "auto"))
+
+    # Remote guests: a non-admin key arriving from outside 127.0.0.1 is forced
+    # into the server-enforced guest policy — dangerous tools stay blocked no
+    # matter what policy/confirm the client claims (the confirm flag is
+    # client-supplied and NOT a security boundary). "Local" = loopback AND no
+    # spoofable X-Forwarded-For header. The tunnel (cloudflared) relays from
+    # 127.0.0.1 but SETS X-Forwarded-For, so tunnel guests are gated too.
+    remote_addr = request.remote_addr or ""
+    is_local = (remote_addr in {"127.0.0.1", "::1", "localhost"}
+                and not request.headers.get("X-Forwarded-For"))
+    auth = _auth_state()
+    if not is_local and auth and not auth["is_admin"]:
+        policy = "guest"
+        confirmed = False
 
     record = _get_session(sid)
     if sid not in _sessions:
@@ -1201,8 +1227,23 @@ def _server_port() -> int:
     return port
 
 
+def _bind_host() -> str:
+    """Fail-safe bind: an UNauthenticated server (no AALI_API_KEY) must never
+    face the network — localhost only. Multi-user mode (key set) binds all
+    interfaces so friends' devices can reach the brain. AALI_BIND overrides."""
+    explicit = (os.getenv("AALI_BIND") or "").strip()
+    if explicit:
+        return explicit
+    return "0.0.0.0" if API_KEY else "127.0.0.1"
+
+
 if __name__ == "__main__":
     _ensure_sessions_loaded()
     _port = _server_port()
-    print(f"Aali chat UI starting on http://127.0.0.1:{_port}")
-    app.run(host="0.0.0.0", port=_port, debug=False)
+    _host = _bind_host()
+    if API_KEY:
+        print(f"Aali chat UI on http://{_host}:{_port} — multi-user (X-API-Key required)")
+    else:
+        print(f"Aali chat UI on http://127.0.0.1:{_port} — local-only "
+              "(set AALI_API_KEY to serve friends; see scripts/aali_share.bat)")
+    app.run(host=_host, port=_port, debug=False)
