@@ -33,6 +33,34 @@ def log(message: str) -> None:
         pass
 
 
+def wait_vram_clear(timeout_s: int = 300) -> None:
+    """Poll until used VRAM is desktop-idle (<1.5 GB) or timeout.
+
+    On PROMOTE the pipeline leaves the promoted adapter server running
+    (by design - it IS the live brain), which holds several GB. Starting
+    Phase B's trainer on top of it would OOM (lesson 2026-09-09 09:50).
+    """
+    deadline = time.monotonic() + timeout_s
+    last = -1
+    while time.monotonic() < deadline:
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.used",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=30,
+            ).stdout.strip().splitlines()
+            last = int(out[-1]) if out else 1 << 30
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            last = 1 << 30
+        if last < 1500:
+            log(f"VRAM clear ({last} MiB) - safe for Phase B")
+            return
+        time.sleep(10)
+    log(f"VRAM still busy after {timeout_s}s ({last} MiB) - Phase B may OOM; "
+        "if the promoted server is up, that is expected - stop it or move "
+        "Phase B to a free window")
+
+
 def run_stage(name: str, cmd: list[str], out: Path) -> int:
     log(f"=== stage start: {name} ===")
     with out.open("a", encoding="utf-8") as fh:
@@ -76,7 +104,8 @@ def main() -> int:
 
     # Phase B resume: extend_context.bat reuses the context-4k checkpoint
     # (train_scratch --resume continues at step 35,500) and mirrors to X:.
-    # Give the driver a minute to release VRAM before loading again.
+    # Wait for real VRAM release: a promoted server intentionally stays up.
+    wait_vram_clear()
     time.sleep(60)
     code = run_stage(
         "Phase B resume (context 4096)",
