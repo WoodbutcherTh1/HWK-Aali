@@ -136,6 +136,33 @@ def test_apply_pref_auto_off_when_terminal_bidi_capable(monkeypatch) -> None:
     assert cli.BIDI_MODE is True
 
 
+def test_windows_terminals_are_never_trusted(monkeypatch) -> None:
+    """Owner screenshot 2026-09-10: Windows Terminal renders Arabic
+    disconnected + mirrored, yet WT_SESSION made the CLI skip its fix.
+    On Windows the CLI always shapes itself — WT_SESSION means nothing.
+    """
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("WT_SESSION", "abc123")  # a Windows Terminal tab
+    assert cli._terminal_bidi_capable() is False
+
+
+def test_non_windows_terminals_are_trusted(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("WT_SESSION", raising=False)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.delenv("ConEmuANSI", raising=False)
+    assert cli._terminal_bidi_capable() is True
+
+
+def test_known_good_terminals_trusted_even_on_windows(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("ConEmuANSI", "ON")
+    assert cli._terminal_bidi_capable() is True
+    monkeypatch.delenv("ConEmuANSI")
+    monkeypatch.setenv("TERM_PROGRAM", "mintty")
+    assert cli._terminal_bidi_capable() is True
+
+
 def test_apply_pref_explicit_overrides_auto(monkeypatch) -> None:
     monkeypatch.setattr(cli, "load_bidi_pref", lambda: "off")
     monkeypatch.setattr(cli, "_terminal_bidi_capable", lambda: False)

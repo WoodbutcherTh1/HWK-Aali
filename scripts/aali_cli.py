@@ -268,16 +268,25 @@ BIDI_MODE = False  # display transform active? (set by apply_bidi_pref)
 
 
 def _terminal_bidi_capable() -> bool:
-    """Terminals that do bidi/shaping themselves — where our transform would
-    double-reverse the text."""
-    if os.environ.get("WT_SESSION"):  # Windows Terminal
-        return True
+    """Terminals that shape + reorder Arabic themselves — where our transform
+    would double-reverse the text.
+
+    Windows terminals are NOT capable: Windows Terminal (WT_SESSION) renders
+    Arabic disconnected and mirrored (owner screenshot 2026-09-10 — the
+    greeting came out as mirrored isolated forms), and conhost / VS Code's
+    xterm.js canvas are the same class of renderer. So on Windows the CLI
+    always fixes the text itself. macOS/Linux terminals (CoreText, HarfBuzz
+    in VTE) shape natively and are trusted — transform off there. Known-good
+    terminals keep an explicit pass even on Windows (ConEmu does real bidi;
+    mintty/WezTerm/iTerm report themselves via TERM_PROGRAM). /bidi on|off
+    (+ AALI_BIDI) remains the manual escape hatch either way.
+    """
     if os.environ.get("TERM_PROGRAM") in {
-            "vscode", "iTerm.app", "WezTerm", "Apple_Terminal", "mintty"}:
+            "iTerm.app", "Apple_Terminal", "WezTerm", "mintty"}:
         return True
-    if os.environ.get("ANSICON") or os.environ.get("ConEmuANSI") == "ON":
+    if os.environ.get("ConEmuANSI") == "ON":
         return True
-    return False
+    return sys.platform != "win32"
 
 
 def load_bidi_pref() -> str:

@@ -13,7 +13,8 @@
 Windows PC (8GB-VRAM GPU, 16GB RAM, ~2TB across C:/D:/X:):
 
 1. **نموذج لغوي يُبنى من الصفر** — a ~125M-param decoder-only transformer
-   (RoPE, SwiGLU, RMSNorm) trained from scratch on the owner's own data.
+   (RoPE positional embeddings, LayerNorm, GELU MLP) trained from scratch on
+   the owner's own data.
 2. **وكيل برمجي وأدوات** — a file/command agent (sandboxed to
    `D:\hwk-projects`) + OCR/document/video/image tools, so the model grows
    into a real assistant rather than a chat toy.
@@ -299,6 +300,14 @@ in parallel:
   (2) extended Arabic-script letters (Persian/Urdu پ چ ژ ک گ ی …) derived
   from Unicode decomposition tags at import time — typo-proof, complete,
   core Arabic table stays canonical; reh-family classified right-joining.
+  v2 fix (2026-09-10, owner screenshot): _terminal_bidi_capable trusted
+  WT_SESSION as bidi-capable, so the CLI skipped its transform in Windows
+  Terminal — which actually renders Arabic disconnected+mirrored. Now
+  platform-aware: on Windows the CLI always shapes itself (WT/conhost/
+  xterm.js are the same renderer class; ConEmu + mintty/WezTerm/iTerm keep
+  an explicit pass), macOS/Linux terminals are trusted (CoreText/HarfBuzz).
+  Tests: test_cli_bidi.py (windows-never-trusted, non-windows-trusted,
+  known-good-on-windows).
 - **Agent honesty guards scoped to real tasks (2026-09-09)**: the
   success-claim and narrated-plan guards in agent_loop.py fired on pure chat
   ("قل لي فقط: جواب اختبار ٤٢" contains تم) and the brain parroted the guard
@@ -363,4 +372,4 @@ in parallel:
   من ~31MB إلى ~26MB — دليل تحذيري مفيد). ثم انسخ dist/*.exe إلى
   %LOCALAPPDATA%\Programs\AaliDesktop\ (نمط التحديث المعتمد).
 
-— Last updated: 2026-09-10 (admin one-click handoff v2: single-use 60s hashed ?ht= token traded server-side for a session — session token never in a URL; admin audit log: /api/admin/audit + dashboard «سجل تدقيق الإجراءات» panel — key issue/revoke, account delete with actor/time/IP; attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; git: ONE branch `main` (legacy snapshots merged, old branches archived as tags); branding: Aali is the only AI — built & trained by team HWK, external provider names scrubbed from user-facing text; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-10 (CLI bidi: Windows Terminal never trusted — CLI shapes Arabic itself on Windows (owner screenshot: mirrored greeting); admin one-click handoff v2: single-use 60s hashed ?ht= token traded server-side for a session — session token never in a URL; admin audit log: /api/admin/audit + dashboard «سجل تدقيق الإجراءات» panel — key issue/revoke, account delete with actor/time/IP; attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; git: ONE branch `main` (legacy snapshots merged, old branches archived as tags); branding: Aali is the only AI — built & trained by team HWK, external provider names scrubbed from user-facing text; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
