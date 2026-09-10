@@ -203,7 +203,7 @@ FLOWS: dict[str, dict[str, Any]] = {
 # ————— من أين يحصل آلي على المعلومات —————
 SOURCES: dict[str, dict[str, str]] = {
     "model": {"label": "النموذج اللغوي", "path": "file-agent/hwk_model/",
-              "what": "البنية (RoPE/SwiGLU/RMSNorm) + tokenizer BPE + توليد — العقلك من الصفر."},
+              "what": "البنية (RoPE/LayerNorm/GELU MLP) + tokenizer BPE + توليد — العقلك من الصفر."},
     "sft": {"label": "بيانات SFT", "path": "data/*.jsonl",
             "what": "أمثلة المحادثة والأدوات والقواعد التي تتشكل منها ردود النموذج بعد التدريب."},
     "memory": {"label": "الذاكرة الدائمة", "path": "~/.aali/aali_memory.json",
