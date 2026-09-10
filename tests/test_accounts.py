@@ -36,6 +36,20 @@ def test_full_user_lifecycle(store):
     assert s and s["email"] == "user@example.com" and not s["is_admin"]
 
 
+def test_mint_session_for_verified_account(store):
+    """mint_session issues a working session for an existing verified account
+    (server-internal handoff flow); missing accounts get ''."""
+    r = accounts.signup("handoff@example.com", "password123")
+    accounts.verify("handoff@example.com", r["dev_code"])
+
+    token = accounts.mint_session("handoff@example.com")
+    assert token
+    sess = accounts.session(token)
+    assert sess and sess["email"] == "handoff@example.com"
+
+    assert accounts.mint_session("ghost@example.com") == ""  # unknown account
+
+
 def test_admin_email_gets_admin_role(store):
     r = accounts.signup("hmam@hwk.team", "password123")
     assert r["role"] == "admin"

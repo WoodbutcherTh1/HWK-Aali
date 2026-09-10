@@ -13,6 +13,8 @@ file-agent/sessions.jsonl
 file-agent/api_keys.jsonl
 # Account store (emails + password hashes) — runtime data, never commit
 file-agent/accounts.jsonl
+# Admin audit log (who did what on the admin surface) — runtime data
+file-agent/audit_log.jsonl
 # user uploads + agent sandbox (runtime data, never commit)
 file-agent/agent_workspace/
 .pytest_cache/

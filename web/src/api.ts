@@ -119,6 +119,23 @@ export function authLogout() {
   setSessionToken("");
 }
 
+/* One-click admin handoff: mint a SINGLE-USE short-lived URL token and return
+   the dashboard URL. The session token itself never appears in a URL or
+   history — the dashboard trades ?ht= for a session server-side. */
+export async function adminHandoff(): Promise<string | null> {
+  try {
+    const res = await fetch(`${apiBase}/api/auth/handoff`, {
+      method: "POST",
+      headers: { "X-Session-Token": getSessionToken() },
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok || !data.handoff_token) return null;
+    return `${apiBase}/admin?ht=${encodeURIComponent(data.handoff_token)}`;
+  } catch {
+    return null;
+  }
+}
+
 export type Policy = "auto" | "aggressive" | "always_ask";
 
 /* — attachments: upload a file, then send its stored name with the next ask — */

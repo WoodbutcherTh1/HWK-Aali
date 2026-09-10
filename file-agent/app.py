@@ -12,10 +12,12 @@ any external workflow.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -40,6 +42,7 @@ app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
 # Unset (default): local single-user mode, unchanged behaviour.
 from file_agent import apikeys
 from file_agent import accounts
+from file_agent import audit
 
 # The ADMIN key. Aali is the provider: clients authenticate with either this
 # master key (admin) or a per-user key issued via the key platform. User keys
@@ -121,6 +124,8 @@ def _require_api_key():
         return None  # self-serve signup is public (rate-limited inside)
     if request.path.startswith("/api/auth/"):
         return None  # account auth (signup/verify/login/reset) is public
+    if request.path == "/api/admin/handoff-redeem":
+        return None  # single-use handoff trade: the ?ht= token IS the credential
     if not request.path.startswith("/api/"):
         return None
     # Account sessions (X-Session-Token) authenticate too: resolve to the
@@ -804,6 +809,22 @@ def _require_admin():
     return None
 
 
+def _audit_actor() -> tuple[str, str]:
+    """Identity of the admin performing an action: (actor, kind) — the session
+    email for account admins, "master key" for the AALI_API_KEY, or "local"
+    in single-user mode."""
+    sess = _account_session()
+    if sess:
+        return sess["email"], "session"
+    if API_KEY:
+        return "master key", "master_key"
+    return "local", "local"
+
+
+def _audit_ip() -> str:
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "")
+
+
 @app.route("/api/register", methods=["POST"])
 def api_register():
     """Self-serve signup: POST {"label": "..."} -> {"ok": true, "api_key": "aali-..."}.
@@ -895,6 +916,28 @@ def api_auth_logout():
     return {"ok": True}
 
 
+@app.route("/api/auth/handoff", methods=["POST"])
+def api_auth_handoff():
+    """One-click admin handoff: an authenticated admin session mints a
+    SINGLE-USE short-lived URL token (?ht=…). The dashboard trades it via
+    /api/admin/handoff-redeem for a real session token — the session token
+    itself never lands in a URL or browser history (the old ?token= flow).
+    Handoff tokens are SHA-256-hashed, exactly like sessions."""
+    sess = _account_session()
+    if not sess or not sess["is_admin"]:
+        return make_response({"ok": False, "error": "admin session required"}, 401)
+    token = secrets.token_urlsafe(32)
+    _HANDOFF_TOKENS["ht:" + hashlib.sha256(token.encode("utf-8")).hexdigest()] = {
+        "email": sess["email"],
+        "expires": time.time() + _HANDOFF_TTL_SECONDS,
+    }
+    audit.record(
+        "handoff_mint", target=sess["email"],
+        actor=sess["email"], actor_kind="session", ip=_audit_ip(),
+    )
+    return {"ok": True, "handoff_token": token, "ttl": _HANDOFF_TTL_SECONDS}
+
+
 @app.route("/api/admin/accounts", methods=["GET"])
 def api_admin_accounts():
     """Admin/builder view of all accounts (no password material)."""
@@ -914,6 +957,12 @@ def api_admin_accounts_delete():
     if not email:
         return make_response({"ok": False, "error": "email required"}, 400)
     ok = accounts.remove_account(email)
+    if ok:
+        actor, kind = _audit_actor()
+        audit.record(
+            "account_delete", target=email, actor=actor, actor_kind=kind,
+            detail="حذف حساب ومفاتيحه المرتبطة", ip=_audit_ip(),
+        )
     return make_response({"ok": ok}, 200 if ok else 404)
 
 
@@ -934,6 +983,12 @@ def api_admin_keys_issue():
     payload = request.get_json(silent=True) or {}
     label = str(payload.get("label", ""))[:80]
     key_id, plaintext = apikeys.issue_key(label=label, created_by="admin")
+    actor, kind = _audit_actor()
+    audit.record(
+        "key_issue", target=f"{key_id} ({label})" if label else key_id,
+        actor=actor, actor_kind=kind, detail="إصدار مفتاح وصول جديد",
+        ip=_audit_ip(),
+    )
     return {"ok": True, "key_id": key_id, "api_key": plaintext,
             "note": "احفظ هذا المفتاح — يُعرض مرة واحدة فقط"}
 
@@ -945,7 +1000,59 @@ def api_admin_keys_revoke(key_id: str):
         return denied
     if not apikeys.revoke(key_id):
         return make_response({"ok": False, "error": "key not found"}, 404)
+    actor, kind = _audit_actor()
+    audit.record(
+        "key_revoke", target=key_id, actor=actor, actor_kind=kind,
+        detail="إلغاء مفتاح وصول", ip=_audit_ip(),
+    )
     return {"ok": True, "revoked": key_id}
+
+
+# One-click admin handoff: short-lived single-use URL tokens (?ht=…) minted by
+# an authenticated admin session. Stored SHA-256-hashed (a leaked store never
+# yields a usable token), consumed on first redeem — mirrors /brain's bt: tokens.
+_HANDOFF_TOKENS: dict[str, dict] = {}
+_HANDOFF_TTL_SECONDS = 60
+
+
+@app.route("/api/admin/handoff-redeem", methods=["POST"])
+def api_admin_handoff_redeem():
+    """Trade a single-use handoff token (?ht=…) for a real admin session token.
+    The token is single-use, lives 60s, and is stored hashed; redeeming grants
+    a session for the minting admin account only — nothing else is accepted."""
+    payload = request.get_json(silent=True) or {}
+    token = str(payload.get("handoff_token", ""))
+    h = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    entry = _HANDOFF_TOKENS.get("ht:" + h)
+    if not token or not entry:
+        return make_response({"ok": False, "error": "رمز الربط غير صالح"}, 401)
+    _HANDOFF_TOKENS.pop("ht:" + h, None)  # single-use: consume BEFORE anything else
+    if entry["expires"] < time.time():
+        return make_response({"ok": False, "error": "انتهت صلاحية رمز الربط — أعد فتح اللوحة من شارة «فريق»"}, 401)
+    sess_token = accounts.mint_session(entry["email"])
+    if not sess_token:
+        return make_response({"ok": False, "error": "الحساب غير متاح"}, 401)
+    actor, kind = entry["email"], "handoff"
+    audit.record(
+        "handoff_redeem", target=entry["email"], actor=actor, actor_kind=kind,
+        detail="استبدال رمز ربط بجلسة لوحة التحكم", ip=_audit_ip(),
+    )
+    return {"ok": True, "token": sess_token, "email": entry["email"]}
+
+
+@app.route("/api/admin/audit", methods=["GET"])
+def api_admin_audit():
+    """Audit trail of admin actions (newest first): GET /api/admin/audit?limit=100
+    &action=key_issue|key_revoke|account_delete — admin-gated like the rest."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    try:
+        limit = min(max(int(request.args.get("limit", "100")), 1), 500)
+    except ValueError:
+        limit = 100
+    action = (request.args.get("action") or "").strip()
+    return {"ok": True, "events": audit.list_events(limit=limit, action=action)}
 
 
 # ————— شجرة عقل آلي (المالك فقط) —————
@@ -1152,6 +1259,7 @@ def admin_dashboard():
   .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px}
   .tag.ok{background:rgba(46,204,113,.15);color:var(--ok)}
   .tag.off{background:rgba(231,76,60,.15);color:var(--bad)}
+  .tag.info{background:rgba(79,140,255,.15);color:var(--acc)}
   .bar{height:6px;background:#0f1117;border-radius:999px;overflow:hidden}
   .bar>i{display:block;height:100%;background:var(--acc)}
   .muted{color:var(--mut);font-size:12px}
@@ -1159,6 +1267,9 @@ def admin_dashboard():
   #secret{word-break:break-all;background:rgba(79,140,255,.1);border:1px solid var(--acc);padding:10px;border-radius:8px;font-family:ui-monospace,monospace;font-size:13px}
   /* in-page confirm dialog (webview-safe replacement for window.confirm) */
   .dlg-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50}
+  /* must come AFTER .dlg-backdrop: same specificity, later wins — otherwise
+     the "hidden" dialog still renders as an empty floating box (seen live) */
+  .dlg-backdrop.hidden{display:none}
   .dlg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;max-width:340px;width:90%}
   .dlg p{margin:0 0 16px;line-height:1.7}
   .dlg .row{justify-content:flex-start}
@@ -1193,6 +1304,13 @@ def admin_dashboard():
   </div>
 
   <div class="panel">
+    <h2>📜 سجل تدقيق الإجراءات <button onclick="loadAudit()" style="font-size:12px;padding:5px 10px">تحديث</button></h2>
+    <div class="muted" style="margin-bottom:10px">كل إجراء إداري يُسجّل: إصدار/إلغاء مفتاح، حذف حساب — مع الفاعل والوقت وIP. لا يتضمّن محتوى المحادثات أبداً.</div>
+    <table><thead><tr><th>الوقت</th><th>الإجراء</th><th>الهدف</th><th>الفاعل</th><th>IP</th></tr></thead>
+    <tbody id="audit"><tr><td colspan="5" class="muted">…</td></tr></tbody></table>
+  </div>
+
+  <div class="panel">
     <h2>🧠 شجرة العقل — الحالة الحية <button onclick="loadBrain()" style="font-size:12px;padding:5px 10px">تحديث</button></h2>
     <div id="brainLive" class="muted">…</div>
     <div class="muted" style="margin-top:10px">الشجرة الكاملة خطوة بخطوة: <a href="/brain" target="_blank" style="color:var(--acc)">فتح /brain</a> · تصدير Obsidian: <code>python scripts/build_brain_vault.py</code></div>
@@ -1210,14 +1328,17 @@ def admin_dashboard():
 <script>
 const $=id=>document.getElementById(id);
 function api(method,path,body,key){
-  return fetch(path,{method,headers:{'Content-Type':'application/json','X-API-Key':key||$('adminkey').value.trim()},body:body?JSON.stringify(body):undefined}).then(r=>r.json());
+  /* key may be the master AALI_API_KEY OR a session token from the web app's
+     one-click handoff (/admin?token=…) — send both headers; the server
+     resolves admin via X-API-Key (master) or X-Session-Token (account). */
+  return fetch(path,{method,headers:{'Content-Type':'application/json','X-API-Key':key||$('adminkey').value.trim(),'X-Session-Token':key||$('adminkey').value.trim()},body:body?JSON.stringify(body):undefined}).then(r=>r.json());
 }
 function fmt(t){ if(!t) return '—'; const d=new Date(t*1000); return d.toLocaleString('ar'); }
 function load(){
   localStorage.setItem('aali_admin_token',$('adminkey').value.trim());
   api('GET','/api/admin/stats').then(s=>{
     if(!s.ok){uiAlert(s.error||'فشل الدخول');return;}
-    render(s); loadBrain();
+    render(s); loadBrain(); loadAudit();
   });
 }
 function render(s){
@@ -1289,6 +1410,18 @@ function openBrain(){
     else uiAlert(r.error||'يتطلب مفتاح المدير');
   });
 }
+const AUDIT_ACT = {key_issue:['إصدار مفتاح','info'],key_revoke:['إلغاء مفتاح','off'],account_delete:['حذف حساب','off']};
+function loadAudit(){
+  api('GET','/api/admin/audit?limit=60').then(function(r){
+    if(!r.ok){ $('audit').innerHTML='<tr><td colspan="5" class="muted">'+(r.error||'يتطلب مفتاح المدير')+'</td></tr>'; return; }
+    $('audit').innerHTML=(r.events||[]).map(function(e){
+      const act=AUDIT_ACT[e.action]||[e.action,'info'];
+      return '<tr><td>'+fmt(e.ts)+'</td><td><span class="tag '+act[1]+'">'+act[0]+'</span></td>'
+        +'<td class="mono">'+(e.target||'—')+'</td><td>'+(e.actor||'—')+' <span class="muted">('+e.actor_kind+')</span></td>'
+        +'<td class="mono">'+(e.ip||'—')+'</td></tr>';
+    }).join('') || '<tr><td colspan="5" class="muted">لا أحداث بعد — يبدأ التسجيل من الآن</td></tr>';
+  }).catch(function(){ $('audit').innerHTML='<tr><td colspan="5" class="muted">تعذّر الجلب</td></tr>'; });
+}
 function brainLabel(ab){
   if(!ab) return '—';
   if(ab.indexOf('نموذج آلي')===0) return 'نموذج آلي الخاص ✦';
@@ -1314,7 +1447,30 @@ function loadBrain(){
   }).catch(function(){ $('brainLive').textContent='تعذّر الجلب'; });
 }
 setInterval(loadBrain, 30000);
-window.onload=()=>{ $('adminkey').value=localStorage.getItem('aali_admin_token')||''; if($('adminkey').value){ load(); } else { loadBrain(); } };
+/* One-click handoff v2: ?ht=<single-use token> is traded server-side for a
+   real session token — the session token never appears in a URL or history.
+   The legacy ?token= flow stays as a fallback for older web builds. */
+function stripQuery(){
+  try{ var u=new URL(location); u.search=''; history.replaceState({},'',u); }catch(e){}
+}
+function redeemHandoff(ht){
+  fetch('/api/admin/handoff-redeem',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({handoff_token:ht})})
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      if(r.ok){ localStorage.setItem('aali_admin_token',r.token); $('adminkey').value=r.token; load(); }
+      else { uiAlert(r.error||'فشل ربط اللوحة'); loadBrain(); }
+    })
+    .catch(function(){ loadBrain(); });
+}
+window.onload=()=>{
+  var p=new URLSearchParams(location.search);
+  var ht=p.get('ht');
+  if(ht){ stripQuery(); redeemHandoff(ht); return; }
+  var qp=p.get('token');
+  if(qp){ localStorage.setItem('aali_admin_token',qp); stripQuery(); }
+  $('adminkey').value=localStorage.getItem('aali_admin_token')||'';
+  if($('adminkey').value){ load(); } else { loadBrain(); }
+};
 </script>
 </body>
 </html>"""

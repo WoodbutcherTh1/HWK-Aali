@@ -213,6 +213,32 @@ def login(email: str, password: str) -> dict:
     return {"ok": True, "token": token, "email": email, "role": role}
 
 
+def mint_session(email: str) -> str:
+    """Mint a session token for an EXISTING verified account (no password).
+
+    Used only by server-internal, already-authenticated flows — the admin
+    dashboard one-click handoff: the web app's admin session mints a
+    single-use URL token, and the dashboard trades it for this session
+    server-side. Returns '' when the account is missing or unverified; it
+    never bypasses the password for anything else.
+    """
+    email = _normalize(email)
+    with _lock:
+        if not _accounts:
+            _load()
+        rec = _accounts.get(email)
+        if not rec or not rec.get("verified"):
+            return ""
+        rec["role"] = "admin" if _is_admin_email(email) else "user"
+        _save()
+        token = secrets.token_urlsafe(32)
+        _sessions[_token_hash(token)] = {
+            "email": email,
+            "expires": _now() + _SESSION_TTL,
+        }
+    return token
+
+
 def reset_request(email: str) -> dict:
     """Issue a password-reset code (same 6-digit shape)."""
     email = _normalize(email)

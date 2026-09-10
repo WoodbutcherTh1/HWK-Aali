@@ -307,6 +307,35 @@ in parallel:
   protocol example moved INSIDE the system prompt — as chat messages the 7b
   brain echoed the example user text back ("ما هي أدواتك؟" → answered the
   example). Capability triggers extended (أدواتك / your tools…).
+- **Admin audit log (2026-09-10)**: every admin action (key issue, key revoke,
+  account delete) is appended to file_agent/audit_log.jsonl (gitignored,
+  AALI_AUDIT_LOG redirect) — {ts, actor, actor_kind, action, target, detail,
+  ip}, plaintext keys/passwords never enter a record, chat content stays out on
+  purpose; trimmed to the newest 2000 entries. GET /api/admin/audit
+  (admin-gated, ?limit/?action) + a «📜 سجل تدقيق الإجراءات» panel in the
+  /admin dashboard (time, colored action tag, target, actor+kind, IP).
+  file_agent/audit.py is stdlib-only, append-only, best-effort (a failed log
+  write never breaks the action). Tests: tests/test_audit.py (6) +
+  test_auth_http.py (3 HTTP: wiring+actor, admin gating, filter/limit).
+- **Admin one-click handoff v2 (2026-09-10)**: the full session token no longer
+  travels in a URL. The web app's admin pill (شارة «فريق») calls
+  `POST /api/auth/handoff` (admin session only — anon/user/master-key all 401)
+  and opens `/admin?ht=<single-use token>`; the dashboard immediately strips
+  the query (history.replaceState) and trades the token server-side via
+  `POST /api/admin/handoff-redeem` → `accounts.mint_session(email)` → a real
+  admin session token saved to localStorage — the session token never appears
+  in a URL or history. Handoff tokens live 60s, are consumed on first redeem
+  (stored SHA-256-hashed like sessions), redeem is exempt from the global key
+  gate (the ht token IS the credential) and grants only the minting account.
+  Legacy `?token=` reader kept so older web builds still land. Both flows
+  send the token in BOTH X-API-Key and X-Session-Token (the dashboard cannot
+  tell which kind it holds — the server resolves X-Session-Token first; a
+  session token alone in X-API-Key is rejected; master key works via
+  X-API-Key). Audited: handoff_mint + handoff_redeem events (raw tokens never
+  logged). Tests: test_auth_http.py (mint gating, single-use/forged/expired
+  redeem, audit events) + test_accounts.py::test_mint_session_for_verified_account.
+  README: admin section documents the flow + screenshots
+  (docs/assets/auth_login.png, docs/assets/admin_dash.png).
 - **/v1 provider surface + desktop 1.0.3 (2026-09-09)**: آلي يصبح موفّراً —
   file-agent/app.py يضيف `GET /v1/models` (يعرض aali, aali-local) و
   `POST /v1/chat/completions` (بالمخطط النمطي المتّبع في واجهات النماذج:
@@ -334,4 +363,4 @@ in parallel:
   من ~31MB إلى ~26MB — دليل تحذيري مفيد). ثم انسخ dist/*.exe إلى
   %LOCALAPPDATA%\Programs\AaliDesktop\ (نمط التحديث المعتمد).
 
-— Last updated: 2026-09-10 (attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; git: ONE branch `main` (legacy snapshots merged, old branches archived as tags); branding: Aali is the only AI — built & trained by team HWK, external provider names scrubbed from user-facing text; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-10 (admin one-click handoff v2: single-use 60s hashed ?ht= token traded server-side for a session — session token never in a URL; admin audit log: /api/admin/audit + dashboard «سجل تدقيق الإجراءات» panel — key issue/revoke, account delete with actor/time/IP; attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; git: ONE branch `main` (legacy snapshots merged, old branches archived as tags); branding: Aali is the only AI — built & trained by team HWK, external provider names scrubbed from user-facing text; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)

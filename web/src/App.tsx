@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  adminHandoff,
   askStream,
   attach,
   authLogout,
@@ -911,7 +912,12 @@ export default function App() {
                   className="upgrade-pill"
                   style={{ padding: "7px 14px" }}
                   title={me.is_admin ? "لوحة الفريق: /admin" : "حسابك"}
-                  onClick={() => (me.is_admin ? window.open(getApiBase() + "/admin", "_blank") : setAuthOpen(true))}
+                  onClick={() => {
+                    if (!me.is_admin) { setAuthOpen(true); return; }
+                    void adminHandoff().then((url) =>
+                      url ? window.open(url, "_blank") : window.open(getApiBase() + "/admin", "_blank")
+                    );
+                  }}
                 >
                   <span>✦</span> {me.email.split("@")[0]}
                   {me.is_admin && <span className="admin-chip">فريق</span>}
