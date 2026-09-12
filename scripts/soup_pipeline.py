@@ -601,6 +601,18 @@ def _acquire_lock() -> bool:
         return False
 
 
+def _release_lock() -> None:
+    """Drop the singleton lock. Every main() exit path must call this - the
+    old cleanup sat after a return and NEVER ran, so the lock file survived
+    every run (a recycled PID named python would then block a future
+    launch)."""
+    try:
+        (Path(os.environ.get("TEMP", "/tmp"))
+         / "hwk_soup_pipeline.lock").unlink()
+    except OSError:
+        pass
+
+
 DETACH_ENV = "HWK_SOUP_PIPELINE_DETACHED"
 DETACH_LOG = "soup_pipeline_self"
 
@@ -679,16 +691,6 @@ def main() -> int:
     if not self_detach(no_wait=args.no_wait):
         return 0
 
-    if args.dry_run:
-        ok, reason = gpu_free()
-        print(f"GPU free: {ok} ({reason})")
-        print(f"1. serve {BASE_MODEL} on :{PORT}")
-        print(f"2. baseline exam -> {REPORTS / 'soup_exam_report_baseline.json'}")
-        print(f"3. soup train on {SFT_V2.name} (via {SOUP_CONFIG})")
-        print(f"4. tuned exam   -> {REPORTS / 'soup_exam_report_tuned.json'}")
-        print(f"5. verdict      -> {REPORTS / 'resft_pipeline_report.md'}")
-        return 0
-
     done_marker = REPORTS / "resft_pipeline_report.md"
     if done_marker.exists():
         # A failed run also writes a verdict; only a real completion blocks a retry.
@@ -701,11 +703,13 @@ def main() -> int:
         log("another pipeline instance already holds the lock - exiting")
         return 3
     if not wait_for_gpu(args.no_wait):
+        _release_lock()
         return 2
 
     server = serve_teacher()
     if server is None:
         write_verdict(None, None)
+        _release_lock()
         return 1
     try:
         baseline = run_exam("baseline", BASE_MODEL)
@@ -747,6 +751,14 @@ def main() -> int:
             promoted_server.terminate()
             write_verdict(baseline, None, "tuned adapter server never became ready")
             return 1
+        # RESTORED 2026-09-12: the 09-09 smoke-gate rewrite (1d32456) silently
+        # dropped this call - main() reached write_verdict(baseline, tuned)
+        # with `tuned` never assigned (NameError right after hours of
+        # training). Grading the served adapter is stage 5 of the pipeline.
+        tuned = run_exam("tuned", _model_for_adapter())
+        if tuned is None:
+            write_verdict(baseline, None, "tuned exam failed after training")
+            return 1
         report_text = write_verdict(baseline, tuned)
         log("=== soup pipeline done ===")
         if "Verdict: PROMOTE" in report_text:
@@ -760,11 +772,7 @@ def main() -> int:
     finally:
         if server is not None:
             server.terminate()
-
-    try:
-        (Path(os.environ.get("TEMP", "/tmp")) / "hwk_soup_pipeline.lock").unlink()
-    except OSError:
-        pass
+        _release_lock()
 
     return 0
 
