@@ -1,18 +1,20 @@
 """Night caretaker: the autonomous operator while the owner sleeps.
 
-Runs for up to 7 hours, checking every 10 minutes, and:
+Modernized 2026-09-10 for the Phase B -> graduation handoff. Runs for up to
+20 hours, checking every 10 minutes:
 
-1. WATCHES Phase A training (progress + anomalies in training.log).
-2. AUTO-HEALS the mentor lab: if the lab process died before finishing its
-   30 tasks, relaunches it (it is resumable by design).
-3. When the GPU frees (training done or crashed):
+1. WATCHES Phase B (context extension, D:/hwk-data/context_training.log)
+   and waits - never touching a running GPU process.
+2. When the GPU frees (Phase B done or crashed):
    - audits + prunes the mentor lab, rebuilds sft_v2 + soup export
-   - runs the soup pipeline if it is not already running/finished
-     (teacher serve -> 26-case baseline exam -> re-SFT -> tuned exam -> verdict)
-4. CHAINS the 4096 context extension afterwards IF the GPU is still free
-   (equivalent of scripts/after_phaseA.bat) - the last big stage.
-5. Writes a morning report the owner reads on waking:
-   D:/hwk-data/MORNING_REPORT.md
+   - runs the soup pipeline (teacher serve -> 24-case baseline exam ->
+     re-SFT -> tuned exam -> verdict; smoke-gated, may take hours)
+   - polls for the verdict and writes D:/hwk-data/MORNING_REPORT.md
+
+Removed from the Phase A era (2026-09-08/09): Phase A auto-resume (Phase A
+is DONE - a resume would fork Phase B's lineage from a stale checkpoint) and
+the 4096-extension chaining (that extension IS Phase B and is already
+running; a second copy would collide with the soup pipeline on the 8GB card).
 
 Safety: never touches a running python GPU process; every launch is via
 its own logged subprocess; the report records every decision with a reason.
@@ -35,15 +37,20 @@ sys.path.insert(0, str(ROOT / "scripts"))
 # "is the 8GB card free", used by every launcher on this machine.
 import wait_gpu_free as gate  # noqa: E402
 
-TRAINING_LOG = Path("D:/hwk-data/training.log")
+# Phase B's heartbeat log (the 4096 extension). Phase A's training.log is
+# stale forever now - watching it would make the caretaker fire instantly.
+TRAINING_LOG = Path("D:/hwk-data/context_training.log")
 CARETAKER_LOG = Path("D:/hwk-data/caretaker.log")
 MORNING_REPORT = Path("D:/hwk-data/MORNING_REPORT.md")
-LAB_LOG = Path("D:/hwk-data/mentor_lab_run.log")
 PIPELINE_LOG = Path("D:/hwk-data/soup_pipeline.log")
 REPORTS = Path("D:/hwk-data/soup")
 CHECK_INTERVAL = 600          # 10 minutes
-MAX_RUNTIME = 7 * 3600
+# Phase B ends ~tomorrow evening (2026-09-10 crash cost ~5h); the pipeline
+# then serves, exams, trains and exams again - one caretaker lifetime must
+# cover the whole arc, including up to 8h of verdict polling.
+MAX_RUNTIME = 28 * 3600
 IDLE_MINUTES = 15
+VERDICT_POLL_LIMIT = 48       # 48 x 10 min = 8 h for the pipeline verdict
 
 DECISIONS: list[str] = []
 
@@ -142,7 +149,6 @@ def gpu_really_free() -> bool:
 
 def write_morning_report() -> None:
     training = training_state()
-    lab_done = _lab_count()
     verdict = ""
     verdict_path = REPORTS / "resft_pipeline_report.md"
     if verdict_path.exists():
@@ -151,14 +157,11 @@ def write_morning_report() -> None:
         "# صباح الخير — Morning report (night caretaker)",
         f"_generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_",
         "",
-        "## Phase A",
-        f"- latest step: {training['step']} / 90,000"
+        "## Phase B (context 4096)",
+        f"- latest step: {training['step']} / 100,000"
         f" (eval_loss: {training['eval']})",
         f"- trainer process alive: {training['process_alive']}"
         f" (log idle {training['log_idle_min'] and round(training['log_idle_min'], 1)} min)",
-        "",
-        "## Mentor lab",
-        f"- episodes captured: {lab_done}/30",
         "",
         "## Re-SFT pipeline",
         "- " + ("FINISHED - see verdict below" if verdict
@@ -170,14 +173,6 @@ def write_morning_report() -> None:
     ]
     MORNING_REPORT.write_text("\n".join(lines), encoding="utf-8")
     log("morning report written")
-
-
-def _lab_count() -> int:
-    lab_file = Path("D:/hwk-data/mentor/omniroute_lab.jsonl")
-    if not lab_file.exists():
-        return 0
-    return sum(1 for line in lab_file.read_text(encoding="utf-8", errors="replace").splitlines()
-               if line.strip())
 
 
 def main() -> int:
@@ -196,19 +191,11 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         log(f"vault export failed (non-fatal): {exc}")
     pipeline_launched = False
-    extension_launched = False
 
     while time.time() - started < MAX_RUNTIME:
         state = training_state()
-        lab_count = _lab_count()
 
-        # 1) lab auto-heal
-        if lab_count < 30 and process_running("omniroute_mentor_lab") is None:
-            decide(f"mentor lab dead at {lab_count}/30 - relaunching")
-            launch("omniroute_mentor_lab.py", "", "mentor_lab_run.log")
-            time.sleep(60)
-
-        # 2) training finished?
+        # 1) Phase B finished (or crashed)?
         if gpu_really_free():
             decide("GPU free - training window over")
             # 2a) audit + rebuild data with everything captured so far
@@ -238,55 +225,23 @@ def main() -> int:
                     decide("launching soup pipeline (exam baseline -> re-SFT -> tuned exam)")
                     pipeline_launched = launch("soup_pipeline.py", "--no-wait",
                                                "soup_pipeline_run.log")
-                    # give it time; poll for its verdict up to 3.5 hours
-                    for _ in range(21):
+                    # the pipeline is smoke-gated (it may abort a bad training
+                    # run and re-train) - poll for the verdict up to 8 hours
+                    for _ in range(VERDICT_POLL_LIMIT):
                         time.sleep(CHECK_INTERVAL)
-                        if (REPORTS / "resft_pipeline_report.md").exists():
+                        if (REPORTS / "resft_pipeline_report.md").stat().st_mtime > started:
                             decide("pipeline verdict ready")
                             break
                         if process_running("soup_pipeline") is None:
                             decide("pipeline exited (check soup_pipeline_run.log)")
                             break
 
-            # 2b+) Phase A resume: the 90k-step pretrain stopped mid-run
-            # (last seen at step 49425/90,000). A stale training.log means
-            # Phase A is NOT running - resume it (resumable by design,
-            # mirrors to X:). after_phaseA.bat chains the 4096 extension
-            # (Phase B) when this run eventually ends.
-            training_log = Path("D:/hwk-data/training.log")
-            phase_a_idle = True
-            try:
-                phase_a_idle = (time.time() - training_log.stat().st_mtime) > 1800
-            except OSError:
-                pass  # no log yet: nothing to protect
-            if phase_a_idle and process_running("train_scratch") is None:
-                decide("Phase A idle - resuming pretraining (resume_training.bat)")
-                subprocess.Popen(
-                    [r"C:\Windows\System32\cmd.exe", "/c",
-                     str(ROOT / "scripts" / "resume_training.bat")],
-                    cwd=str(ROOT),
-                )
-
-            # 2c) chain the 4096 context extension (Phase B) via the watcher:
-            # after_phaseA.bat waits for training.log idle 15+ min itself, so
-            # spawning the WATCHER (not the extension) is collision-free.
-            # System32 cmd explicitly: Git-bash PATH made `timeout /t` resolve
-            # to GNU timeout and spin the watcher in a fast loop (incident
-            # 2026-09-08 21:03).
-            if not extension_launched:
-                decide("spawning after_phaseA watcher (chains Phase B on Phase A end)")
-                extension_launched = True
-                subprocess.Popen(
-                    [r"C:\Windows\System32\cmd.exe", "/c",
-                     str(ROOT / "scripts" / "after_phaseA.bat")],
-                    cwd=str(ROOT),
-                )
             write_morning_report()
             break
 
         # still training - status line + keep waiting
-        log(f"training alive: step {state['step']}, "
-            f"eval {state['eval']}, lab {lab_count}/30")
+        log(f"Phase B alive: step {state['step']}, "
+            f"eval {state['eval']}")
         time.sleep(CHECK_INTERVAL)
 
     write_morning_report()
