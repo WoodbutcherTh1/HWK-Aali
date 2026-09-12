@@ -23,9 +23,11 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -268,10 +270,65 @@ def probe_model_port(port: int, timeout: float = 1.5) -> str | None:
         return None
 
 
+def probe_gpu() -> dict | None:
+    """One nvidia-smi snapshot (name, util %, VRAM, temp). None when
+    nvidia-smi is missing or errors (Pi CI, iGPU-only boxes) - the card
+    simply never renders there."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,"
+                            "memory.total,temperature.gpu",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return parse_nvidia_smi(out.splitlines()[0]) if out else None
+
+
+def parse_nvidia_smi(line: str) -> dict | None:
+    """One 'csv,noheader,nounits' row:
+    'NVIDIA GeForce RTX 3070, 9, 7744, 8192, 48'
+    (split from the right so GPU names containing commas survive)."""
+    parts = [p.strip() for p in line.split(",")]
+    if len(parts) < 5:
+        return None
+    name_parts, util, used, total, temp = parts[:-4], *parts[-4:]
+    try:
+        return {"name": ", ".join(name_parts), "util_pct": int(util),
+                "vram_used_mib": int(used), "vram_total_mib": int(total),
+                "temp_c": int(temp)}
+    except ValueError:
+        return None
+
+
+def gpu_card(info: dict | None) -> Card | None:
+    """The GPU card: bar = VRAM pressure, state from utilization.
+    A loaded-but-idle card (the promoted soup server resident in VRAM)
+    reads as 'wait', a busy one as 'run', a free one as 'idle'."""
+    if info is None:
+        return None
+    used, total = info["vram_used_mib"], info["vram_total_mib"]
+    frac = (used / total) if total else None
+    gb = f"{used / 1024:.1f}/{total / 1024:.1f} GB"
+    util, temp = info["util_pct"], info["temp_c"]
+    if util >= 20:
+        state, detail = "run", f"🔥 cooking - {util}% util - {gb}"
+    elif frac is not None and frac >= 0.8:
+        state, detail = "wait", f"model resident - {gb} - {util}% util"
+    else:
+        state, detail = "idle", f"idle - {util}% util - {gb} free"
+    extra = f"{temp}°C" + (" 🥵" if temp >= 85 else "")
+    return Card(title=f"GPU - {info['name']}", state=state,
+                detail=detail, frac=frac, extra=extra)
+
+
 def collect_cards(data_dir: Path, now: float | None = None,
-                  brain_probe=probe_model_port) -> list[Card]:
-    """Build the card list from the real logs. brain_probe is injectable so
-    tests never touch the network."""
+                  brain_probe: Callable[[int], str | None] = probe_model_port,
+                  gpu_probe: Callable[[], dict | None] | None = None,
+                  ) -> list[Card]:
+    """Build the card list from the real logs. brain_probe and gpu_probe are
+    injectable so tests never touch the network or nvidia-smi (gpu_probe=None
+    renders no GPU card at all)."""
     now = time.time() if now is None else now
     cards: list[Card] = []
 
@@ -286,6 +343,11 @@ def collect_cards(data_dir: Path, now: float | None = None,
     if api is not None:
         cards.append(Card(title="Aali API :5055", state="run",
                           detail="web/CLI/desktop brain", extra="LIVE"))
+
+    # The star of the show: the 8GB card every long job fights over.
+    gpu = gpu_card(gpu_probe()) if gpu_probe is not None else None
+    if gpu is not None:
+        cards.append(gpu)
 
     # 2. Graduation verdict (the thing the whole arc waits for)
     report = data_dir / "soup" / "resft_pipeline_report.md"
@@ -473,7 +535,7 @@ def main() -> int:
     try:
         while True:
             now = datetime.now().astimezone()
-            cards = collect_cards(args.data_dir)
+            cards = collect_cards(args.data_dir, gpu_probe=probe_gpu)
             frame_text = render(cards, now, frame,
                                 shutil.get_terminal_size().columns,
                                 plain=args.plain)

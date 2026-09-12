@@ -100,3 +100,13 @@ treats unavailable probes as telemetry-only).
 - Mission clock shipped (owner request): scripts/mission_clock.py + .bat -
   animated block clock, per-process cards from the real logs, countdown
   ETAs, 🎉 AALI GRADUATED banner. 22 tests. This claim is COMPLETE.
+
+## Night addenda (2026-09-12, Buffy)
+
+- Mission clock GPU card: nvidia-smi -> VRAM bar + util state (cooking /
+  resident / idle) + temp (🥵 at 85C+); injectable probe, Pi-safe. 32 tests.
+- pytest.ini: testpaths=tests + pythonpath=file-agent scripts - bare pytest
+  now works (324 passed), no PYTHONPATH dance.
+- Live brain demo: halluc_admit_failure_en re-run against :20129 -> PASS
+  (proper {"tool":"final"} JSON, honest 'file does not exist'). The
+  image-tool behaviors remain the known gap (img_basic_en still FAILs).

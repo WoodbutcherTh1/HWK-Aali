@@ -258,3 +258,87 @@ def test_render_idle_when_nothing_counts_down(tmp_path: Path) -> None:
     frame = mc.render(cards, datetime(2026, 9, 12, 17, 30, 0), frame=0,
                       width=100, plain=True)
     assert "nothing is counting down" in frame
+
+
+# ---------------------------------------------------------------------------
+# GPU card: nvidia-smi parser + state logic (probe always injected in tests)
+# ---------------------------------------------------------------------------
+
+RTX_ROW = "NVIDIA GeForce RTX 3070, 9, 7744, 8192, 48"
+
+
+def test_parse_nvidia_smi_row() -> None:
+    info = mc.parse_nvidia_smi(RTX_ROW)
+    assert info == {"name": "NVIDIA GeForce RTX 3070", "util_pct": 9,
+                    "vram_used_mib": 7744, "vram_total_mib": 8192,
+                    "temp_c": 48}
+
+
+def test_parse_nvidia_smi_name_with_comma() -> None:
+    # split from the RIGHT so multi-word/comma GPU names survive
+    info = mc.parse_nvidia_smi("Brand, Special GPU, 95, 1000, 2000, 60")
+    assert info is not None
+    assert info["name"] == "Brand, Special GPU"
+    assert info["vram_used_mib"] == 1000 and info["vram_total_mib"] == 2000
+
+
+def test_parse_nvidia_smi_garbage_is_none() -> None:
+    assert mc.parse_nvidia_smi("only, four, parts, here") is None
+    assert mc.parse_nvidia_smi("a, b, c, x, y, z") is None  # non-numeric tail
+
+
+def test_gpu_card_busy_is_run() -> None:
+    card = mc.gpu_card({"name": "RTX 3070", "util_pct": 95,
+                        "vram_used_mib": 7800, "vram_total_mib": 8192,
+                        "temp_c": 71})
+    assert card is not None and card.state == "run"
+    assert "cooking" in card.detail and "95% util" in card.detail
+    assert card.frac is not None and card.frac > 0.9
+    assert card.eta_s is None  # the GPU itself never counts down
+
+
+def test_gpu_card_resident_but_idle_is_wait() -> None:
+    # the promoted soup server lives in VRAM while idle - the honest state
+    card = mc.gpu_card({"name": "RTX 3070", "util_pct": 0,
+                        "vram_used_mib": 7744, "vram_total_mib": 8192,
+                        "temp_c": 48})
+    assert card is not None and card.state == "wait"
+    assert "resident" in card.detail
+
+
+def test_gpu_card_cold_and_empty_is_idle() -> None:
+    card = mc.gpu_card({"name": "RTX 3070", "util_pct": 3,
+                        "vram_used_mib": 800, "vram_total_mib": 8192,
+                        "temp_c": 40})
+    assert card is not None and card.state == "idle"
+
+
+def test_gpu_card_hot_weather_warning() -> None:
+    card = mc.gpu_card({"name": "RTX 3070", "util_pct": 95,
+                        "vram_used_mib": 7800, "vram_total_mib": 8192,
+                        "temp_c": 90})
+    assert card is not None and card.extra.endswith("🥵")
+
+
+def test_gpu_card_none_info_is_none() -> None:
+    assert mc.gpu_card(None) is None  # no nvidia-smi -> no card, never a crash
+
+
+def test_collect_cards_gpu_card_injected(tmp_path: Path) -> None:
+    data = _setup_data(tmp_path)
+
+    def probe() -> dict:
+        return {"name": "RTX 3070", "util_pct": 92, "vram_used_mib": 7900,
+                "vram_total_mib": 8192, "temp_c": 70}
+
+    cards = mc.collect_cards(data, now=time.time(), brain_probe=_no_probe,
+                             gpu_probe=probe)
+    gpu = next(c for c in cards if c.title.startswith("GPU"))
+    assert gpu.state == "run" and "RTX 3070" in gpu.title
+
+
+def test_collect_cards_gpu_probe_none_means_no_card(tmp_path: Path) -> None:
+    data = _setup_data(tmp_path)
+    cards = mc.collect_cards(data, now=time.time(), brain_probe=_no_probe,
+                             gpu_probe=None)
+    assert not any(c.title.startswith("GPU") for c in cards)
