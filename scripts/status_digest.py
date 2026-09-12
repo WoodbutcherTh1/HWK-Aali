@@ -178,8 +178,11 @@ def pipeline() -> list[tuple[str, str]]:
                                    f"{fmt_age(activity)})")]
                 # fresh start marker but no recent activity: the run died
                 # just after starting (reboot / job kill) - say so.
-                silent_for = fmt_age(activity if activity is not None
-                                     else age_seconds(SOUP_LOG))
+                silent_age = (activity if activity is not None
+                              else age_seconds(SOUP_LOG))
+                silent_for = fmt_age(silent_age)
+                if silent_for.endswith(" ago"):
+                    silent_for = silent_for[: -len(" ago")]
                 return [("⚠️", f"pipeline STALLED - started {fmt_age(age)} "
                                f"but silent for {silent_for} (relaunch "
                                "soup_pipeline.py)")]
