@@ -83,3 +83,20 @@ treats unavailable probes as telemetry-only).
   (stalled-start / running-with-stage-line); 292 green full-suite.
 - Decision pending (owner): salvage-exam checkpoint-2900 now (GPU free,
   finish_pipeline.py --once, baseline bar is 1/26) vs full clean relaunch.
+
+## Graduation (2026-09-12 evening, Buffy)
+
+- Owner chose salvage. finish_pipeline.py --once (detached, soup_salvage.log):
+  served checkpoint-2900, tuned exam **4/26 vs baseline 1/26 -> PROMOTE**.
+  promoted.json written; adapter LIVE on :20129. Phase B done the same hour
+  (100,000/100,000). Full retrain stays available (23% unused) but nothing
+  is pending.
+- Fallout fixed: promoted.json rerouted agent_loop's mode="local" and 4
+  test_hwk.py unit tests started calling the soup server (hidden dependency
+  from a pre-promotion era). Tests now pin AALI_OWN_MODEL=0 (the documented
+  kill-switch) and stay hermetic. Suite: 314 passed (PYTHONPATH=file-agent,
+  the run_tests.bat contract - bare pytest runs fail on the file-agent
+  imports; consider baking it into a pytest.ini later).
+- Mission clock shipped (owner request): scripts/mission_clock.py + .bat -
+  animated block clock, per-process cards from the real logs, countdown
+  ETAs, 🎉 AALI GRADUATED banner. 22 tests. This claim is COMPLETE.

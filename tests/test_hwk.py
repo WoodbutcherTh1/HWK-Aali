@@ -356,6 +356,7 @@ def test_agent_loop_records_conversation_turns(tmp_path, monkeypatch, mem_dir):
 
     monkeypatch.delenv("LOCAL_MODEL_PATH", raising=False)
     monkeypatch.setenv("AALI_OLLAMA", "0")
+    monkeypatch.setenv("AALI_OWN_MODEL", "0")  # ignore any promoted.json
     agent_loop("أنشئ ملف mem_test.txt واكتب بداخله تم", tmp_path, mode="local", print_final=False)
     log = (mem_dir / memory.CONVERSATION_LOG_NAME).read_text(encoding="utf-8").strip().splitlines()
     assert len(log) >= 2
@@ -368,6 +369,7 @@ def test_memory_block_included_in_scratch_transcript(tmp_path, monkeypatch, mem_
 
     memory.remember("owner name is Hmam", kind="fact")
     monkeypatch.setenv("AALI_OLLAMA", "0")  # force the scratch-model path
+    monkeypatch.setenv("AALI_OWN_MODEL", "0")  # and ignore any promoted.json
     fake_ckpt = tmp_path / "final.pt"
     fake_ckpt.write_bytes(b"x")  # exists-check passes; loader is patched below
     monkeypatch.setenv("LOCAL_MODEL_PATH", str(fake_ckpt))
@@ -568,6 +570,9 @@ def test_agent_workspace_and_instructions(tmp_path, monkeypatch):
     monkeypatch.delenv("LOCAL_MODEL_PATH", raising=False)
     # Pin the deterministic path so the test never depends on Ollama running.
     monkeypatch.setenv("AALI_OLLAMA", "0")
+    # A graduation PROMOTE writes promoted.json and reroutes mode="local"
+    # to the promoted soup server - unit tests pin the scratch-model path.
+    monkeypatch.setenv("AALI_OWN_MODEL", "0")
     response = agent_loop(
         "أنشئ ملف build_test.txt واكتب بداخله نجاح",
         tmp_path,
@@ -606,6 +611,7 @@ def test_agent_loop_request_id_passthrough(tmp_path, monkeypatch):
     from agent_loop import agent_loop
 
     monkeypatch.setenv("AALI_OLLAMA", "0")
+    monkeypatch.setenv("AALI_OWN_MODEL", "0")  # ignore any promoted.json
     monkeypatch.delenv("LOCAL_MODEL_PATH", raising=False)
     rid = "fixed-rid-42"
     queue = agent_log.subscribe(rid)
