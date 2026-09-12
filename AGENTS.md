@@ -453,6 +453,26 @@ in parallel:
   2.0 gate launched a serve that starved the box; the serve itself needs
   3-4 GB). NOTE for next runs: these two helpers exist ONLY because the
   live run imported pre-fix code — the fixed pipeline needs neither.
+- **Reboot kill + job-object breakaway (2026-09-12 evening)**: the machine
+  REBOOTED at 16:28:39 local (WMI LastBootUpTime), killing attempt 7 at step
+  2927/3804 (adapter served for its tuned exam — checkpoints through 2900
+  survived with valid adapter_model.safetensors; the baseline exam had
+  already graded 1/26). The scheduled task "HWK SoupPipeline" relaunched the
+  pipeline (16:29:01) and it died within its first minute: the task's python
+  exits 0 BY DESIGN (self_detach), Task Scheduler closes its JOB OBJECT
+  (kill-on-job-close), and the kernel killed the "detached" child that had
+  inherited the job — DETACHED_PROCESS protects against console close, NOT
+  job close; only "starting Soup server" got logged. Fix:
+  launch_detached.detached_creationflags() adds CREATE_BREAKAWAY_FROM_JOB
+  (child leaves the job at birth; when the job refuses breakaway, fall back
+  to the plain flags so the launch still works) and both spawn sites route
+  through it (launch_detached.spawn_detached with an OSError fallback,
+  soup_pipeline.self_detach likewise). status_digest second lesson: it
+  reported "pipeline RUNNING" 34 min after everything died — a fresh start
+  marker is not proof of life; RUNNING now requires recent pipeline WRITES
+  (≤15 min), a fresh start marker over a silent log alerts "STALLED -
+  relaunch soup_pipeline.py". Tests: tests/test_launch_detached.py (15),
+  tests/test_status_digest.py (12); 292 green full-suite.
 - **UI professional polish layer (2026-09-12 night)**: web/src/styles.css
   gained a refinement pass at the end of the file — antialiased type +
   text-wrap pretty, real glass sidebar/chat-head (color-mix + backdrop
@@ -549,4 +569,9 @@ in parallel:
   من ~31MB إلى ~26MB — دليل تحذيري مفيد). ثم انسخ dist/*.exe إلى
   %LOCALAPPDATA%\Programs\AaliDesktop\ (نمط التحديث المعتمد).
 
-— Last updated: 2026-09-12 (smoke-probe RAM gate: CPU probes pre-flight free RAM and skip fast (exit 4) when the GPU trainer starves the host — 2026-09-09-style three silent exit-3 cycles fixed; server output captured to smoke_server.log); 2026-09-10 (CLI bidi: Windows Terminal never trusted — CLI shapes Arabic itself on Windows (owner screenshot: mirrored greeting); admin one-click handoff v2: single-use 60s hashed ?ht= token traded server-side for a session — session token never in a URL; admin audit log: /api/admin/audit + dashboard «سجل تدقيق الإجراءات» panel — key issue/revoke, account delete with actor/time/IP; attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; git: ONE branch `main` (legacy snapshots merged, old branches archived as tags); branding: Aali is the only AI — built & trained by team HWK, external provider names scrubbed from user-facing text; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-12 (reboot kill + job breakaway: the 16:28:39 reboot
+killed attempt 7 and the task-relaunched attempt 8 died in its first minute —
+a scheduled task's job object sweeps a detached child that inherited it;
+CREATE_BREAKAWAY_FROM_JOB now requested with a plain-flag fallback; status
+digest calls a fresh-start-marker-over-silent-log STALLED, never RUNNING);
+smoke-probe RAM gate: CPU probes pre-flight free RAM and skip fast (exit 4) when the GPU trainer starves the host — 2026-09-09-style three silent exit-3 cycles fixed; server output captured to smoke_server.log); 2026-09-10 (CLI bidi: Windows Terminal never trusted — CLI shapes Arabic itself on Windows (owner screenshot: mirrored greeting); admin one-click handoff v2: single-use 60s hashed ?ht= token traded server-side for a session — session token never in a URL; admin audit log: /api/admin/audit + dashboard «سجل تدقيق الإجراءات» panel — key issue/revoke, account delete with actor/time/IP; attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; git: ONE branch `main` (legacy snapshots merged, old branches archived as tags); branding: Aali is the only AI — built & trained by team HWK, external provider names scrubbed from user-facing text; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)

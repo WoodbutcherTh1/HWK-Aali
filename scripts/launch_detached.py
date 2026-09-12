@@ -34,6 +34,34 @@ LOG_DIR = Path("D:/hwk-data")
 ENV_MARKER = "HWK_DETACHED"
 
 
+def detached_creationflags() -> int:
+    """DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP + CREATE_BREAKAWAY_FROM_JOB.
+
+    2026-09-12 16:29 lesson (attempt 8): the pipeline launched by the
+    scheduled task "HWK SoupPipeline" died in its first minute. The task's
+    python runs inside a Task Scheduler JOB OBJECT with kill-on-job-close;
+    our DETACHED child still INHERITED that job, so when the parent exited 0
+    (the self-detach design: parent returns, child runs), the scheduler
+    closed the job and the kernel killed every process in it - the fresh
+    pipeline died WITH its parent's success, logging only "starting Soup
+    server". CREATE_BREAKAWAY_FROM_JOB lets the child leave the job at birth
+    (it requires JOB_OBJECT_LIMIT_BREAKAWAY_OK on the job; where that is not
+    set, CreateProcess refuses the flag and the caller must retry without
+    it - see spawn_detached's fallback)."""
+    if sys.platform != "win32":
+        return 0
+    return (subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_BREAKAWAY_FROM_JOB)
+
+
+def _plain_detached_flags() -> int:
+    """The pre-2026-09-12-16:29 flag set (no job breakaway)."""
+    if sys.platform != "win32":
+        return 0
+    return subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+
 def build_command(argv: list[str]) -> list[str]:
     """Resolve the executable to an absolute path (the caller's cwd decides,
     not the child's) and return the spawn-ready command list."""
@@ -46,12 +74,29 @@ def build_command(argv: list[str]) -> list[str]:
 
 
 def spawn_detached(command: list[str], log_base: str, cwd: Path) -> int:
-    """Spawn command detached; returns the child pid."""
+    """Spawn command detached; returns the child pid.
+
+    Tries the breakaway spawn first (survives a scheduled-task / CI job
+    closing over the parent - the 16:29 attempt-8 kill); when the job
+    refuses breakaway (no JOB_OBJECT_LIMIT_BREAKAWAY_OK), retries with the
+    plain detached flag set so the launch still works."""
     out_path = LOG_DIR / f"{log_base}.log"
     err_path = LOG_DIR / f"{log_base}.log.err"
-    creationflags = 0
-    if sys.platform == "win32":
-        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    try:
+        return _spawn(command, out_path, err_path, cwd,
+                      detached_creationflags())
+    except OSError as exc:
+        if sys.platform != "win32":
+            raise
+        print(f"[launch_detached] breakaway refused ({exc}); retrying "
+              "without it - child may die if the parent's job closes",
+              file=sys.stderr, flush=True)
+        return _spawn(command, out_path, err_path, cwd,
+                      _plain_detached_flags())
+
+
+def _spawn(command: list[str], out_path: Path, err_path: Path, cwd: Path,
+           creationflags: int) -> int:
     with out_path.open("a", encoding="utf-8") as out, \
             err_path.open("a", encoding="utf-8") as err:
         child = subprocess.Popen(  # noqa: S603 - owner-controlled command

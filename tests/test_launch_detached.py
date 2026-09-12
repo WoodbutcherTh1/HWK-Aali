@@ -13,6 +13,7 @@ Run:
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -141,3 +142,96 @@ def test_self_detach_runs_inplace_without_psutil(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr(sp, "psutil", None)
     monkeypatch.delenv(sp.DETACH_ENV, raising=False)
     assert sp.self_detach() is True, "no psutil = cannot re-spawn = run in-place"
+
+
+# ---------------------------------------------------------------------------
+# Job-object breakaway (2026-09-12 16:29 lesson, attempt 8): a scheduled
+# task runs its python inside a JOB OBJECT with kill-on-close; a detached
+# child that INHERITS the job dies with the parent's exit. The child must
+# ask to BREAK AWAY at birth; where the job refuses, fall back to the
+# plain detached flags so the launch still works.
+# ---------------------------------------------------------------------------
+
+_BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
+_DETACHED = getattr(subprocess, "DETACHED_PROCESS", 0)
+_NEW_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+
+def test_detached_creationflags_include_breakaway() -> None:
+    flags = ld.detached_creationflags()
+    if sys.platform != "win32":
+        assert flags == 0
+        return
+    assert flags & _DETACHED and flags & _NEW_GROUP and flags & _BREAKAWAY
+
+
+def test_spawn_detached_asks_for_breakaway(monkeypatch, tmp_path: Path) -> None:
+    seen: dict = {}
+
+    def fake_popen(command, **kwargs):
+        seen["flags"] = kwargs["creationflags"]
+        return _FakeChild()
+
+    monkeypatch.setattr(ld.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(ld, "LOG_DIR", tmp_path)
+    ld.spawn_detached(["tool.exe"], "unit_log", cwd=tmp_path)
+    if sys.platform == "win32":
+        assert seen["flags"] & _BREAKAWAY, "child must leave the parent's job"
+
+
+def test_spawn_detached_falls_back_when_breakaway_refused(
+        monkeypatch, tmp_path: Path) -> None:
+    calls: list[int] = []
+
+    def fake_popen(command, **kwargs):
+        calls.append(kwargs["creationflags"])
+        if kwargs["creationflags"] & _BREAKAWAY:
+            raise OSError("access denied: job does not allow breakaway")
+        return _FakeChild()
+
+    monkeypatch.setattr(ld.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(ld, "LOG_DIR", tmp_path)
+    pid = ld.spawn_detached(["tool.exe"], "unit_log", cwd=tmp_path)
+    assert pid == 4242
+    if sys.platform == "win32":
+        assert len(calls) == 2, "one breakaway attempt + one fallback"
+        assert calls[0] & _BREAKAWAY
+        assert not (calls[1] & _BREAKAWAY), "fallback must drop the breakaway"
+        assert calls[1] & _DETACHED and calls[1] & _NEW_GROUP
+    else:
+        assert len(calls) == 1
+
+
+def test_self_detach_respawn_breaks_away_from_job(monkeypatch, tmp_path: Path) -> None:
+    spawned: dict = {}
+
+    def fake_popen(argv, **kwargs):
+        spawned["flags"] = kwargs.get("creationflags", 0)
+        return _FakeChild()
+
+    monkeypatch.setattr(sp.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(sp, "REPORTS", tmp_path)
+    monkeypatch.delenv(sp.DETACH_ENV, raising=False)
+    assert sp.self_detach() is False
+    if sys.platform == "win32":
+        assert spawned["flags"] & _BREAKAWAY, "pipeline child must break away"
+
+
+def test_self_detach_falls_back_when_breakaway_refused(
+        monkeypatch, tmp_path: Path) -> None:
+    calls: list[int] = []
+
+    def fake_popen(argv, **kwargs):
+        calls.append(kwargs.get("creationflags", 0))
+        if kwargs.get("creationflags", 0) & _BREAKAWAY:
+            raise OSError("breakaway refused")
+        return _FakeChild()
+
+    monkeypatch.setattr(sp.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(sp, "REPORTS", tmp_path)
+    monkeypatch.delenv(sp.DETACH_ENV, raising=False)
+    assert sp.self_detach() is False, "fallback still spawns the child"
+    if sys.platform == "win32":
+        assert len(calls) == 2
+        assert calls[0] & _BREAKAWAY
+        assert not (calls[1] & _BREAKAWAY)

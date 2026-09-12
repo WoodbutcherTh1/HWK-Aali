@@ -140,6 +140,34 @@ def test_pipeline_promote_is_graduation(tmp_path: Path) -> None:
     assert "PROMOTE" in msg
 
 
+def test_pipeline_fresh_start_but_silent_log_is_stalled(tmp_path: Path) -> None:
+    # 2026-09-12 17:03 false alarm: the reboot killed attempt 8 one minute
+    # after "=== soup pipeline start ===" - a young start marker over a
+    # silent log is a DEAD run, not a RUNNING one.
+    soup_log = tmp_path / "soup_pipeline.log"
+    report = tmp_path / "resft_pipeline_report.md"
+    _write(soup_log, f"{_stamp(34 * 60)} === soup pipeline start ===\n"
+                     f"{_stamp(34 * 60)} starting Soup server on port 20129\n")
+    _write(report, "**Verdict: INCOMPLETE**\n", age_s=10 * 3600)
+    icon, msg = _pipeline(soup_log, report)
+    assert icon == "⚠️"
+    assert "STALLED" in msg and "relaunch" in msg
+    assert "RUNNING" not in msg
+
+
+def test_pipeline_fresh_start_with_recent_stage_line_is_running(
+        tmp_path: Path) -> None:
+    # a genuinely live run writes stage lines right after the start marker
+    soup_log = tmp_path / "soup_pipeline.log"
+    report = tmp_path / "resft_pipeline_report.md"
+    _write(soup_log, f"{_stamp(3 * 60)} === soup pipeline start ===\n"
+                     f"{_stamp(60)} starting Soup server on port 20129\n")
+    _write(report, "**Verdict: INCOMPLETE**\n", age_s=10 * 3600)
+    icon, msg = _pipeline(soup_log, report)
+    assert icon == "🔄"
+    assert "RUNNING" in msg
+
+
 def test_pipeline_no_go_alerts(tmp_path: Path) -> None:
     soup_log = tmp_path / "soup_pipeline.log"
     report = tmp_path / "resft_pipeline_report.md"

@@ -46,6 +46,7 @@ except ImportError:  # pragma: no cover
 # "is the 8GB card free", used by every launcher on this machine.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wait_gpu_free as gate  # noqa: E402
+import launch_detached as ld  # noqa: E402
 from soup_exam import SMOKE_CASE_IDS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -644,21 +645,35 @@ def self_detach(no_wait: bool = False) -> bool:
         return True
     if psutil is None:  # cannot re-spawn safely; run in-place (old behavior)
         return True
-    creationflags = 0
-    if sys.platform == "win32":
-        creationflags = (subprocess.DETACHED_PROCESS
-                         | subprocess.CREATE_NEW_PROCESS_GROUP)
     child_argv = [sys.executable, str(Path(__file__).resolve())]
     if no_wait:
         child_argv.append("--no-wait")
+    # 2026-09-12 16:29 lesson (attempt 8): launched by the scheduled task
+    # "HWK SoupPipeline", the detached child INHERITED the task's job object
+    # (kill-on-close); the parent's exit 0 closed the job and the kernel
+    # killed the fresh pipeline in its first minute. The breakaway flag lets
+    # the child leave the job at birth; where the job refuses breakaway, retry
+    # with the plain detached flags (launch still works, old kill risk kept).
     with (REPORTS.parent / f"{DETACH_LOG}.log").open("a", encoding="utf-8") as out, \
             (REPORTS.parent / f"{DETACH_LOG}.log.err").open("a", encoding="utf-8") as err:
-        child = subprocess.Popen(  # noqa: S603 - this same script, owner-run
-            child_argv,
-            stdout=out, stderr=err, stdin=subprocess.DEVNULL,
-            cwd=str(ROOT), creationflags=creationflags, close_fds=True,
-            env={**os.environ, DETACH_ENV: "1"},
-        )
+        try:
+            child = subprocess.Popen(  # noqa: S603 - this same script, owner-run
+                child_argv,
+                stdout=out, stderr=err, stdin=subprocess.DEVNULL,
+                cwd=str(ROOT), creationflags=ld.detached_creationflags(),
+                close_fds=True,
+                env={**os.environ, DETACH_ENV: "1"},
+            )
+        except OSError:
+            if sys.platform != "win32":
+                raise
+            child = subprocess.Popen(  # noqa: S603
+                child_argv,
+                stdout=out, stderr=err, stdin=subprocess.DEVNULL,
+                cwd=str(ROOT), creationflags=ld._plain_detached_flags(),
+                close_fds=True,
+                env={**os.environ, DETACH_ENV: "1"},
+            )
     print(f"[soup_pipeline] detached as pid {child.pid} - output: "
           f"{REPORTS.parent / (DETACH_LOG + '.log')} (this console is now free)",
           flush=True)

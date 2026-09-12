@@ -159,6 +159,12 @@ def _last_pipeline_activity(lines: list[str]) -> float | None:
 def pipeline() -> list[tuple[str, str]]:
     # Verdicts are read from the report FILE (rewritten fresh by every completed
     # run), never from old log lines - history must not read like news.
+    # 2026-09-12 17:03 lesson (the reboot killed attempt 8 in its first
+    # minute): a fresh "start" line is NOT proof of life - a run that died
+    # right after starting leaves a young start marker and a silent log.
+    # A run counts as RUNNING only when the pipeline WROTE something
+    # recently (stages, smoke probes...); a fresh start marker over a silent
+    # log is a STALLED run that needs a relaunch.
     lines = tail(SOUP_LOG, 10)
     for line in reversed(lines):
         if "pytest-of" in line:
@@ -166,7 +172,17 @@ def pipeline() -> list[tuple[str, str]]:
         if "=== soup pipeline start ===" in line:
             age = _log_line_age(line)
             if age is not None and age < 6 * 3600:
-                return [("🔄", f"pipeline RUNNING (log last write {fmt_age(age_seconds(SOUP_LOG))})")]
+                activity = _last_pipeline_activity(lines)
+                if activity is not None and activity <= STALL_SEC:
+                    return [("🔄", f"pipeline RUNNING (last activity "
+                                   f"{fmt_age(activity)})")]
+                # fresh start marker but no recent activity: the run died
+                # just after starting (reboot / job kill) - say so.
+                silent_for = fmt_age(activity if activity is not None
+                                     else age_seconds(SOUP_LOG))
+                return [("⚠️", f"pipeline STALLED - started {fmt_age(age)} "
+                               f"but silent for {silent_for} (relaunch "
+                               "soup_pipeline.py)")]
             break
     # Mid-training the start marker scrolls past tail(10) - a recent line the
     # PIPELINE itself wrote proves it is alive (the smoke watcher writes

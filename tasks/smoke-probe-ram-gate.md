@@ -63,3 +63,23 @@ treats unavailable probes as telemetry-only).
   3.5 GB after a serve at "2 GB free" drove the box to 0.13 GB mid-run
   (recovered by killing the exact port-owning PID — house rule honored).
 - Final: 277 tests green, 16 commits, tree clean.
+
+## Evening follow-up: reboot kill + breakaway (2026-09-12, Buffy)
+
+- 16:28:39 the machine REBOOTED (WMI LastBootUpTime) — attempt 7 died at
+  step 2927/3804 while serving the tuned adapter for its exam; Phase B had
+  just finished (100,000 steps). tuned/checkpoint-2900 survived valid.
+- Scheduled task relaunched the pipeline at 16:29:01 → it died in its
+  first minute: the task's python exits 0 by design (self_detach), the
+  scheduler closes its JOB OBJECT (kill-on-close), and the kernel killed
+  the detached child that INHERITED the job. DETACHED_PROCESS does not
+  protect against job close.
+- Fix: detached_creationflags() = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+  | CREATE_BREAKAWAY_FROM_JOB, plain-flag fallback when the job refuses;
+  used by launch_detached.spawn_detached AND soup_pipeline.self_detach.
+- status_digest fix: a fresh "start" marker over a silent log is now
+  "STALLED - relaunch" (was "RUNNING" 34 min after the reboot kill).
+- Tests: +5 launch_detached (breakaway/fallback), +2 status_digest
+  (stalled-start / running-with-stage-line); 292 green full-suite.
+- Decision pending (owner): salvage-exam checkpoint-2900 now (GPU free,
+  finish_pipeline.py --once, baseline bar is 1/26) vs full clean relaunch.
