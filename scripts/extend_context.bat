@@ -31,7 +31,10 @@ if errorlevel 1 (
   exit /b 2
 )
 
-".venv\Scripts\python.exe" train_scratch.py ^
+rem Detached launch (2026-09-12): the hours-long trainer must survive this
+rem window closing (the 12:20 console event killed a whole run). The launcher
+rem appends to D:\hwk-data\context_training.log itself.
+".venv\Scripts\python.exe" scripts\launch_detached.py --log context_training -- train_scratch.py ^
   --data D:/hwk-data/tokens ^
   --corpora pile,arabic ^
   --tokenizer D:/hwk-data/tokenizer/hwk_spm.model ^
@@ -41,4 +44,4 @@ if errorlevel 1 (
   --batch-size 1 --gradient-accumulation 8 --grad-checkpoint ^
   --max-steps 100000 --save-steps 500 --log-steps 25 ^
   --learning-rate 1e-4 --warmup-steps 200 --dtype bf16 ^
-  --resume > D:\hwk-data\context_training.log 2>&1
+  --resume

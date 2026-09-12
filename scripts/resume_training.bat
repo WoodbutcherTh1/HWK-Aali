@@ -8,7 +8,10 @@ set ROOT=%~dp0..
 cd /d "%ROOT%"
 set PYTHONIOENCODING=utf-8
 
-".venv\Scripts\python.exe" train_scratch.py ^
+rem Detached launch (2026-09-12): the trainer must survive this window
+rem closing (the 12:20 console event killed a whole run). The launcher
+rem appends to D:\hwk-data\training.log itself.
+".venv\Scripts\python.exe" scripts\launch_detached.py --log training -- train_scratch.py ^
   --data D:/hwk-data/tokens ^
   --corpora pile,arabic ^
   --tokenizer D:/hwk-data/tokenizer/hwk_spm.model ^
@@ -18,5 +21,5 @@ set PYTHONIOENCODING=utf-8
   --batch-size 4 --gradient-accumulation 8 ^
   --max-steps 90000 --save-steps 2500 --log-steps 25 ^
   --warmup-steps 500 --dtype bf16 ^
-  --resume > D:\hwk-data\training.log 2>&1
+  --resume
 pause

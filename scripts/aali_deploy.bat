@@ -49,8 +49,12 @@ echo  سيبدأ تدريب QLoRA + امتحان الترقية على الـ GP
 echo  تأكد أن Phase A متوقف أو أنهى عمله.
 set /p GO=  متابعة؟ (y/N): 
 if /i "%GO%"=="y" (
-  start "Aali Soup Pipeline" cmd /k "set PYTHONIOENCODING=utf-8 && .venv\Scripts\python.exe scripts\soup_pipeline.py"
+  rem 2026-09-12: detached launch - the pipeline (and its hours-long train)
+  rem must never live in a console window that a close/Ctrl+C would kill.
+  ".venv\Scripts\python.exe" scripts\launch_detached.py --log soup_pipeline -- .venv\Scripts\python.exe scripts\soup_pipeline.py
 )
+echo.
+pause
 goto menu
 
 :merge

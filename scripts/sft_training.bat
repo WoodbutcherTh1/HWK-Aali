@@ -14,7 +14,10 @@ if not exist "D:\hwk-models\sft-v1" mkdir "D:\hwk-models\sft-v1"
 if not exist "D:\hwk-models\sft-v1\checkpoint.pt" copy /Y "D:\hwk-models\context-4k\checkpoint.pt" "D:\hwk-models\sft-v1\checkpoint.pt"
 if not exist "D:\hwk-models\sft-v1\trainer-state.pt" copy /Y "D:\hwk-models\context-4k\trainer-state.pt" "D:\hwk-models\sft-v1\trainer-state.pt"
 
-".venv\Scripts\python.exe" train_scratch.py ^
+rem Detached launch (2026-09-12): the trainer must survive this window
+rem closing (the 12:20 console event killed a whole run). The launcher
+rem appends to D:\hwk-data\sft_training.log itself.
+".venv\Scripts\python.exe" scripts\launch_detached.py --log sft_training -- train_scratch.py ^
   --data data/sft_mix.jsonl ^
   --tokenizer D:/hwk-data/tokenizer/hwk_spm.model ^
   --output-dir D:/hwk-models/sft-v1 ^
@@ -23,4 +26,4 @@ if not exist "D:\hwk-models\sft-v1\trainer-state.pt" copy /Y "D:\hwk-models\cont
   --batch-size 1 --gradient-accumulation 8 --grad-checkpoint ^
   --max-steps 103000 --save-steps 250 --log-steps 25 ^
   --learning-rate 5e-5 --warmup-steps 100 --dtype fp16 ^
-  --resume > D:\hwk-data\sft_training.log 2>&1
+  --resume
