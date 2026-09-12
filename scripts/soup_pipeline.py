@@ -487,6 +487,26 @@ def run_training() -> bool:
         log(f"dataset gate passed: 0 token-overflow rows at max_length={max_length}")
     except ImportError:
         log("dataset gate skipped (build_aali_sft_v2 not importable)")
+    # Media floors gate (sft_v3, 2026-09-12 postmortem): a dataset below the
+    # per-tool media floors cannot teach the exam's media behaviors - the 09-12
+    # run trained on 7 media rows in 5,336 and went 0/5 on media. Re-check here
+    # so a stale or hand-built file fails in one second instead of burning a
+    # ~4.4h training attempt. Same import contract as the overflow gate above.
+    try:
+        from build_aali_sft_v2 import media_floor_failures, media_tool_counts
+        with SFT_V2.open("r", encoding="utf-8") as handle:
+            written = [json.loads(line) for line in handle if line.strip()]
+        floor_failures = media_floor_failures(media_tool_counts(written))
+        if floor_failures:
+            log("media floors gate FAILED: " + "; ".join(floor_failures))
+            log("rebuild with scripts/build_aali_sft_v2.py before training")
+            return False
+        log("media floors gate passed: "
+            + ", ".join(f"{tool}={count}"
+                        for tool, count in sorted(
+                            media_tool_counts(written).items())))
+    except ImportError:
+        log("media floors gate skipped (build_aali_sft_v2 not importable)")
     log(f"starting soup train on {SFT_V2.name}")
     # Stream the trainer's output to a live log (the old capture-to-buffer
     # died with subprocess.run); on exit the tail goes to last_stage.txt.

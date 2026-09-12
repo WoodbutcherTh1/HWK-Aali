@@ -1,8 +1,33 @@
 # Task: image-tool-heavy SFT mix for the next graduation run (sft_v3)
 
-- owner: unclaimed (plan authored by Buffy, 2026-09-12)
-- status: planned — needs the owner's go (nothing launches while the
-  checkpoint-2900 adapter is promoted and serving on :20129)
+- owner: Buffy (implemented 2026-09-12, ~19:50 local)
+- status: steps 1–3 DONE and verified offline (builder episodes + floors gate
+  + rebuild). Step 4 (launch) needs the owner's explicit go — the
+  checkpoint-2900 adapter is promoted and live-serving on :20129.
+
+## Implementation results (2026-09-12, verified)
+
+- Builder media block replaced: **67 authored episodes** (image ×19, video
+  ×12 incl. 4 two-turn consent pairs, read ×8, edit ×8, emoji ×6, error
+  recovery ×8 — plus 2 ask-when-vague kept from v2). All schemas match
+  file_tools.py (`generate_emoji` takes `prompt`, NOT the v2 bug
+  `description`).
+- **Floors gate shipped in TWO places**: the builder fails with exit 2
+  below per-tool floors (image 12 / video 8 / edit 6 / read 6 / emoji 4,
+  `MEDIA_FLOORS`), measured on rows actually WRITTEN; `soup_pipeline.run_training`
+  re-checks the file before training so a stale/hand-built dataset fails in
+  one second instead of burning a ~4.4h attempt.
+- Rebuild verified: 5,391 records (was 5,336), **media rows 7 → 67**
+  (generate_image 22 / video 16 / edit 10 / read 11 / emoji 8), arabic
+  share 0.345, 0 token-overflow rows, 0 exam leaks in the written file,
+  soup.yaml replica check passes.
+- Diff vs backup (`D:/hwk-data/soup/sft_v2.pre_sft_v3_backup.jsonl`):
+  +60 v3 episodes, +1 conversation-log row (live log grew), −4 OLD media
+  episodes intentionally superseded (image-gen-ar, video-plain-rough-en/ar,
+  emoji-gen-en — leak-verified clean, replaced by v3 versions). No other
+  source changed.
+- Tests: 7 new gate tests; full suite **331 passed**.
+- Build report kept at `D:/hwk-data/soup/sft_v3_build_report.json`.
 
 ## Diagnosis (evidence, not vibes)
 
@@ -46,7 +71,9 @@ general mix. Structure (all with real file_tools.py schemas; `prompt` +
 - **read_image ×8** (EN 4 / AR 4): OCR on screenshots/signs/documents.
 - **edit_image ×8** (EN 4 / AR 4): resize/crop/rotate/grayscale ops with
   `path` + `output` + `op` (never overwrite).
-- **generate_emoji ×6** (EN 3 / AR 3): sticker requests with description+path.
+- **generate_emoji ×6** (EN 3 / AR 3): sticker requests with prompt+path
+  (`prompt` is the real file_tools.py arg — the v2 draft said `description`;
+  implemented with the correct key).
 - **error-recovery pairs ×8**: tool result `{"ok": false, ...}` AFTER a
   media call → assistant admits + offers fix (no invented success) — the
   hallucination family that already works, extended to media.

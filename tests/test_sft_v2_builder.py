@@ -424,3 +424,102 @@ def test_token_overflow_rows_names_the_failure(tmp_path: Path) -> None:
     if live.exists():
         assert builder.token_overflow_rows(
             live, max_length=builder.TRAIN_MAX_LENGTH) == []
+
+
+# ---------------------------------------------------------------------------
+# sft_v3 media block + floors gate (2026-09-12 postmortem: media 0/5 because
+# the mix had 7 media rows and 6 of 13 authored episodes died as exam leaks)
+# ---------------------------------------------------------------------------
+
+def test_media_tool_counts_counts_rows_per_tool() -> None:
+    rows = [
+        {"messages": [_msg("user", "draw"),
+                      _msg("assistant", '{"tool": "generate_image", "arguments": {}}')],
+         "source": "a"},
+        {"messages": [_msg("user", "clip"),
+                      _msg("assistant", '{"tool": "generate_video", "arguments": {}}')],
+         "source": "b"},
+        {"messages": [_msg("user", "final"),
+                      _msg("assistant", '{"tool": "final", "content": "no tool"}')],
+         "source": "c"},
+    ]
+    counts = builder.media_tool_counts(rows)
+    assert counts["generate_image"] == 1
+    assert counts["generate_video"] == 1
+    assert counts["edit_image"] == 0
+
+
+def test_media_floor_failures_names_each_shortfall() -> None:
+    counts = dict.fromkeys(builder.MEDIA_FLOORS, 99)
+    assert builder.media_floor_failures(counts) == []
+    counts = {tool: 0 for tool in builder.MEDIA_FLOORS}
+    failures = builder.media_floor_failures(counts)
+    assert len(failures) == len(builder.MEDIA_FLOORS)
+    assert any("generate_image" in f and "floor 12" in f for f in failures)
+
+
+def test_generated_media_block_meets_every_floor_and_leaks_nothing(
+        tmp_path: Path) -> None:
+    """The exact failure that gutted the 09-12 mix, now a test: the authored
+    media episodes must clear the floors on their own, and NONE of them may
+    reuse an exam user-turn (the leak gate killed 6 of the old 13)."""
+    rows = builder.generated_episodes()
+    failures = builder.media_floor_failures(builder.media_tool_counts(rows))
+    assert failures == [], failures
+    # leak check against a real exam file containing the v2 offenders
+    exam = tmp_path / "exam.jsonl"
+    exam.write_text(json.dumps({"id": "img_basic_en", "turns": [
+        ["user", "Draw me a picture of a mountain lake at dawn"]]}) + "\n",
+        encoding="utf-8")
+    hashes = builder.load_exam_prompts(exam)
+    for row in rows:
+        user_text, _ = builder._record_text(row)
+        assert builder._hash_pair(user_text, "") not in hashes, row["source"]
+
+
+def test_generate_emoji_episodes_teach_the_real_schema_key() -> None:
+    rows = builder.generated_episodes()
+    emoji_rows = [r for r in rows
+                  if '"generate_emoji"' in r["messages"][-1]["content"]]
+    assert len(emoji_rows) >= 6  # floor is 4; authored 6 for headroom
+    for row in emoji_rows:
+        args = json.loads(row["messages"][-1]["content"])["arguments"]
+        assert "prompt" in args and "path" in args
+        assert "description" not in args  # the v2 bug: wrong arg name
+
+
+def test_multi_turn_consent_pair_teaches_refusal_then_call() -> None:
+    """The exam's follow-up cases grade two-turn consent-then-call behavior;
+    the v2 survivors were single-turn only."""
+    rows = builder.generated_episodes()
+    by_source = {r["source"]: r for r in rows}
+    row = by_source["video-consent-v3-wedding-en"]
+    roles = [m["role"] for m in row["messages"]]
+    assert roles == ["system", "user", "assistant", "user", "assistant"]
+    refusal = json.loads(row["messages"][2]["content"])
+    assert refusal["tool"] == "final"
+    call = json.loads(row["messages"][4]["content"])
+    assert call["tool"] == "generate_video"
+    assert set(call["arguments"]) == {"prompt", "path"}
+
+
+def test_media_error_recovery_episodes_use_honest_finals() -> None:
+    rows = builder.generated_episodes()
+    by_source = {r["source"]: r for r in rows}
+    row = by_source["media-error-v3-path-en"]
+    last = row["messages"][-1]
+    assert last["role"] == "assistant"
+    payload = json.loads(last["content"])
+    assert payload["tool"] == "final"
+    assert "doesn't exist" in payload["content"]
+
+
+def test_build_report_includes_media_floor_status() -> None:
+    """The report must always carry the floor verdict so the pipeline log and
+    any human can see it without rerunning the build."""
+    assert hasattr(builder, "MEDIA_FLOORS")
+    assert builder.MEDIA_FLOORS["generate_image"] >= 12
+    assert builder.MEDIA_FLOORS["generate_video"] >= 8
+    assert builder.MEDIA_FLOORS["edit_image"] >= 6
+    assert builder.MEDIA_FLOORS["read_image"] >= 6
+    assert builder.MEDIA_FLOORS["generate_emoji"] >= 4

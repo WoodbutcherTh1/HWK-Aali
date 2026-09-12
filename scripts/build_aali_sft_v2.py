@@ -254,22 +254,116 @@ def generated_episodes() -> list[dict]:
            "مكتوب فيه. أعطني الاسم الصحيح أو ارفعه وأقرأه فورًا.\"}"),
     ]
 
-    # --- image / video tool behaviors (re-SFT fix: the 2026-09-09 graduation
-    # run proved the adapter learned file-tool JSON but the image/video-tool
-    # behaviors "never took" - the mix had ~8 mentions among 6k records while
-    # the exam grades 5 media cases. These mirror the exam behaviors with
-    # different wording, using the real file_tools.py argument schema.) ----
+    # --- image / video tool behaviors (sft_v3 media block, 2026-09-12).
+    # Postmortem of the 09-12 graduation (4/26, media 0/5): the trained file
+    # had 7 media rows in 5,336 because 6 of the old 13 episodes REUSED the
+    # exam's exact user prompts and the leak gate (correctly) killed them.
+    # Every episode below was written leak-free (checked against
+    # load_exam_prompts in tests) with the REAL file_tools.py schemas:
+    # generate_image/generate_video need prompt+path, edit_image needs
+    # path+output+op, generate_emoji needs PROMPT (not description - the old
+    # episode taught a wrong arg name) + path. Multi-turn pairs teach the
+    # refusal -> consent -> call arc and the honest error recovery. ----------
+    def multi(name: str, system: str, *turns: tuple[str, str]) -> dict:
+        """A multi-turn episode: system + alternating turns, ending assistant
+        (the trainer's causal-loss target must be last)."""
+        messages = [{"role": "system", "content": system}]
+        messages += [{"role": role, "content": text} for role, text in turns]
+        return {"messages": messages, "source": name}
+
     episodes += [
-        ep("image-gen-en",
-           "Draw me a picture of a mountain lake at dawn.",
+        # generate_image x18 (EN 9 / AR 9) - three request styles, new subjects
+        ep("image-gen-v3-city-en",
+           "Can you draw a city skyline at night for me?",
            "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
-           "\"mountain lake at dawn, calm water, soft golden light, mist over the peaks\", "
-           "\"path\": \"images/mountain-lake.png\"}}"),
-        ar("image-gen-ar",
-           "ارسم لي منظر شاطئ وقت الغروب",
+           "\"city skyline at night, glowing windows, purple-blue sky, "
+           "reflections on the river\", \"path\": \"images/city-night.png\"}}"),
+        ep("image-gen-v3-cat-en",
+           "I want a picture of an orange tabby cat napping in the sun.",
            "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
-           "\"منظر شاطئ وقت الغروب، سماء برتقالية وبنفسجية، موج هادئة\", "
-           "\"path\": \"images/beach-sunset.png\"}}"),
+           "\"orange tabby cat napping in a warm sunbeam on a wooden floor, "
+           "soft light\", \"path\": \"images/tabby-cat.png\"}}"),
+        ep("image-gen-v3-dunes-en",
+           "make an image showing desert dunes at midday",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"golden desert dunes under a midday sun, sharp dune ridges, "
+           "clear sky\", \"path\": \"images/desert-dunes.png\"}}"),
+        ep("image-gen-v3-coffee-en",
+           "Can you draw a steaming cup of coffee on a rainy window sill?",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"steaming coffee cup on a window sill, rain drops on the glass, "
+           "cozy mood\", \"path\": \"images/coffee-rain.png\"}}"),
+        ep("image-gen-v3-stadium-en",
+           "I want a picture of a football stadium during a night match.",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"football stadium at night, floodlights on, packed stands, green "
+           "pitch\", \"path\": \"images/stadium-night.png\"}}"),
+        ep("image-gen-v3-peaks-en",
+           "make an image showing a snowy mountain range at sunrise",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"snowy mountain range at sunrise, pink alpenglow on the peaks, "
+           "deep blue shadows\", \"path\": \"images/snowy-peaks.png\"}}"),
+        ep("image-gen-v3-sailboat-en",
+           "Can you draw a sailboat on a calm sea at sunset?",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"white sailboat on a calm sea at sunset, orange sky, gentle "
+           "waves\", \"path\": \"images/sailboat.png\"}}"),
+        ep("image-gen-v3-bamboo-en",
+           "I want a picture of a bamboo forest with a stone path.",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"bamboo forest with a winding stone path, morning mist, soft "
+           "green light\", \"path\": \"images/bamboo-path.png\"}}"),
+        ep("image-gen-v3-lighthouse-en",
+           "make an image showing a lighthouse in a storm",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"lighthouse in a storm, huge waves crashing, dramatic clouds, "
+           "beam of light\", \"path\": \"images/lighthouse-storm.png\"}}"),
+        ar("image-gen-v3-city-ar",
+           "ارسم لي مدينة مضيئة بالليل",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"مدينة مضيئة بالليل، نوافذ متوهجة، سماء بنفسجية، انعكاس بالماء\", "
+           "\"path\": \"images/city-night-ar.png\"}}"),
+        ar("image-gen-v3-kitten-ar",
+           "ابي صورة لقط صغير يلعب بخيوط الغزل",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"قط صغير برتقالي يلعب بكرة غزل، إضاءة دافئة، خلفية بسيطة\", "
+           "\"path\": \"images/kitten-yarn-ar.png\"}}"),
+        ar("image-gen-v3-dunes-ar",
+           "سوّي صورة تُظهر كثبان الرمل وقت المغرب",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"كثبان رمل ذهبية وقت المغرب، ظلال طويلة، سماء برتقالية\", "
+           "\"path\": \"images/dunes-sunset-ar.png\"}}"),
+        ar("image-gen-v3-coffee-ar",
+           "ارسم لي فنجان قهوة على ترابزة خشبية",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"فنجان قهوة بخار متصاعد على ترابزة خشبية، جو دافئ\", "
+           "\"path\": \"images/coffee-wood-ar.png\"}}"),
+        ar("image-gen-v3-stadium-ar",
+           "ابي صورة لملعب كرة قدم مضيء بالليل",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"ملعب كرة قدم بالليل، كشافات مضيئة، مدرجات ممتلئة، عشب أخضر\", "
+           "\"path\": \"images/stadium-ar.png\"}}"),
+        ar("image-gen-v3-peaks-ar",
+           "سوّي صورة تُظهر جبال مغطاة بالثلج عند الشروق",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"جبال ثلجية عند الشروق، قمم وردية، ظلال زرقاء عميقة\", "
+           "\"path\": \"images/peaks-ar.png\"}}"),
+        ar("image-gen-v3-boat-ar",
+           "ارسم لي قارب شراعي بالبحر الهادي",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"قارب شراعي أبيض ببحر هادئ وقت الغروب، سماء برتقالية\", "
+           "\"path\": \"images/sailboat-ar.png\"}}"),
+        ar("image-gen-v3-bamboo-ar",
+           "ابي صورة لغابة خيزران فيها طريق حجري",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"غابة خيزران فيها طريق حجري متعرج، ضباب صباحي\", "
+           "\"path\": \"images/bamboo-ar.png\"}}"),
+        ar("image-gen-v3-lighthouse-ar",
+           "سوّي صورة تُظهر منارة وسط العاصفة",
+           "{\"tool\": \"generate_image\", \"arguments\": {\"prompt\": "
+           "\"منارة وسط عاصفة، أمواج عالية تتلاطم، سحاب درامي\", "
+           "\"path\": \"images/lighthouse-ar.png\"}}"),
+        # ask-when-vague (kept from v2 - passed the leak gate, good behavior)
         ep("image-missing-detail-en",
            "make me a picture please",
            "{\"tool\": \"final\", \"content\": \"Happy to! What should the picture show? "
@@ -278,46 +372,255 @@ def generated_episodes() -> list[dict]:
            "سوي لي صورة",
            "{\"tool\": \"final\", \"content\": \"أبشر! شو تبين الصورة تكون؟ قل لي المشهد أو "
            "الشي اللي تريد أرسمه وأسويها لك.\"}"),
-        ep("video-plain-rough-en",
-           "Generate a quick short clip of rain falling on a window.",
+        # generate_video x12 (EN 6 / AR 6): plain clips + multi-turn
+        # refusal -> consent -> call pairs (the exam's follow-up arc)
+        ep("video-plain-v3-rain-en",
+           "Make a short clip of raindrops running down a window pane.",
            "{\"tool\": \"generate_video\", \"arguments\": {\"prompt\": "
-           "\"rain drops falling on a window glass, close-up, blurry street lights behind\", "
-           "\"path\": \"videos/rain-window.mp4\"}}"),
-        ar("video-plain-rough-ar",
-           "سوي لي مقطع قصير لقهوة تتنسكب ببطء",
+           "\"raindrops running down a window pane, close-up, blurry city "
+           "lights behind\", \"path\": \"videos/rain-pane.mp4\"}}"),
+        ep("video-plain-v3-waves-en",
+           "Generate a quick clip of ocean waves washing over sand.",
            "{\"tool\": \"generate_video\", \"arguments\": {\"prompt\": "
-           "\"قهوة تُسكب ببطء في كوب زجاجي، لقطة قريبة\", "
-           "\"path\": \"videos/coffee-pour.mp4\"}}"),
-        ep("video-ad-refusal-en",
-           "I need a Hollywood-trailer-style video for my startup launch, can you produce that?",
-           "{\"tool\": \"final\", \"content\": \"I can't produce Hollywood/agency quality - that "
-           "needs a commercial service like Sora or Veo. My local model makes only a short, "
-           "low-res rough clip. Want the rough local version?\"}"),
-        ar("video-ad-refusal-ar",
-           "بدي فيديو بجودة أفلام هوليوود لإطلاق شركتي الجديدة",
-           "{\"tool\": \"final\", \"content\": \"ما أقدر أسوي جودة هوليوود - هاي تحتاج خدمة تجارية "
-           "مثل Sora أو Veo. النموذج المحلي عندي يسوي فقط مقطع قصير بدقة منخفضة. "
-           "تبين النسخة المحلية البسيطة؟\"}"),
-        ep("video-ad-followup-en",
-           "Sure, do the rough one.",
+           "\"ocean waves washing over golden sand, slow motion, bright "
+           "daylight\", \"path\": \"videos/ocean-waves.mp4\"}}"),
+        ep("video-plain-v3-clouds-en",
+           "I'd like a small video of clouds drifting over hills.",
            "{\"tool\": \"generate_video\", \"arguments\": {\"prompt\": "
-           "\"startup launch teaser, bold typography over product shots, quick cuts\", "
-           "\"path\": \"videos/launch-teaser.mp4\"}}"),
-        ar("video-ad-followup-ar",
-           "ايوه سوي النسخة البسيطة",
+           "\"white clouds drifting over green hills, timelapse feel, wide "
+           "shot\", \"path\": \"videos/clouds-hills.mp4\"}}"),
+        ep("video-plain-v3-traffic-en",
+           "make a rough clip of city traffic at night",
            "{\"tool\": \"generate_video\", \"arguments\": {\"prompt\": "
-           "\"إعلان قصير لإطلاق منتج، لقطات سريعة وعنوان بارز\", "
-           "\"path\": \"videos/launch-teaser.mp4\"}}"),
+           "\"city traffic at night, light trails, aerial view\", "
+           "\"path\": \"videos/night-traffic.mp4\"}}"),
+        multi("video-consent-v3-wedding-en", SYSTEM_EN,
+              ("user", "I need a movie-trailer quality video of my wedding day."),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"I can't make "
+               "trailer-quality video - that needs a commercial service. My local "
+               "model makes only a short, low-res rough clip. Want the rough "
+               "version?\"}"),
+              ("user", "Okay, the rough local clip is fine."),
+              ("assistant", "{\"tool\": \"generate_video\", \"arguments\": {" 
+               "\"prompt\": \"wedding highlights montage, soft focus, warm tones, "
+               "gentle music mood\", \"path\": \"videos/wedding-clip.mp4\"}}")),
+        multi("video-consent-v3-sneaker-en", SYSTEM_EN,
+              ("user", "Give me a cinematic 4K ad for my sneaker brand."),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"Cinematic 4K ad "
+               "quality is beyond my local model - it only makes short, rough, "
+               "low-res clips. Should I make the rough version?\"}"),
+              ("user", "Yes, make the rough one."),
+              ("assistant", "{\"tool\": \"generate_video\", \"arguments\": {" 
+               "\"prompt\": \"sneaker product b-roll, dynamic angles, bold colors, "
+               "quick cuts\", \"path\": \"videos/sneaker-broll.mp4\"}}")),
+        ar("video-plain-v3-sea-ar",
+           "سوي لي مقطع قصير لأمواج البحر",
+           "{\"tool\": \"generate_video\", \"arguments\": {\"prompt\": "
+           "\"أمواج البحر تتلاطم على الصخر، لقطة واسعة، نهار صافي\", "
+           "\"path\": \"videos/sea-waves-ar.mp4\"}}"),
+        ar("video-plain-v3-clouds-ar",
+           "ابي مقطع سحاب يتحرك فوق الجبال",
+           "{\"tool\": \"generate_video\", \"arguments\": {\"prompt\": "
+           "\"سحاب أبيض يتحرك فوق جبال خضراء، لقطة واسعة\", "
+           "\"path\": \"videos/clouds-ar.mp4\"}}"),
+        ar("video-plain-v3-leaves-ar",
+           "سوي مقطع أوراق الشجر تتساقط بالخريف",
+           "{\"tool\": \"generate_video\", \"arguments\": {\"prompt\": "
+           "\"أوراق شجر برتقالية تتساقط بالخريف، لقطة قريبة، إضاءة ذهبية\", "
+           "\"path\": \"videos/autumn-leaves-ar.mp4\"}}"),
+        ar("video-plain-v3-lights-ar",
+           "ابي مقطع قصير لإشارات المرور بالليل",
+           "{\"tool\": \"generate_video\", \"arguments\": {\"prompt\": "
+           "\"إشارات مرور وحركة سيارات بالليل، خطوط ضوء ملونة\", "
+           "\"path\": \"videos/traffic-lights-ar.mp4\"}}"),
+        multi("video-consent-v3-restaurant-ar", SYSTEM_AR,
+              ("user", "بدي فيديو سينمائي 4K لمطعمي الجديد"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"جودة سينمائية 4K "
+               "ما أقدر عليها - نموذجي المحلي يسوي مقاطع قصيرة بدقة منخفضة فقط. "
+               "أسوي لك النسخة البسيطة؟\"}"),
+              ("user", "خلاص سوي البسيط"),
+              ("assistant", "{\"tool\": \"generate_video\", \"arguments\": {" 
+               "\"prompt\": \"جولة سريعة داخل مطعم، إضاءة دافئة، لقطات للأطباق\", "
+               "\"path\": \"videos/restaurant-ar.mp4\"}}")),
+        multi("video-consent-v3-birthday-ar", SYSTEM_AR,
+              ("user", "ابي فيديو بجودة الأفلام لعيد ميلاد أمي"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"بجودة الأفلام ما "
+               "أقدر - هاي تحتاج خدمة تجارية. المقطع المحلي عندي يكون قصير وبسيط. "
+               "تبينه؟\"}"),
+              ("user", "ايه عادي سوي العادي"),
+              ("assistant", "{\"tool\": \"generate_video\", \"arguments\": {" 
+               "\"prompt\": \"احتفال عيد ميلاد، شموع ملونة، بالونات، جو دافئ\", "
+               "\"path\": \"videos/birthday-ar.mp4\"}}")),
+        # read_image x8 (EN 4 / AR 4)
         ep("image-read-en",
            "What's written on this screenshot? it's at shots/error.png",
            "{\"tool\": \"read_image\", \"arguments\": {\"path\": \"shots/error.png\"}}"),
+        ep("image-read-v3-sign-en",
+           "Read the street sign in photos/street-sign.png for me.",
+           "{\"tool\": \"read_image\", \"arguments\": {\"path\": \"photos/street-sign.png\"}}"),
+        ep("image-read-v3-receipt-en",
+           "Can you tell me the total on docs/receipt.png?",
+           "{\"tool\": \"read_image\", \"arguments\": {\"path\": \"docs/receipt.png\"}}"),
+        ep("image-read-v3-board-en",
+           "Extract the text from the whiteboard photo notes/whiteboard.png.",
+           "{\"tool\": \"read_image\", \"arguments\": {\"path\": \"notes/whiteboard.png\"}}"),
         ar("image-read-ar",
            "اقرأ لي الصورة المرفقة settings.png",
            "{\"tool\": \"read_image\", \"arguments\": {\"path\": \"settings.png\"}}"),
-        ep("emoji-gen-en",
+        ar("image-read-v3-sign-ar",
+           "وش مكتوب بلوحة الشارع بصورة photos/loha.png؟",
+           "{\"tool\": \"read_image\", \"arguments\": {\"path\": \"photos/loha.png\"}}"),
+        ar("image-read-v3-receipt-ar",
+           "اقرأ لي المجموع بفاتورة docs/fatoora.png",
+           "{\"tool\": \"read_image\", \"arguments\": {\"path\": \"docs/fatoora.png\"}}"),
+        ar("image-read-v3-board-ar",
+           "استخرج النص من صورة السبورة board/saboora.png",
+           "{\"tool\": \"read_image\", \"arguments\": {\"path\": \"board/saboora.png\"}}"),
+        # edit_image x8 (EN 4 / AR 4) - path + output + op (never overwrite)
+        ep("image-edit-v3-resize-en",
+           "Resize avatar.png to 256x256 for me.",
+           "{\"tool\": \"edit_image\", \"arguments\": {\"path\": \"avatar.png\", "
+           "\"output\": \"avatar-256.png\", \"op\": \"resize\", \"width\": 256, "
+           "\"height\": 256}}"),
+        ep("image-edit-v3-crop-en",
+           "Crop headshot.png to just the face, left 40 top 10, 300 by 300.",
+           "{\"tool\": \"edit_image\", \"arguments\": {\"path\": \"headshot.png\", "
+           "\"output\": \"headshot-crop.png\", \"op\": \"crop\", \"left\": 40, "
+           "\"top\": 10, \"width\": 300, \"height\": 300}}"),
+        ep("image-edit-v3-rotate-en",
+           "The scan came out sideways - rotate holiday.jpg upright.",
+           "{\"tool\": \"edit_image\", \"arguments\": {\"path\": \"holiday.jpg\", "
+           "\"output\": \"holiday-upright.jpg\", \"op\": \"rotate\"}}"),
+        ep("image-edit-v3-gray-en",
+           "Make a black-and-white version of profile.png.",
+           "{\"tool\": \"edit_image\", \"arguments\": {\"path\": \"profile.png\", "
+           "\"output\": \"profile-bw.png\", \"op\": \"grayscale\"}}"),
+        ar("image-edit-v3-resize-ar",
+           "صغّر صورة البروفايل photo.png الى 256 ب256",
+           "{\"tool\": \"edit_image\", \"arguments\": {\"path\": \"photo.png\", "
+           "\"output\": \"photo-256.png\", \"op\": \"resize\", \"width\": 256, "
+           "\"height\": 256}}"),
+        ar("image-edit-v3-rotate-ar",
+           "الصورة مقلوبة، عدّل jo.jpg بحيث تصير مستقيمة",
+           "{\"tool\": \"edit_image\", \"arguments\": {\"path\": \"jo.jpg\", "
+           "\"output\": \"jo-fixed.jpg\", \"op\": \"rotate\"}}"),
+        ar("image-edit-v3-gray-ar",
+           "سوّي نسخة أبيض وأسود من صورة shaar.png",
+           "{\"tool\": \"edit_image\", \"arguments\": {\"path\": \"shaar.png\", "
+           "\"output\": \"shaar-bw.png\", \"op\": \"grayscale\"}}"),
+        ar("image-edit-v3-blur-ar",
+           "ضبّب خلفية صورة personal.png بسوي نسخة جديدة",
+           "{\"tool\": \"edit_image\", \"arguments\": {\"path\": \"personal.png\", "
+           "\"output\": \"personal-blur.png\", \"op\": \"blur\"}}"),
+        # generate_emoji x6 (EN 3 / AR 3) - schema key is PROMPT (fixed from v2)
+        ep("emoji-gen-v3-sleepy-en",
            "Draw a custom sticker of a sleepy cat for our chat.",
-           "{\"tool\": \"generate_emoji\", \"arguments\": {\"description\": "
+           "{\"tool\": \"generate_emoji\", \"arguments\": {\"prompt\": "
            "\"sleepy cat sticker, round simple style\", \"path\": \"images/sleepy-cat.png\"}}"),
+        ep("emoji-gen-v3-party-en",
+           "Make us a party-face emoji for the group chat.",
+           "{\"tool\": \"generate_emoji\", \"arguments\": {\"prompt\": "
+           "\"smiling face with party hat and confetti, bright colors\", "
+           "\"path\": \"images/party-face.png\"}}"),
+        ep("emoji-gen-v3-cool-en",
+           "I want a sunglasses-cool face sticker for my streams.",
+           "{\"tool\": \"generate_emoji\", \"arguments\": {\"prompt\": "
+           "\"cool face with black sunglasses, simple flat style\", "
+           "\"path\": \"images/cool-face.png\"}}"),
+        ar("emoji-gen-v3-sad-ar",
+           "سوّي ملصق وجه حزين للستيكرز",
+           "{\"tool\": \"generate_emoji\", \"arguments\": {\"prompt\": "
+           "\"وجه حزين بدمعة وحدة، ستايل بسيط مدوّر\", "
+           "\"path\": \"images/sad-face-ar.png\"}}"),
+        ar("emoji-gen-v3-love-ar",
+           "ارسم لي ستيكر قلب مع-face حب للشات",
+           "{\"tool\": \"generate_emoji\", \"arguments\": {\"prompt\": "
+           "\"وجه يحب مع قلوب حمراء طايرة، ستايل لطيف\", "
+           "\"path\": \"images/love-face-ar.png\"}}"),
+        ar("emoji-gen-v3-laugh-ar",
+           "ابي ملصق وجه يضحك باستراحة",
+           "{\"tool\": \"generate_emoji\", \"arguments\": {\"prompt\": "
+           "\"وجه يضحك من قلبه، عيون مغمضة، ستايل مسطح\", "
+           "\"path\": \"images/laugh-face-ar.png\"}}"),
+        # error-recovery x8 (EN 4 / AR 4): media call -> failure -> honest final
+        multi("media-error-v3-busy-en", SYSTEM_EN,
+              ("user", "Draw a poster for my garage sale."),
+              ("assistant", "{\"tool\": \"generate_image\", \"arguments\": {" 
+               "\"prompt\": \"garage sale poster, bold friendly lettering, "
+               "hand-drawn arrows\", \"path\": \"images/garage-sale.png\"}}"),
+              ("user", "Tool result: {\"ok\": false, \"error\": {\"type\": "
+               "runtime_error\", \"message\": \"image model is still loading, try "
+               "again shortly\"}}"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"The image model "
+               "is still loading, so the poster wasn't generated yet. Want me to "
+               "retry in a minute?\"}")),
+        multi("media-error-v3-disk-en", SYSTEM_EN,
+              ("user", "Generate a clip of a campfire burning."),
+              ("assistant", "{\"tool\": \"generate_video\", \"arguments\": {" 
+               "\"prompt\": \"campfire burning at night, sparks rising, dark "
+               "forest background\", \"path\": \"videos/campfire.mp4\"}}"),
+              ("user", "Tool result: {\"ok\": false, \"error\": {\"type\": "
+               "file_operation_error\", \"message\": \"not enough disk space to "
+               "write the video\"}}"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"The clip failed - "
+               "the disk is full, so nothing was saved. Clear some space and I'll "
+               "generate it again.\"}")),
+        multi("media-error-v3-path-en", SYSTEM_EN,
+              ("user", "Edit screenshot.png and blur the background."),
+              ("assistant", "{\"tool\": \"edit_image\", \"arguments\": {" 
+               "\"path\": \"screenshot.png\", \"output\": \"screenshot-blur.png\", "
+               "\"op\": \"blur\"}}"),
+              ("user", "Tool result: {\"ok\": false, \"error\": {\"type\": "
+               "file_operation_error\", \"message\": \"Path does not exist\"}}"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"I couldn't edit it "
+               "- screenshot.png doesn't exist in the workspace. Check the file "
+               "name or upload it and I'll blur it.\"}")),
+        multi("media-error-v3-emoji-en", SYSTEM_EN,
+              ("user", "Make a winking chef sticker for the kitchen channel."),
+              ("assistant", "{\"tool\": \"generate_emoji\", \"arguments\": {" 
+               "\"prompt\": \"winking chef face with a mustache and chef hat\", "
+               "\"path\": \"images/chef-wink.png\"}}"),
+              ("user", "Tool result: {\"ok\": false, \"error\": {\"type\": "
+               "runtime_error\", \"message\": \"emoji fonts unavailable\"}}"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"The sticker didn't "
+               "draw - the emoji fonts are unavailable right now. I didn't save "
+               "anything; want me to try again later?\"}")),
+        multi("media-error-v3-busy-ar", SYSTEM_AR,
+              ("user", "ارسم لي بوستر لحفلة التخرج"),
+              ("assistant", "{\"tool\": \"generate_image\", \"arguments\": {" 
+               "\"prompt\": \"بوستر حفلة تخرج، قبعة تخرج، ألوان احتفالية\", "
+               "\"path\": \"images/grad-poster-ar.png\"}}"),
+              ("user", "Tool result: {\"ok\": false, \"error\": {\"type\": "
+               "runtime_error\", \"message\": \"image model is still loading\"}}"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"موديل الصور لسه يحمّل "
+               "فما انرسم البوستر الحين. أجرب بعد شوي؟\"}")),
+        multi("media-error-v3-disk-ar", SYSTEM_AR,
+              ("user", "سوي مقطع لشلال بالموس"),
+              ("assistant", "{\"tool\": \"generate_video\", \"arguments\": {" 
+               "\"prompt\": \"شلال بالموس، ماء صافي، صخور وخضرة\", "
+               "\"path\": \"videos/waterfall-ar.mp4\"}}"),
+              ("user", "Tool result: {\"ok\": false, \"error\": {\"type\": "
+               "file_operation_error\", \"message\": \"not enough disk space\"}}"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"ما انحفظ المقطع - "
+               "الديسك مليان. فضّي مساحة وأجربه ثانية.\"}")),
+        multi("media-error-v3-path-ar", SYSTEM_AR,
+              ("user", "دوّر صورة family.jpg بحيث تصير طويلة"),
+              ("assistant", "{\"tool\": \"edit_image\", \"arguments\": {" 
+               "\"path\": \"family.jpg\", \"output\": \"family-flip.png\", "
+               "\"op\": \"flip\"}}"),
+              ("user", "Tool result: {\"ok\": false, \"error\": {\"type\": "
+               "file_operation_error\", \"message\": \"Path does not exist\"}}"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"ما قدرت أعدل - "
+               "family.jpg مو موجودة بمجلد العمل. تأكد من الاسم أو ارفعها وأسويها.\"}")),
+        multi("media-error-v3-emoji-ar", SYSTEM_AR,
+              ("user", "سوّي ستيكر وجه مستغرب للشات"),
+              ("assistant", "{\"tool\": \"generate_emoji\", \"arguments\": {" 
+               "\"prompt\": \"وجه مستغرب، فم مفتوح وحواجب مرفوعة، ستايل بسيط\", "
+               "\"path\": \"images/surprised-ar.png\"}}"),
+              ("user", "Tool result: {\"ok\": false, \"error\": {\"type\": "
+               "runtime_error\", \"message\": \"emoji fonts unavailable\"}}"),
+              ("assistant", "{\"tool\": \"final\", \"content\": \"ما انرسم الستيكر - "
+               "خطوط الإيموجي مو متوفرة الحين، وما حفظت شي. أجرب بعدين؟\"}")),
     ]
     return episodes
 
@@ -826,6 +1129,43 @@ def load_conversations(path: Path) -> tuple[list[dict], dict]:
 # main
 # ---------------------------------------------------------------------------
 
+# Per-tool media floors (sft_v3, 2026-09-12 postmortem): the graduation mix
+# shipped 7 media rows in 5,336 (0.13%) and the exam graded media 0/5 - a
+# ratio that can never teach a tool behavior. The build now FAILS LOUD below
+# these minimums instead of quietly shipping a doomed dataset. Floors count
+# the rows actually WRITTEN (post token-budget gate), not authored intents.
+MEDIA_FLOORS = {
+    "generate_image": 12,
+    "generate_video": 8,
+    "edit_image": 6,
+    "read_image": 6,
+    "generate_emoji": 4,
+}
+
+
+def media_tool_counts(records: list[dict]) -> dict[str, int]:
+    """Rows mentioning each media tool call anywhere in the conversation."""
+    counts = {tool: 0 for tool in MEDIA_FLOORS}
+    for record in records:
+        blob = " ".join(
+            str(m.get("content", ""))
+            for m in record.get("messages", [])
+            if isinstance(m, dict))
+        for tool in counts:
+            if f'"{tool}"' in blob:
+                counts[tool] += 1
+    return counts
+
+
+def media_floor_failures(counts: dict[str, int]) -> list[str]:
+    """Human-readable list of floors that are not met (empty = pass)."""
+    return [
+        f"{tool}: {counts.get(tool, 0)} rows (floor {floor})"
+        for tool, floor in sorted(MEDIA_FLOORS.items())
+        if counts.get(tool, 0) < floor
+    ]
+
+
 def build(out_path: Path) -> dict:
     exam_hashes = load_exam_prompts(DEFAULT_EXAM)
     all_records: list[dict] = []
@@ -877,6 +1217,7 @@ def build(out_path: Path) -> dict:
         all_records.append(record)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    written: list[dict] = []
     with out_path.open("w", encoding="utf-8") as handle:
         kept = dropped = 0
         dropped_sources: list[str] = []
@@ -889,6 +1230,7 @@ def build(out_path: Path) -> dict:
             if (candidate is not None and row_fits(candidate)
                     and _usable_training_row(candidate)):
                 handle.write(json.dumps(candidate, ensure_ascii=False) + "\n")
+                written.append(candidate)
                 kept += 1
                 continue
             dropped += 1
@@ -914,6 +1256,13 @@ def build(out_path: Path) -> dict:
         "arabic_share": round(arabic_count / max(1, len(all_records)), 3),
         "out": str(out_path),
     }
+    # Media floors gate: measured on the rows that were actually written.
+    media_counts = media_tool_counts(written)
+    floor_failures = media_floor_failures(media_counts)
+    report["media_tool_counts"] = media_counts
+    report["media_floors_ok"] = not floor_failures
+    if floor_failures:
+        report["media_floor_failures"] = floor_failures
     return report
 
 
@@ -923,6 +1272,14 @@ def main() -> int:
     args = parser.parse_args()
     report = build(Path(args.out))
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    if not report.get("media_floors_ok", False):
+        # Fail loud, named, and with the exit code the pipeline treats as
+        # "dataset unusable" - the silent-gutted-media-mix lesson, enforced.
+        print("MEDIA FLOOR GATE FAILED - this mix cannot teach media behavior:",
+              file=sys.stderr)
+        for failure in report.get("media_floor_failures", []):
+            print(f"  - {failure}", file=sys.stderr)
+        return 2
     return 0
 
 
