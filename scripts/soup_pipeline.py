@@ -273,11 +273,29 @@ def wait_vram_clear(timeout_s: int = 240) -> None:
         log(f"VRAM still busy after {timeout_s}s ({reason}) - training may OOM")
 
 
+def _soup_max_length() -> int:
+    """data.max_length from soup.yaml (the trainer's truncation window)."""
+    try:
+        match = re.search(r"^\s*max_length:\s*(\d+)",
+                          SOUP_CONFIG.read_text(encoding="utf-8"), re.MULTILINE)
+        if match:
+            return int(match.group(1))
+    except OSError:
+        pass
+    return 1024
+
+
 # ---------------------------------------------------------------------------
 # Smoke probe: cheap CPU-served exam between training checkpoints, so a
-# broken adapter dies in ~1h instead of burning 3h for a 0/26 verdict
-# (2026-09-09: the tuned exam graded a DEAD endpoint and scored 0/26 -
-# the smoke gate also forces a live serving check before any real exam).
+# BROKEN run dies early instead of burning 3h for a phantom verdict
+# (2026-09-09: the tuned exam graded a DEAD endpoint and scored 0/26).
+# CALIBRATION LESSON (2026-09-12 night): aborting on a low BEHAVIORAL score
+# killed a healthy run at 30% - a 1.5B student learns the protocol shape
+# long before the behaviors (the promoted 2026-09-09 adapter would score
+# ~1-2/6 on these same cases mid-training). The gate aborts only on PROVEN
+# breakage - (nearly) all-empty generations, the phantom signature - and
+# logs low-but-real scores as telemetry. A NaN-collapsed adapter that still
+# emits repeated tokens is caught by the final exam.
 # ---------------------------------------------------------------------------
 
 def _probe_endpoint(base_url: str, prompt: str, model: str, timeout: int = 120) -> str:
@@ -332,6 +350,7 @@ def run_smoke_probe(stage: str) -> dict | None:
     if not (adapter / "adapter_model.safetensors").exists():
         log(f"smoke probe [{stage}]: no adapter checkpoint yet - skipping")
         return None
+    log(f"smoke probe [{stage}]: launching against {adapter.name} on :{SMOKE_PORT}")
     try:
         probe = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "soup_probe_smoke.py"),
@@ -340,6 +359,7 @@ def run_smoke_probe(stage: str) -> dict | None:
              "--output", str(REPORTS / f"smoke_{stage}.json")],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=1800,
+            creationflags=subprocess.CREATE_NO_WINDOW,  # probe must not share the pipeline's console (0xC000013A kills)
         )
     except subprocess.TimeoutExpired:
         # A timed-out probe is 'unavailable', never a failed probe - it must
@@ -352,6 +372,14 @@ def run_smoke_probe(stage: str) -> dict | None:
             encoding="utf-8")
     except OSError:
         pass
+    if probe.returncode == 4:
+        # Pre-flight RAM gate in the probe itself: the GPU trainer's host-side
+        # memory starved the CPU serve (2026-09-12 morning: 0.3 GB free -> the
+        # server thrashed into the pagefile for 600s -> three exit-3 cycles
+        # with no clue). Skipping is free - the next cycle re-checks.
+        log(f"smoke probe [{stage}] skipped: not enough free RAM for the "
+            f"CPU serve - see {SMOKE_LOG_TAIL}")
+        return None
     if probe.returncode != 0:
         log(f"smoke probe [{stage}] FAILED (exit {probe.returncode}) "
             f"- see {SMOKE_LOG_TAIL}")
@@ -374,33 +402,58 @@ def _probe_passes(report: dict | None) -> bool:
     return (int(match.group(1)) if match else 0) >= SMOKE_MIN_PASS
 
 
+def _probe_is_broken(report: dict | None) -> bool:
+    """True when the probe PROVES the endpoint is not serving the adapter:
+    (nearly) every case came back with an EMPTY generation - the exact
+    phantom-verdict signature (2026-09-09: 26 empty replies were graded a
+    0/26 'regression'). A low-but-real behavioral score is mid-training
+    normal for a 1.5B student and must never abort (2026-09-12 lesson: the
+    0/6-with-real-text probes killed a healthy run at 30%).
+    """
+    if not report:
+        return False  # unavailable - the caller decides what that counts as
+    results = report.get("results")
+    if not isinstance(results, list) or not results:
+        return True  # a graded report without visible outputs cannot be trusted
+    empty = sum(1 for r in results
+                if not str(r.get("raw_output", "")).strip())
+    return empty >= max(1, len(results) - 1)  # all but one empty = broken
+
+
 def smoke_watcher(stop: threading.Event, abort_reason: list[str]) -> None:
     """Probe the newest adapter checkpoint every ~6.5 min while training runs
-    (first checkpoints appear after ~epoch 1). Two consecutive FAILED probes
-    = the run is broken: terminate the trainer. Unavailable probes (no
-    checkpoint yet, CPU serve not viable) never count as failures."""
+    (first checkpoints appear after ~epoch 1). Two consecutive BROKEN probes
+    (all-empty generations = dead endpoint / phantom verdict) terminate the
+    trainer. Low-but-real behavioral scores are logged as telemetry only -
+    they are EXPECTED mid-training and never abort (2026-09-12 calibration:
+    the behavioral threshold killed a healthy run at 30%). Unavailable probes
+    (no checkpoint yet, CPU serve not viable) never count as failures."""
     trainer = training_process
     if trainer is None or not _cpu_serving_ok():
         return
-    consecutive_fails = 0
+    consecutive_broken = 0
     while not stop.wait(SMOKE_POLL_S):
         report = run_smoke_probe("midtrain")
         if report is None:
-            continue  # unavailable != failed
-        if _probe_passes(report):
-            consecutive_fails = 0
-            log("smoke gate: probe passed - training continues")
-        else:
-            consecutive_fails += 1
-            log(f"smoke gate: probe FAILED "
-                f"({consecutive_fails}/{SMOKE_MAX_CONSECUTIVE_FAILS})")
-            if consecutive_fails >= SMOKE_MAX_CONSECUTIVE_FAILS:
-                reason = ("smoke gate: 2 consecutive failed probes - "
-                          "adapter is broken, aborting training")
+            continue  # unavailable != broken
+        if _probe_is_broken(report):
+            consecutive_broken += 1
+            log(f"smoke gate: probe BROKEN - empty generations "
+                f"({consecutive_broken}/{SMOKE_MAX_CONSECUTIVE_FAILS})")
+            if consecutive_broken >= SMOKE_MAX_CONSECUTIVE_FAILS:
+                reason = ("smoke gate: 2 consecutive broken probes (empty "
+                          "generations) - endpoint is dead, aborting training")
                 log(reason)
                 abort_reason.append(reason)
                 trainer.terminate()
                 return
+        else:
+            consecutive_broken = 0
+            passing = _probe_passes(report)
+            log(f"smoke gate: endpoint alive - behaviors "
+                f"{report.get('score')} (telemetry only; full exam decides)")
+            if passing:
+                log("smoke gate: behaviors already at threshold - looking good")
 
 
 def run_training() -> bool:
@@ -414,6 +467,25 @@ def run_training() -> bool:
     if str(SFT_V2).replace("\\", "/") not in config_text:
         log(f"error: {SOUP_CONFIG} does not point at {SFT_V2} - fix data.train first")
         return False
+    # Pre-train tripwire (2026-09-12 night): three train attempts died in the
+    # tokenization map on rows whose prompt alone filled data.max_length. The
+    # builder's own gate catches this upstream - check again here so a stale
+    # or hand-edited dataset fails in one second with the rows named, instead
+    # of burning a serve + baseline exam + training attempt (~20 min each).
+    try:
+        from build_aali_sft_v2 import token_overflow_rows
+        max_length = _soup_max_length()
+        overflow = token_overflow_rows(SFT_V2, max_length)
+        if overflow:
+            log(f"dataset gate FAILED: {len(overflow)} row(s) would be rejected "
+                f"by the trainer at max_length={max_length}: "
+                + ", ".join(f"row {r['row']} ({r['source']}, ~{r['prompt_tokens_est']} tok prompt)"
+                            for r in overflow[:10]))
+            log("rebuild with scripts/build_aali_sft_v2.py before training")
+            return False
+        log(f"dataset gate passed: 0 token-overflow rows at max_length={max_length}")
+    except ImportError:
+        log("dataset gate skipped (build_aali_sft_v2 not importable)")
     log(f"starting soup train on {SFT_V2.name}")
     # Stream the trainer's output to a live log (the old capture-to-buffer
     # died with subprocess.run); on exit the tail goes to last_stage.txt.
@@ -529,6 +601,45 @@ def _acquire_lock() -> bool:
         return False
 
 
+DETACH_ENV = "HWK_SOUP_PIPELINE_DETACHED"
+DETACH_LOG = "soup_pipeline_self"
+
+
+def self_detach(no_wait: bool = False) -> bool:
+    """2026-09-12 12:20 lesson: a pipeline running in a visible console died
+    WITH its console (0xC000013A swept probe + trainer + pipeline at step
+    1270/3804). On first entry (env marker unset) this re-spawns itself
+    fully detached (new process group, no console) with output redirected to
+    D:/hwk-data/soup_pipeline_self.log, sets the marker, and the parent
+    exits 0. The child passes the marker through and runs for real.
+    --dry-run is exempt (prints to the caller's console on purpose). The
+    caller's --no-wait choice is passed through; waiting for the GPU happens
+    inside the detached child, logging to the same file."""
+    if os.environ.get(DETACH_ENV) == "1":
+        return True
+    if psutil is None:  # cannot re-spawn safely; run in-place (old behavior)
+        return True
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = (subprocess.DETACHED_PROCESS
+                         | subprocess.CREATE_NEW_PROCESS_GROUP)
+    child_argv = [sys.executable, str(Path(__file__).resolve())]
+    if no_wait:
+        child_argv.append("--no-wait")
+    with (REPORTS.parent / f"{DETACH_LOG}.log").open("a", encoding="utf-8") as out, \
+            (REPORTS.parent / f"{DETACH_LOG}.log.err").open("a", encoding="utf-8") as err:
+        child = subprocess.Popen(  # noqa: S603 - this same script, owner-run
+            child_argv,
+            stdout=out, stderr=err, stdin=subprocess.DEVNULL,
+            cwd=str(ROOT), creationflags=creationflags, close_fds=True,
+            env={**os.environ, DETACH_ENV: "1"},
+        )
+    print(f"[soup_pipeline] detached as pid {child.pid} - output: "
+          f"{REPORTS.parent / (DETACH_LOG + '.log')} (this console is now free)",
+          flush=True)
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Post-Phase-A Soup pipeline")
     parser.add_argument("--no-wait", action="store_true",
@@ -541,6 +652,19 @@ def main() -> int:
             stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
             pass
+
+    if args.dry_run:
+        ok, reason = gpu_free()
+        print(f"GPU free: {ok} ({reason})")
+        print(f"1. serve {BASE_MODEL} on :{PORT}")
+        print(f"2. baseline exam -> {REPORTS / 'soup_exam_report_baseline.json'}")
+        print(f"3. soup train on {SFT_V2.name} (via {SOUP_CONFIG})")
+        print(f"4. tuned exam   -> {REPORTS / 'soup_exam_report_tuned.json'}")
+        print(f"5. verdict      -> {REPORTS / 'resft_pipeline_report.md'}")
+        return 0
+
+    if not self_detach(no_wait=args.no_wait):
+        return 0
 
     if args.dry_run:
         ok, reason = gpu_free()

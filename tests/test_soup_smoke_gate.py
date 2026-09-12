@@ -87,7 +87,8 @@ def test_adapter_dir_falls_back_to_output_root(tmp_path: Path, monkeypatch) -> N
 
 
 # ---------------------------------------------------------------------------
-# _probe_passes: the smoke pass threshold
+# _probe_passes: behavioral threshold (now TELEMETRY ONLY at mid-train)
+# _probe_is_broken: the abort condition - empty generations = dead endpoint
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("score,expected", [
@@ -102,9 +103,54 @@ def test_probe_passes_rejects_missing_report() -> None:
     assert sp._probe_passes(None) is False
 
 
+def _graded_report(raw_outputs: list[str]) -> dict:
+    return {"score": f"{sum(1 for r in raw_outputs if r.strip())}/6",
+            "results": [{"id": f"case{i}", "raw_output": r}
+                        for i, r in enumerate(raw_outputs)]}
+
+
+def test_probe_broken_when_all_generations_empty() -> None:
+    # the phantom-verdict signature (2026-09-09): 26 empty replies were
+    # graded a 0/26 'regression' - THIS is what must abort training
+    assert sp._probe_is_broken(_graded_report(["", "", "", "", "", ""]))
+
+
+def test_probe_broken_when_only_one_case_answers() -> None:
+    assert sp._probe_is_broken(_graded_report(["hi", "", "", "", "", ""]))
+
+
+def test_probe_not_broken_on_low_but_real_outputs() -> None:
+    # the 2026-09-12 calibration: a healthy 1.5B student mid-training scores
+    # 0/6 with REAL text (protocol learned, behaviors not yet) - never abort
+    report = _graded_report([
+        "I'm sorry, but as an AI language model, I don't have the capability",
+        '{"tool":"file","arguments":{"path":"/x"}}',
+        "لا يمكنني الوصول إلى الملف",
+        '{"tool":"run","arguments":{"command":"ls"}}',
+        '{"tool":"final","content":"ok"}',
+        "",
+    ])
+    report["score"] = "0/6"  # real text, zero BEHAVIORAL passes (helper counts raws)
+    assert not sp._probe_is_broken(report)
+    assert not sp._probe_passes(report)  # telemetry says: keep training
+
+
+def test_probe_not_broken_on_full_pass() -> None:
+    assert not sp._probe_is_broken(_graded_report(["a", "b", "c", "d", "e", "f"]))
+
+
+def test_probe_broken_on_untrustworthy_report_without_results() -> None:
+    # a graded report with a score but NO visible outputs cannot be trusted
+    assert sp._probe_is_broken({"score": "0/6"}) is True
+    # an EMPTY report is indistinguishable from 'no data yet' -> unavailable
+    assert sp._probe_is_broken({}) is False
+    assert sp._probe_is_broken(None) is False  # unavailable: caller decides
+
+
 # ---------------------------------------------------------------------------
-# smoke_watcher: 2 consecutive FAILED probes abort; passes reset; a probe
-# being unavailable (None) never counts as a failure
+# smoke_watcher: 2 consecutive BROKEN probes (empty generations) abort;
+# low-but-real scores are telemetry and never abort; a probe being
+# unavailable (None) never counts as broken
 # ---------------------------------------------------------------------------
 
 class _FakeTrainer:
@@ -142,28 +188,40 @@ def _run_watcher(monkeypatch, reports: list, min_calls: int):
     return fake, abort_reason, calls
 
 
-def test_watcher_aborts_after_two_consecutive_failed_probes(monkeypatch) -> None:
-    reports = [{"score": "1/6"}, {"score": "2/6"}]
+def test_watcher_aborts_after_two_consecutive_broken_probes(monkeypatch) -> None:
+    empty = _graded_report(["", "", "", "", "", ""])
+    reports = [empty, empty]
     fake, abort_reason, calls = _run_watcher(monkeypatch, reports, min_calls=2)
-    assert fake.terminated, "trainer must be terminated at the 2nd failed probe"
+    assert fake.terminated, "trainer must be terminated at the 2nd broken probe"
     assert calls == [1, 1]
     assert abort_reason and "smoke gate" in abort_reason[0]
 
 
-def test_watcher_pass_resets_the_fail_counter(monkeypatch) -> None:
-    # fail -> pass -> fail: the counter reset means no abort after 3 probes
-    reports = [{"score": "1/6"}, {"score": "4/6"}, {"score": "2/6"}]
-    fake, abort_reason, calls = _run_watcher(monkeypatch, reports, min_calls=3)
+def test_watcher_low_scores_are_telemetry_and_never_abort(monkeypatch) -> None:
+    # the 2026-09-12 regression: healthy run killed at 30% by 0/6-with-text
+    low = _graded_report(["real text", "more text", "x", "y", "z", "w"])
+    reports = [low, low, low, low]
+    fake, abort_reason, calls = _run_watcher(monkeypatch, reports, min_calls=4)
+    assert not fake.terminated, "real-but-low scores must never abort"
+    assert abort_reason == []
+    assert len(calls) == 4
+
+
+def test_watcher_broken_counter_resets_on_alive_probe(monkeypatch) -> None:
+    empty = _graded_report(["", "", "", "", "", ""])
+    alive = _graded_report(["a", "b", "c", "d", "e", ""])
+    reports = [empty, alive, empty, alive]  # broken, alive, broken, alive
+    fake, abort_reason, calls = _run_watcher(monkeypatch, reports, min_calls=4)
     assert not fake.terminated
     assert abort_reason == []
-    assert len(calls) == 3
+    assert len(calls) == 4
 
 
-def test_watcher_unavailable_probe_does_not_reset_the_fail_counter(monkeypatch) -> None:
-    # Only a PASS proves health: fail, unavailable, fail is still two
-    # consecutive fails (an unavailable probe must not let a broken adapter
-    # dodge the gate by checkpoint-timing luck), so the 2nd fail aborts.
-    reports = [None, {"score": "0/6"}, None, {"score": "0/6"}]
+def test_watcher_unavailable_probe_does_not_reset_the_broken_counter(monkeypatch) -> None:
+    # Only an ALIVE probe proves health: broken, unavailable, broken still
+    # aborts (unavailable must not let a dead endpoint dodge the gate).
+    empty = _graded_report(["", "", "", "", "", ""])
+    reports = [None, empty, None, empty]
     fake, abort_reason, calls = _run_watcher(monkeypatch, reports, min_calls=4)
     assert fake.terminated
     assert abort_reason and "smoke gate" in abort_reason[0]
@@ -172,7 +230,7 @@ def test_watcher_unavailable_probe_does_not_reset_the_fail_counter(monkeypatch) 
 
 def test_watcher_never_aborts_on_unavailable_probes_alone(monkeypatch) -> None:
     # None is 'cannot judge' (no checkpoint yet / CPU serve down) - it must
-    # neither count as a failure nor crash the watcher.
+    # neither count as broken nor crash the watcher.
     reports = [None, None, None]
     fake, abort_reason, calls = _run_watcher(monkeypatch, reports, min_calls=3)
     assert not fake.terminated
@@ -241,6 +299,7 @@ def test_wait_http_false_on_error_status(monkeypatch) -> None:
 
 def test_write_verdict_includes_failure_reason(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(sp, "REPORTS", tmp_path)
+    monkeypatch.setattr(sp, "log", lambda _m: None)  # keep the real log clean
     baseline = {"score": "1/26"}
     text = sp.write_verdict(baseline, None, "tuned adapter server never became ready")
     assert "**Verdict: INCOMPLETE" in text
@@ -254,6 +313,7 @@ def test_write_verdict_promote_records_promotion(tmp_path: Path, monkeypatch) ->
     tuned_dir.mkdir(parents=True)
     (tuned_dir / "adapter_model.safetensors").write_text("w")
     monkeypatch.setattr(sp, "REPORTS", tmp_path)
+    monkeypatch.setattr(sp, "log", lambda _m: None)  # keep the real log clean
     text = sp.write_verdict({"score": "1/26"}, {"score": "5/26"})
     assert "Verdict: PROMOTE" in text
     promoted = json.loads((tmp_path / "promoted.json").read_text(encoding="utf-8"))
@@ -264,6 +324,129 @@ def test_write_verdict_promote_records_promotion(tmp_path: Path, monkeypatch) ->
 
 def test_write_verdict_regression_keeps_baseline(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(sp, "REPORTS", tmp_path)
+    monkeypatch.setattr(sp, "log", lambda _m: None)  # keep the real log clean
     text = sp.write_verdict({"score": "1/26"}, {"score": "0/26"})
     assert "NO-GO for promotion (regression)" in text
     assert not (tmp_path / "promoted.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# RAM starvation fix (2026-09-12 morning): with ~0.3 GB free (the GPU trainer
+# holding the rest) the CPU serve thrashed into the pagefile and never became
+# ready - three exit-3 cycles with no clue. The probe now pre-flights free RAM
+# (exit 4 = skip, never a failure) and captures the server's output so a
+# late/dying server shows WHY instead of a bare timeout.
+# ---------------------------------------------------------------------------
+
+import soup_probe_smoke as sprobe  # noqa: E402
+
+
+def _probe_argv(tmp_path: Path) -> None:
+    sys.argv = ["soup_probe_smoke.py", "--model", "D:/nonexistent/checkpoint",
+                "--port", "20130", "--output", str(tmp_path / "smoke.json")]
+
+
+class _DeadServer:
+    def terminate(self) -> None:
+        pass
+
+    def wait(self, timeout: int = 0) -> int:
+        return 0
+
+    def kill(self) -> None:
+        pass
+
+
+def test_free_ram_gb_returns_number_or_none() -> None:
+    # must never raise: a measurement failure means None (fail-open)
+    value = sprobe._free_ram_gb()
+    assert value is None or value > 0
+
+
+def test_probe_skips_fast_when_ram_starved(tmp_path: Path, monkeypatch,
+                                           capsys) -> None:
+    _probe_argv(tmp_path)
+    launched = []
+
+    def _no_launch(*_a, **_k):  # the server must never be attempted
+        launched.append(1)
+        raise AssertionError("server started despite RAM gate")
+
+    monkeypatch.setattr(sprobe, "_free_ram_gb", lambda: 0.3)
+    monkeypatch.setattr(sprobe.subprocess, "Popen", _no_launch)
+    assert sprobe.main() == 4
+    assert not launched
+    out = capsys.readouterr().out
+    assert "0.30 GB RAM free" in out and "skipped" in out
+
+
+def test_probe_does_not_gate_when_ram_unknown(tmp_path: Path, monkeypatch) -> None:
+    # None = cannot measure -> fail-open (the gate must never disable the
+    # probe on machines where RAM cannot be read)
+    _probe_argv(tmp_path)
+    monkeypatch.setattr(sprobe, "_free_ram_gb", lambda: None)
+    monkeypatch.setattr(sprobe, "wait_http", lambda _u, timeout_s: False)
+    monkeypatch.setattr(sprobe.subprocess, "Popen", lambda *a, **k: _DeadServer())
+    # server never ready -> the OLD exit 3 path, still intact
+    assert sprobe.main() == 3
+
+
+def test_probe_exit3_dumps_server_tail_for_diagnosis(tmp_path: Path, monkeypatch,
+                                                     capsys) -> None:
+    _probe_argv(tmp_path)
+    monkeypatch.setattr(sprobe, "_free_ram_gb", lambda: 8.0)
+    monkeypatch.setattr(sprobe, "wait_http", lambda _u, timeout_s: False)
+    monkeypatch.setattr(sprobe.subprocess, "Popen", lambda *a, **k: _DeadServer())
+    monkeypatch.setattr(sprobe, "SERVER_LOG", tmp_path / "server.log")
+    (tmp_path / "server.log").write_text("CUDA out of memory on CPU? no - RAM", encoding="utf-8")
+    assert sprobe.main() == 3
+    out = capsys.readouterr().out
+    assert "never became ready" in out
+    assert "--- soup serve (cpu) tail ---" in out
+    assert "RAM" in out  # the server's own words are now visible
+
+
+def _capture_pipeline_log(monkeypatch) -> list[str]:
+    lines: list[str] = []
+    monkeypatch.setattr(sp, "log", lines.append)
+    return lines
+
+
+def test_pipeline_maps_probe_exit4_to_skip(tmp_path: Path, monkeypatch) -> None:
+    # exit 4 (RAM-starved) is 'unavailable', never a failed probe: it must
+    # not log FAILED and must not count toward the watcher's broken counter
+    tuned = tmp_path / "tuned" / "checkpoint-900"
+    tuned.mkdir(parents=True)
+    (tuned / "adapter_model.safetensors").write_text("w")
+    monkeypatch.setattr(sp, "REPORTS", tmp_path)
+    monkeypatch.setattr(sp, "SMOKE_LOG_TAIL", tmp_path / "tail.txt")
+    log_lines = _capture_pipeline_log(monkeypatch)
+
+    class _Result:
+        returncode = 4
+        stdout = "probe skipped: only 0.30 GB RAM free"
+        stderr = ""
+
+    monkeypatch.setattr(sp.subprocess, "run", lambda *a, **k: _Result())
+    assert sp.run_smoke_probe("midtrain") is None
+    assert any("skipped" in line and "RAM" in line for line in log_lines)
+    assert not any("FAILED" in line for line in log_lines)
+
+
+def test_pipeline_keeps_exit3_as_failure(tmp_path: Path, monkeypatch) -> None:
+    # a real exit 3 (server started, never became ready) still logs FAILED
+    tuned = tmp_path / "tuned" / "checkpoint-900"
+    tuned.mkdir(parents=True)
+    (tuned / "adapter_model.safetensors").write_text("w")
+    monkeypatch.setattr(sp, "REPORTS", tmp_path)
+    monkeypatch.setattr(sp, "SMOKE_LOG_TAIL", tmp_path / "tail.txt")
+    log_lines = _capture_pipeline_log(monkeypatch)
+
+    class _Result:
+        returncode = 3
+        stdout = "probe server never became ready on :20130"
+        stderr = ""
+
+    monkeypatch.setattr(sp.subprocess, "run", lambda *a, **k: _Result())
+    assert sp.run_smoke_probe("midtrain") is None
+    assert any("FAILED (exit 3)" in line for line in log_lines)
