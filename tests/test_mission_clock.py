@@ -342,3 +342,53 @@ def test_collect_cards_gpu_probe_none_means_no_card(tmp_path: Path) -> None:
     cards = mc.collect_cards(data, now=time.time(), brain_probe=_no_probe,
                              gpu_probe=None)
     assert not any(c.title.startswith("GPU") for c in cards)
+
+
+def test_collect_cards_phase_c_states(tmp_path: Path) -> None:
+    """Phase C (Aali's own brain) card: waiting -> running -> done, parsed
+    from the chain log + the trainer's step= lines."""
+    data = _setup_data(tmp_path)
+    # default fixture: no chain log -> idle
+    cards = mc.collect_cards(data, now=time.time(), brain_probe=_no_probe,
+                             gpu_probe=None)
+    card = next(c for c in cards if "Phase C" in c.title)
+    assert card.state == "idle"
+
+    # chain waiting for v4
+    (data / mc.PHASE_C_CHAIN_LOG).write_text(
+        "[2026-09-13 00:19:11] === Phase C chain start ===\n"
+        "[2026-09-13 00:19:11] waiting for the v4 verdict\n", encoding="utf-8")
+    cards = mc.collect_cards(data, now=time.time(), brain_probe=_no_probe,
+                             gpu_probe=None)
+    card = next(c for c in cards if "Phase C" in c.title)
+    assert card.state == "wait"
+    assert "waiting" in card.detail
+
+    # trainer running: step= lines from phase_c_sft.log drive the progress
+    (data / mc.PHASE_C_LOG).write_text(
+        "step=1400 loss=0.71 tok/s=48,000 eta=0.0h\n", encoding="utf-8")
+    cards = mc.collect_cards(data, now=time.time(), brain_probe=_no_probe,
+                             gpu_probe=None)
+    card = next(c for c in cards if "Phase C" in c.title)
+    assert card.state == "run"
+    assert card.frac is not None and 0.49 < card.frac < 0.52  # 1400/2800
+
+    # done marker wins over everything
+    with (data / mc.PHASE_C_CHAIN_LOG).open("a", encoding="utf-8") as fh:
+        fh.write("[2026-09-13 06:40:00] === Phase C chain done ===\n")
+    cards = mc.collect_cards(data, now=time.time(), brain_probe=_no_probe,
+                             gpu_probe=None)
+    card = next(c for c in cards if "Phase C" in c.title)
+    assert card.state == "done" and card.frac == 1.0
+
+
+def test_collect_cards_phase_c_failure_is_a_stall(tmp_path: Path) -> None:
+    data = _setup_data(tmp_path)
+    (data / mc.PHASE_C_CHAIN_LOG).write_text(
+        "[2026-09-13 06:30:00] Phase C SFT FAILED - see phase_c_sft.log\n",
+        encoding="utf-8")
+    cards = mc.collect_cards(data, now=time.time(), brain_probe=_no_probe,
+                             gpu_probe=None)
+    card = next(c for c in cards if "Phase C" in c.title)
+    assert card.state == "stall"
+    assert "FAILED" in card.detail

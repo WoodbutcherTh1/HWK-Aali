@@ -55,6 +55,9 @@ RAINBOW = [MAGENTA, CYAN, GREEN, YELLOW]
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 PHASE_B_TARGET = 100_000
+PHASE_C_TARGET = 2_800
+PHASE_C_LOG = "phase_c_sft.log"
+PHASE_C_CHAIN_LOG = "phase_c_chain.log"
 DEFAULT_DATA_DIR = Path("D:/hwk-data")
 PROMOTED_PORT = 20129
 AALI_API_PORT = 5055
@@ -434,6 +437,35 @@ def collect_cards(data_dir: Path, now: float | None = None,
         else:
             cards.append(Card(title="Night caretaker", state="wait",
                               detail="on duty"))
+
+    # 7. Phase C: SFT of Aali's OWN from-zero brain (chain fires after v4)
+    chain_text = _read(data_dir / PHASE_C_CHAIN_LOG)
+    chain_lines = [l for l in (chain_text or "").splitlines() if l.strip()]
+    chain_done = any("Phase C chain done" in l for l in chain_lines)
+    chain_failed = any("FAILED" in l for l in chain_lines)
+    if chain_done:
+        cards.append(Card(title="Phase C - Aali's own brain", state="done",
+                          frac=1.0, detail="SFT complete - review smoke output"))
+    elif chain_failed:
+        first_fail = next((l.split("] ", 1)[-1] for l in chain_lines
+                           if "FAILED" in l), "failed")
+        cards.append(Card(title="Phase C - Aali's own brain", state="stall",
+                          detail=first_fail[:70]))
+    else:
+        phasec = parse_phase_b(_read(data_dir / PHASE_C_LOG) or "")
+        if phasec["step"] is not None and phasec["step"] > 0:
+            cards.append(Card(
+                title="Phase C - Aali's own brain", state="run",
+                frac=min(1.0, phasec["step"] / PHASE_C_TARGET),
+                detail=f"SFT step {phasec['step']:,}/{PHASE_C_TARGET:,}"
+                       + (f" - {phasec['toks']} tok/s" if phasec["toks"] else "")))
+        elif chain_lines:
+            waiting = chain_lines[-1].split("] ", 1)[-1]
+            cards.append(Card(title="Phase C - Aali's own brain", state="wait",
+                              detail=waiting[:70]))
+        else:
+            cards.append(Card(title="Phase C - Aali's own brain", state="idle",
+                              detail="chain not started"))
     return cards
 
 
