@@ -50,7 +50,10 @@ SOUP_EXE = Path("D:/hwk-tools/soup-venv/Scripts/soup.exe")
 SERVER_LOG = Path("D:/hwk-data/smoke_server.log")
 # Qwen-1.5B weights + torch runtime on CPU need roughly 3-4 GB; below this
 # the server load turns into pagefile thrash that never becomes ready.
-SMOKE_MIN_FREE_RAM_GB = 2.0
+# 3.5 (2026-09-12 14:08 lesson): the trainer's host RAM keeps growing, and
+# a serve launched at "2 GB free" drove the machine to 0.13 GB - the probe
+# server had to be killed by port-owner to save the trainer's pace.
+SMOKE_MIN_FREE_RAM_GB = 3.5
 
 
 def _free_ram_gb() -> float | None:
@@ -149,12 +152,17 @@ def main() -> int:
         server_log_handle = SERVER_LOG.open("a", encoding="utf-8")
     except OSError:
         server_log_handle = None
+    # BELOW_NORMAL priority (2026-09-12 14:00 lesson): a CPU serve competes
+    # for host CPU with the GPU trainer's feed loop - at normal priority the
+    # trainer degraded from ~1.5 to ~3.7 s/it during probe cycles. The probe
+    # is telemetry; the trainer sets the pace.
+    priority = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
     server = subprocess.Popen(
         [str(SOUP_EXE), "serve", "--model", args.model,
          "--port", str(args.port), "--device", "cpu"],
         stdout=server_log_handle or subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW,  # no console -> no Ctrl+C/close kill (0xC000013A)
+        creationflags=subprocess.CREATE_NO_WINDOW | priority,  # no console -> no Ctrl+C/close kill (0xC000013A)
     )
     try:
         if not wait_http(f"{base_url}/models", timeout_s=600):
