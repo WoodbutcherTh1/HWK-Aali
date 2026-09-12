@@ -419,6 +419,26 @@ in parallel:
   runs can neither fake activity nor fool the board); INCOMPLETE verdicts
   name the auto-retry. Tests: tests/test_launch_detached.py (10),
   tests/test_status_digest.py (10).
+- **CRITICAL: dropped tuned exam restored + lock leak fixed (2026-09-12
+  afternoon)**: git pickaxe shows the 09-09 smoke-gate rewrite (1d32456)
+  silently dropped `tuned = run_exam("tuned", ...)` from soup_pipeline.main
+  — after hours of training the pipeline reached
+  write_verdict(baseline, tuned) with `tuned` never assigned: NameError,
+  leaked adapter server, NO verdict. Found while reviewing the LIVE run
+  (which had imported the pre-fix code and would have crashed in ~1h).
+  Restored the stage (with a failure reason on exam failure). Also: the
+  singleton-lock cleanup sat after a return and NEVER ran — every run left
+  hwk_soup_pipeline.lock behind (a recycled python PID could block future
+  launches); _release_lock() now covers every main() exit path, and a
+  duplicated dead --dry-run block was removed. Salvage:
+  scripts/finish_pipeline.py (launched detached, soup_finish.log) watched
+  the live run and completes its missing tail — waits for trainer-done
+  (gate + log idle + lock PID dead), reuses the leaked :20129 server or
+  serves the newest adapter, runs the SAME exam + verdict via the
+  pipeline's own functions, kill-by-port-owner (never by image name),
+  idempotent behind a fresh-verdict check. Tests: tests/test_finish_pipeline.py
+  (10) + a source-level regression test asserting main() grades the tuned
+  adapter before the verdict.
 - **UI professional polish layer (2026-09-12 night)**: web/src/styles.css
   gained a refinement pass at the end of the file — antialiased type +
   text-wrap pretty, real glass sidebar/chat-head (color-mix + backdrop
