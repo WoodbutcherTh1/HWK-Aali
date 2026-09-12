@@ -25,6 +25,7 @@ STATE = DATA / ".status_digest_state.json"
 TRAIN_LOG = DATA / "context_training.log"
 CARE_LOG = DATA / "caretaker.log"
 SOUP_LOG = DATA / "soup_pipeline.log"
+REPORT = DATA / "soup" / "resft_pipeline_report.md"
 PI_LOG = Path("D:/hwk-data/pi_ci/ci_status.log")
 PI_RESULT = Path("D:/hwk-data/pi_ci/result.json")
 TARGET_STEPS = 100_000
@@ -111,36 +112,72 @@ def phase_b() -> tuple[list[str], dict]:
     return rows, info
 
 
-def caretaker() -> list[str]:
-    lines = tail(CARE_LOG, 6)
-    age = age_seconds(CARE_LOG)
+def caretaker() -> list[tuple[str, str]]:
+    lines = tail(CARE_LOG, 8)
     if not lines:
         return [("⚠️", "no caretaker log at all")]
-    alive = next((l for l in reversed(lines) if "Phase B alive" in l), None)
+    age = age_seconds(CARE_LOG)
+    # "going to sleep" is the caretaker's LAST line on a normal end of duty
+    # - an old log ending with it is a completed shift, not a stall.
+    if "going to sleep" in lines[-1]:
+        return [("✅", f"duty ended normally {fmt_age(age)} - relaunch "
+                       "night_caretaker.py for the next shift")]
     if age is not None and age > STALL_SEC:
         return [("⚠️", f"caretaker STALLED - last write {fmt_age(age)} "
-                       f"(duty window may have expired)")]
+                       "(killed mid-duty? relaunch night_caretaker.py)")]
+    alive = next((l for l in reversed(lines) if "Phase B alive" in l), None)
     return [("✅", f"on duty, last check {fmt_age(age)}"
                    + (f" - '{alive.strip()}'" if alive else ""))]
+
+
+def _log_line_age(line: str) -> float | None:
+    """Age in seconds of a '[YYYY-MM-DD HH:MM:SS] ...' log line (the soup
+    pipeline stamps UTC). None when the line has no parseable stamp."""
+    match = re.match(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]", line)
+    if not match:
+        return None
+    try:
+        stamp = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+        return time.time() - stamp.replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def _last_pipeline_activity(lines: list[str]) -> float | None:
+    """Age of the newest line the PIPELINE itself wrote. Test suites pollute
+    the real log (write_verdict lines carry 'pytest-of'); those lines are
+    skipped, so file mtimes and fresh-looking junk cannot fake activity."""
+    for line in reversed(lines):
+        if "pytest-of" in line:
+            continue
+        age = _log_line_age(line)
+        if age is not None:
+            return age
+    return None
 
 
 def pipeline() -> list[tuple[str, str]]:
     # Verdicts are read from the report FILE (rewritten fresh by every completed
     # run), never from old log lines - history must not read like news.
-    report = DATA / "soup" / "resft_pipeline_report.md"
     lines = tail(SOUP_LOG, 10)
     for line in reversed(lines):
         if "pytest-of" in line:
             continue
         if "=== soup pipeline start ===" in line:
-            age = age_seconds(SOUP_LOG)
+            age = _log_line_age(line)
             if age is not None and age < 6 * 3600:
-                return [("🔄", f"pipeline RUNNING (log last write {fmt_age(age)})")]
+                return [("🔄", f"pipeline RUNNING (log last write {fmt_age(age_seconds(SOUP_LOG))})")]
             break
-    age = age_seconds(report)
+    # Mid-training the start marker scrolls past tail(10) - a recent line the
+    # PIPELINE itself wrote proves it is alive (the smoke watcher writes
+    # every ~6.5 min during training; pytest pollution is filtered out).
+    activity = _last_pipeline_activity(lines)
+    if activity is not None and activity < 10 * 60:
+        return [("🔄", f"pipeline RUNNING (log last write {fmt_age(activity)})")]
+    age = age_seconds(REPORT)
     if age is not None and age < 48 * 3600:
         try:
-            text = report.read_text(encoding="utf-8", errors="replace")
+            text = REPORT.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return [("❓", "verdict file exists but is unreadable")]
         if "PROMOTE" in text:
@@ -149,6 +186,10 @@ def pipeline() -> list[tuple[str, str]]:
         if "NO-GO" in text:
             return [("⚠️", f"verdict NO-GO {fmt_age(age)} - baseline kept, "
                            "graduation failed")]
+        if "INCOMPLETE" in text:
+            return [("⚠️", f"last run INCOMPLETE {fmt_age(age)} - a stage "
+                           "failed (see soup_pipeline.log); the next launch "
+                           "auto-retries")]
         return [("❓", "verdict file present but contains no verdict")]
     return [("💤", "idle - awaiting Phase B completion (no fresh verdict)")]
 
