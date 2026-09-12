@@ -110,14 +110,15 @@ in parallel:
   enforced in code: run_command blocks env-dumping (os.environ/process.env/
   printenv/$VAR/.env) and redacts credentials from tool output; Aali never
   exposes his own prompts/code/env/logs. Docs: docs/ai_security_lessons.md.
-- **Next-stage automation (LIVE, waiting on GPU)**: scripts/soup_pipeline.py
-  runs since 18:52 — waits for a free GPU (python-family check + log idle),
+- **Graduation pipeline (LIVE, waiting on GPU)**: scripts/soup_pipeline.py —
+  waits for a free GPU via the shared gate (python-family check + log idle),
   then serves the Soup teacher, runs the 24-case baseline exam, re-SFTs on
-  sft_v2.jsonl (4,086 records: capped mix + tools + mentor failures ×3 +
-  live chats + memory/security episodes; dedup + exam-leak gated), grades the
-  tuned model, writes the promotion verdict
-  (docs/post_phaseA_pipeline.md). scripts/after_phaseA.bat still handles the
-  1024→4096 context extension; launch it once too.
+  sft_v2.jsonl (6,166 records, 35.5% Arabic — see the 2026-09-10 audit bullet
+  below; dedup + exam-leak gated), grades the tuned model, writes the
+  promotion verdict (docs/post_phaseA_pipeline.md). Phase B owns the card
+  until it finishes (~21:00 on 2026-09-10); the modernized night caretaker
+  fires the pipeline the moment the GPU frees. No extension chaining —
+  Phase B IS the 4096 extension and it is already running.
 - **Suggestions (LIVE)**: every Aali reply now ships up to 3 safe,
   language-matched follow-up chips (/api/ask `suggestions` field; CLI shows
   numbered chips — typing 1/2/3 sends one).
@@ -133,16 +134,41 @@ in parallel:
   processes, diagnostics with read-only-first safety rules.
 - **Arabic corpus (LIVE)**: fetch_arabic_corpus.py — 4,000 Wikisource dump
   pages + 105K hotel-review lines verified and downloaded;
-  5,000 Arabic SFT episodes seeded; sft_v2 rebuilt at 6,108 records with
-  34% Arabic share (recovery-report rebalance goal met).
+  5,000 Arabic SFT episodes seeded; sft_v2 now 6,166 records with 35.5%
+  Arabic share (2026-09-10 audit: mentor data actually present — see the
+  audit bullet below).
 - **Semantic memory (LIVE)**: recall is hybrid keyword + embedding cosine
   (Ollama nomic-embed-text, vectors cached in ~/.aali/); "deployments"
   finds the GitHub-push rule; honest `mode` field, keyword fallback.
-- **Night caretaker (ON DUTY since 19:34)**: scripts/night_caretaker.py —
-  watches Phase A hourly; auto-heals the mentor lab; when the GPU frees it
-  audits+prunes lab episodes (scripts/audit_mentor_lab.py: runs every build,
-  keeps only verified-working ones), rebuilds sft_v2, launches the soup
-  pipeline, chains the 4096 extension, and writes D:/hwk-data/MORNING_REPORT.md.
+- **Night caretaker (RELAUNCHED 2026-09-10, modernized)**:
+  scripts/night_caretaker.py — watches Phase B (D:/hwk-data/context_training.log)
+  every 10 min until the GPU frees, then: audits+prunes lab episodes
+  (scripts/audit_mentor_lab.py: keeps only verified-working builds), rebuilds
+  sft_v2 + soup export, launches soup_pipeline.py, waits for its verdict, and
+  writes D:/hwk-data/MORNING_REPORT.md. Phase A-era behavior REMOVED: no
+  Phase A resume (it is DONE — a resume would fork Phase B's lineage) and no
+  4096-extension chaining (double-launch would collide with the pipeline on
+  the 8GB card). Duty window extended to 28h so the whole Phase B →
+  graduation arc fits inside one caretaker lifetime (2026-09-11: window
+  bumped again after the power-off crash delayed the finish). Trainer,
+  caretaker and pipeline survive Freebuff restarts (WMI-spawned) but NOT an
+  OS power-off/reboot — relaunch order: scripts/extend_context.bat, then
+  night_caretaker.py.
+- **Pi-CI (2026-09-11, scheduled task HWK PiCI)**: the Raspberry Pi
+  (192.168.1.9, user `aalici`) is Aali's permanent ARM/Linux test target.
+  Every 15 min the PC ships a git bundle (no GitHub credentials involved) via
+  D:/hwk-data/pi_ci/ship_to_pi.sh; the Pi clones/updates, installs deps and
+  runs the full pytest suite (1h timeout), and the PC fetches result.json →
+  D:/hwk-data/pi_ci/. One-time setup pending: see D:/hwk-data/pi_ci/README.md
+  (two ssh commands as pi@, then the task fully takes over). Pi is off →
+  cycle skips silently.
+- **Status board (2026-09-11, scheduled task HWK StatusDigest)**:
+  scripts/status_digest.py regenerates D:/hwk-data/STATUS.md every 30 min —
+  alerts-first (stalled trainer/caretaker, NO-GO verdict, disk rule, Pi-CI
+  failures), then Phase B step/pace/ETA (computed across consecutive runs,
+  never from the trainer's own ETA column), caretaker, graduation pipeline
+  (verdict read from the report FILE's freshness, not old log lines), Pi-CI,
+  disks. Run by hand anytime: python scripts/status_digest.py
 - **Brain tree (LIVE, owner-only)**: /brain — admin-gated live tree of every flow (signin, signup, chat, output, keys, memory, brain selection, training) with each step citing its real code file; /api/brain/live JSON; live snapshot = counts/timestamps only, never user content. Obsidian export: scripts/build_brain_vault.py → D:/hwk-data/aali-brain-vault (wiki-linked, Graph View). Tests in tests/test_brain.py.
 - **Aali as a product (2026-09-07)**: one server, every client — the vision is
   Aali on servers with users on web/desktop/CLI/terminal. Shipped: SSE
@@ -307,7 +333,115 @@ in parallel:
   xterm.js are the same renderer class; ConEmu + mintty/WezTerm/iTerm keep
   an explicit pass), macOS/Linux terminals are trusted (CoreText/HarfBuzz).
   Tests: test_cli_bidi.py (windows-never-trusted, non-windows-trusted,
-  known-good-on-windows).
+  known-good-on-windows).- **soup-train root-cause fix: token budgets + row structure (2026-09-12
+  night)**: three graduation attempts (23:48, 00:27, 01:00 UTC) died in the
+  same place — `soup train` ValueError "no causal-loss target remains after
+  tokenization/truncation at data.max_length". Root causes were TWO builder
+  defects, found by running SOUP'S OWN code path on CPU
+  (soup_cli.data.loader.load_dataset + sft_format.build_format_row +
+  loss_mask.ensure_causal_loss_target — replicate before theorizing):
+  (1) Arabic costs ~1.5 chars/token on the Qwen2.5 tokenizer vs ~4.0 for
+  English, so the flat MAX_TOTAL_CHARS=2200 cap let Arabic-heavy mentor
+  prompts reach ~957 tokens and fill the 768 window (answer truncated away
+  = nothing to learn). Fix: token budgets in build_aali_sft_v2.py —
+  TRAIN_MAX_LENGTH=768 (KEEP IN SYNC with soup.yaml; 1024 was tried and
+  CUDA-OOM'd the 8GB card at batch_size=1), PROMPT_TOKEN_BUDGET=550,
+  ANSWER_TOKEN_BUDGET=200, a per-row Arabic/English token estimator
+  (_est_tokens, measured constants), row_fits/token_report, trim_to_budget
+  now derives a per-row char budget from them, truncates a long task head
+  but NEVER truncates the answer (untrimmable rows are dropped and named),
+  and the write gate enforces it all.
+  (2) conversation logs were sanitized BEFORE chunking: dropped assistant
+  turns merged user turns into all-user chunks and sliced mid-exchange —
+  3 user-only + 20 user-final rows reached the file and soup rejects rows
+  whose assistant mask is empty (no causal-loss target). Fix: chunk first,
+  sanitize per chunk, require the last turn to be an assistant turn
+  (chunks_without_assistant_target stat; 40 chunks dropped on rebuild).
+  Defense in depth: soup_pipeline.run_training now runs a pre-train
+  dataset gate (build_aali_sft_v2.token_overflow_rows: token overflow AND
+  structural checks, rows named in the log, fails in 1s instead of a
+  20-min serve+exam+train cycle). Verification chain: 237 pytest tests
+  green; real-tokenizer scan = 0 would-be-rejected rows; soup-path replica
+  = 0 rejected. Dataset: 5,336 rows, 34.4% Arabic. Live proof: train
+  finally PAST all previous failure points (attempt 6, 02:27 UTC, steps
+  ticking). Tests: tests/test_sft_v2_builder.py (18, incl. chunk-boundary
+  regression + live-dataset canary).
+- **Smoke-gate calibration (2026-09-12 night, attempt 6 lesson)**: the
+  mid-train smoke probe aborted a HEALTHY run at 30% — two graded 0/6
+  probes, but the probe JSON showed real text + valid tool JSON (a 1.5B
+  student learns the protocol shape long before the behaviors; the
+  promoted 09-09 adapter would fail the same mid-train bar, and on 09-09
+  the gate was CPU-disabled so it never once saw a passing adapter).
+  soup_pipeline.smoke_watcher now aborts ONLY on proven breakage
+  (_probe_is_broken: all-but-one generation EMPTY — the 09-09 phantom
+  signature); low-but-real scores log as telemetry. The full 26-case tuned
+  exam still decides promotion. Tests: tests/test_soup_smoke_gate.py (13,
+  rewritten to the calibrated contract). Attempt 7 (03:17 UTC) relaunched
+  with the calibrated gate.
+- **Smoke-probe RAM gate (2026-09-12 morning, attempt 7 lesson)**: every
+  mid-train probe after 08:02 died `exit 3` ("probe server never became
+  ready on :20130") — the GPU trainer's host-side RAM growth left ~0.3 GB
+  of 16 GB free, so the CPU serve pagefile-thrashed forever instead of
+  loading Qwen-1.5B (the first probe ran before the trainer bloated).
+  Training was never at risk (unavailable probes are telemetry-only).
+  Fix: soup_probe_smoke.py pre-flights free RAM (SMOKE_MIN_FREE_RAM_GB=2.0,
+  psutil → Win32 ctypes fallback, fail-open on unknown) and exits 4 with
+  the number; soup_pipeline.run_smoke_probe maps exit 4 to a logged
+  "skipped: not enough free RAM" that never counts toward the abort
+  threshold, while a real exit 3 still does. Diagnosability: the probe's
+  server output is captured to D:/hwk-data/smoke_server.log (was DEVNULL —
+  the real error sat in a pipe nobody read) and exit 3 dumps its tail.
+  Live capture proved it: the thrashing server froze at "Loading weights:
+  0%" in the log. SECOND lesson the same morning: the 12:20 cycle died
+  0xC000013A (console Ctrl+C/close) and the event swept the ENTIRE visible
+  console — probe, trainer and pipeline all killed at step 1270/3804 (the
+  pipeline had been running in the owner's terminal, NOT detached). Fix:
+  the probe and its server spawn with CREATE_NO_WINDOW (no console to
+  receive close events) and the pipeline logs a per-cycle "launching
+  against checkpoint-<n>" marker. The run was relaunched detached via
+  Start-Process -WindowStyle Hidden + stdout/stderr redirects (the
+  caretaker's launch convention) — long GPU jobs must never live in a
+  visible console. Tests: tests/test_soup_smoke_gate.py (37).
+  Detached-launch convention now enforced in code: scripts/launch_detached.py
+  (generic no-console launcher, append-mode logs under D:/hwk-data),
+  soup_pipeline.self_detach() (re-spawns itself detached on first entry —
+  env marker HWK_SOUP_PIPELINE_DETACHED, --no-wait preserved; --dry-run
+  exempt), and the trainer .bat launchers (extend_context,
+  resume_training, sft_training, aali_deploy's train menu) all route
+  through them — closing the terminal can no longer kill a run.
+  Tests: tests/test_launch_detached.py (7).
+- **UI professional polish layer (2026-09-12 night)**: web/src/styles.css
+  gained a refinement pass at the end of the file — antialiased type +
+  text-wrap pretty, real glass sidebar/chat-head (color-mix + backdrop
+  blur), layered shadows + inset hairlines on surfaces, hairline hover
+  scrollbars, calmer focus rings, faster settle animations (0.13–0.18s,
+  prefers-reduced-motion honored), uniform quick-pill icon boxes, calmer
+  top-bar CTAs. Theme-variable driven, so sepia inherits everything.
+  Rebuilt web/dist; visually verified via screenshots at /ui/.
+- **sft_v2 audit + builder fixes (2026-09-10)**: the pre-graduation audit
+  found the mix was NOT ready — 6,070 records, 34.6% Arabic, and ALL 67
+  mentor episodes silently dropped at write time (each exceeded
+  MAX_TOTAL_CHARS=2200; the write loop discarded over-length rows without a
+  trace, so the documented "mentor failures ×3" never trained). Also found:
+  the ×3 upweight copies were byte-identical so the dedup gate killed #2/#3
+  before writing; mentor transcripts leaked the mentors' own toolset
+  (Read/Edit/Bash/Grep/Write, with stringified arguments) and near-miss tool
+  JSON; chat logs carried bare {"content": ...} and "{}" replies. Builder
+  fixes (scripts/build_aali_sft_v2.py): head+tail trim_to_budget (keeps the
+  task + the failure/recovery ending, never splits tool-call JSON mid-object,
+  always ends on an assistant turn); upweight copies exempt from dedup; a
+  tool-message sanitizer (foreign tools + their orphaned results dropped,
+  near-miss JSON repaired, nameless finals rewritten to {"tool":"final"},
+  "{}" replies dropped) applied to mentor AND conversation-log records;
+  write-time drops are named in the report, never silent; 13 new media-tool
+  episodes (EN+AR) mirroring the exam's generate_image/generate_video
+  behaviors with the real file_tools.py schema (the 2026-09-09 graduation
+  failure was precisely that image-tool behaviors never took). Result:
+  6,166 records, 35.5% Arabic, mentor data really in (19 clean + 13 failure
+  ×3), 0 exam leaks, 0 unintended duplicates, every tool name inside Aali's
+  25-tool registry, all arguments proper objects. Tests:
+  tests/test_sft_v2_builder.py (10). Smoke gate verified live 2026-09-10:
+  CPU dry-run of the 6-case probe against stale checkpoint-4326.
 - **Agent honesty guards scoped to real tasks (2026-09-09)**: the
   success-claim and narrated-plan guards in agent_loop.py fired on pure chat
   ("قل لي فقط: جواب اختبار ٤٢" contains تم) and the brain parroted the guard
@@ -372,4 +506,4 @@ in parallel:
   من ~31MB إلى ~26MB — دليل تحذيري مفيد). ثم انسخ dist/*.exe إلى
   %LOCALAPPDATA%\Programs\AaliDesktop\ (نمط التحديث المعتمد).
 
-— Last updated: 2026-09-10 (CLI bidi: Windows Terminal never trusted — CLI shapes Arabic itself on Windows (owner screenshot: mirrored greeting); admin one-click handoff v2: single-use 60s hashed ?ht= token traded server-side for a session — session token never in a URL; admin audit log: /api/admin/audit + dashboard «سجل تدقيق الإجراءات» panel — key issue/revoke, account delete with actor/time/IP; attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; git: ONE branch `main` (legacy snapshots merged, old branches archived as tags); branding: Aali is the only AI — built & trained by team HWK, external provider names scrubbed from user-facing text; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)
+— Last updated: 2026-09-12 (smoke-probe RAM gate: CPU probes pre-flight free RAM and skip fast (exit 4) when the GPU trainer starves the host — 2026-09-09-style three silent exit-3 cycles fixed; server output captured to smoke_server.log); 2026-09-10 (CLI bidi: Windows Terminal never trusted — CLI shapes Arabic itself on Windows (owner screenshot: mirrored greeting); admin one-click handoff v2: single-use 60s hashed ?ht= token traded server-side for a session — session token never in a URL; admin audit log: /api/admin/audit + dashboard «سجل تدقيق الإجراءات» panel — key issue/revoke, account delete with actor/time/IP; attachments LIVE: 📎 upload images/video/audio/docs with analyze-first OCR+Whisper; chat guards: no {} / echo / meta-leak / language naming + guest policy; /v1 provider surface + desktop auto-boot 1.0.3 (cloudflared bundled); ACCOUNTS: users | builders & team — email+password+code verify+reset, roles in one app (AALI_ADMIN_EMAILS), connection internals admin-only; brain auto-revive + dignified fallback; remote-brain provider for Pi hosting; git: ONE branch `main` (legacy snapshots merged, old branches archived as tags); branding: Aali is the only AI — built & trained by team HWK, external provider names scrubbed from user-facing text; sharing hardening: fail-safe bind + aali_share.bat + gated tunnel; CLI bidi v2 wrap + extended letters; calm-glow web v2; Phase A done, Phase B 4096 relaunched after accidental close; earlier: owner brain tree + event feed + vault; aali_deploy publishing menu; new theme/icon; soup graduation queued; Aali-as-a-product server + streaming + multi-user + desktop app, memory + security upgrade, OmniRoute + Soup, edit_image/edit_video + machine_ops, mentor learning loop; sft-now remains condemned — re-SFT with the rebalanced mix + mentor episodes at ≤3 epochs, promote only on the exam)

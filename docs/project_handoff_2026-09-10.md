@@ -237,16 +237,31 @@ the exact manual commands and pitfalls).
   every ~6.5 min on CPU (port 20130) and ABORTS at 2 consecutive failed probes;
   the tuned adapter is served + health-checked before grading (the phantom
   0/26-verdict bug is fixed); on PROMOTE that server STAYS UP as the live brain.
-- Night caretaker (`scripts/night_caretaker.py`): watches Phase A hourly,
-  auto-heals the mentor lab, audits+prunes lab episodes
-  (`audit_mentor_lab.py` — keeps only verified-working episodes), rebuilds
-  sft_v2, launches the soup pipeline, chains the 4096 extension, writes
-  `D:/hwk-data/MORNING_REPORT.md`.
-- `sft_v2.jsonl` ≈ 6,070 records at snapshot (night-caretaker-rebuilt, so a
-  moving target — count it, don't trust any printed number), 34% Arabic (rebalanced from 1.4%): capped
-  mix + tools + mentor failures ×3 + live chats + memory/security episodes;
-  dedup + exam-leak gated. **sft_now remains CONDEMNED** — re-SFT with the
-  rebalanced mix at ≤3 epochs, promote only on the exam.
+- Night caretaker (`scripts/night_caretaker.py`): watches Phase B
+  (context_training.log) every 10 min until the GPU frees, then audits+prunes
+  lab episodes (`audit_mentor_lab.py` — keeps only verified-working
+  episodes), rebuilds sft_v2 + soup export, launches the soup pipeline, waits
+  for its verdict, writes `D:/hwk-data/MORNING_REPORT.md`. It no longer
+  resumes Phase A (done) or chains the 4096 extension (that IS Phase B — a
+  second copy would collide with the pipeline on the 8GB card). Relaunch it
+  detached if a Freebuff restart kills it.
+- `sft_v2.jsonl` = 6,166 records at the 2026-09-10 audit (rebuilt after the
+  fixes below), 35.5% Arabic (rebalanced from 1.4%): capped mix + tools +
+  mentor data actually present (19 clean + 13 failure episodes ×3) + live
+  chats + memory/security episodes + 13 media-tool episodes; dedup +
+  exam-leak gated, all tool names validated against Aali's registry. Audit
+  corrections (build_aali_sft_v2.py): every mentor episode had been silently
+  dropped at write time for exceeding MAX_TOTAL_CHARS=2200 — now
+  head+tail-trimmed to budget (tool JSON never split, ends on an assistant
+  turn); the ×3 failure upweight copies are exempt from dedup (byte-identical
+  copies were being killed before writing); a tool-message sanitizer removes
+  the external mentors' leaked toolset (Read/Edit/Bash/Grep/Write with
+  stringified args), repairs near-miss tool JSON, rewrites nameless
+  {"content": ...} replies to the {"tool":"final"} protocol shape and drops
+  "{}" replies — in mentor AND conversation-log records; write-time drops
+  are named in the report, never silent. Tests: tests/test_sft_v2_builder.py.
+  **sft_now remains CONDEMNED** — re-SFT with the rebalanced mix at ≤3
+  epochs, promote only on the exam.
 - Teacher data: 87+ SFT records from external mentors (`mentor_*.py`,
   `scripts/mentor_capture.py`); mentor lab automation via Colab bundle.
 
