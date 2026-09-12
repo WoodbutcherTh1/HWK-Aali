@@ -614,8 +614,21 @@ def self_detach(no_wait: bool = False) -> bool:
     exits 0. The child passes the marker through and runs for real.
     --dry-run is exempt (prints to the caller's console on purpose). The
     caller's --no-wait choice is passed through; waiting for the GPU happens
-    inside the detached child, logging to the same file."""
+    inside the detached child, logging to the same file.
+
+    Already-detached entries run in-place (no double fork):
+    - DETACH_ENV set (our own child), or
+    - HWK_DETACHED set (spawned by scripts/launch_detached.py, which sets it
+      for every child - a dedicated launcher and a self-detach guard would
+      otherwise each re-spawn once), or
+    - a caller that NEEDS us in-place (today_chain.py runs the pipeline as a
+      serial stage and waits on our exit code - it passes the skip marker
+      itself and owns the detachment)."""
     if os.environ.get(DETACH_ENV) == "1":
+        return True
+    if os.environ.get("HWK_DETACHED") == "1":
+        return True
+    if os.environ.get("HWK_NO_SELF_DETACH") == "1":
         return True
     if psutil is None:  # cannot re-spawn safely; run in-place (old behavior)
         return True

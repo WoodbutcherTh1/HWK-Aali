@@ -22,11 +22,16 @@ Exit codes: 0 = spawned (child pid printed), 2 = bad usage / spawn failed.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 LOG_DIR = Path("D:/hwk-data")
+# Children spawned here set this so a script with its own self-detach guard
+# (soup_pipeline.self_detach) knows it is ALREADY detached and must not
+# re-spawn itself a second time.
+ENV_MARKER = "HWK_DETACHED"
 
 
 def build_command(argv: list[str]) -> list[str]:
@@ -54,6 +59,7 @@ def spawn_detached(command: list[str], log_base: str, cwd: Path) -> int:
             stdout=out, stderr=err, stdin=subprocess.DEVNULL,
             cwd=str(cwd), creationflags=creationflags,
             close_fds=True,
+            env={**os.environ, ENV_MARKER: "1"},
         )
     print(f"[launch_detached] pid {child.pid} -> {out_path} (err: {err_path.name})",
           flush=True)

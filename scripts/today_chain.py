@@ -12,6 +12,7 @@ if stage 1 succeeded - never two trainers on the 8GB card at once.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -57,10 +58,12 @@ def wait_vram_clear(timeout_s: int = 300) -> None:
             "Phase B to a free window")
 
 
-def run_stage(name: str, cmd: list[str], out: Path) -> int:
+def run_stage(name: str, cmd: list[str], out: Path,
+              env: dict[str, str] | None = None) -> int:
     log(f"=== stage start: {name} ===")
     with out.open("a", encoding="utf-8") as fh:
-        proc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT, cwd=str(ROOT))
+        proc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT,
+                              cwd=str(ROOT), env=env)
     log(f"=== stage end: {name} (exit {proc.returncode}) ===")
     return proc.returncode
 
@@ -87,11 +90,17 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         log(f"vault export failed (non-fatal): {exc}")
 
+    # The chain runs the pipeline IN-PLACE as its serial stage: we wait on its
+    # exit code and only then resume Phase B. HWK_NO_SELF_DETACH tells the
+    # pipeline's self_detach() guard not to fork itself away from us - the
+    # chain owns detachment (today_chain.bat launches the whole chain via
+    # scripts/launch_detached.py, so nothing console-bound remains).
     code = run_stage(
         "graduation pipeline",
         [str(ROOT / ".venv" / "Scripts" / "python.exe"),
          str(ROOT / "scripts" / "soup_pipeline.py")],
         NIGHT_LOG,
+        env={**os.environ, "HWK_NO_SELF_DETACH": "1"},
     )
     if code != 0:
         log("pipeline failed - NOT starting Phase B on a possibly busy GPU; "
