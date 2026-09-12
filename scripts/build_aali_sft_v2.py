@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -1143,6 +1144,49 @@ MEDIA_FLOORS = {
 }
 
 
+# v4 media upweight (2026-09-12, drafted DURING the v3 run - see the probe
+# curve): media behavior had not consolidated by 52% of training while the
+# anti-hallucination pass held from 29% - and the one structural difference
+# is that mentor-failure episodes ship as x3 copies while media ships as
+# unique rows. Exposure COUNT consolidates a behavior, not episode variety.
+# Default OFF so the v3 experiment stays clean; enable the v4 recipe with:
+#   AALI_MEDIA_UPWEIGHT=3 python scripts/build_aali_sft_v2.py
+MEDIA_UPWEIGHT_DEFAULT = 0
+MEDIA_CALL_TOOLS = ("generate_image", "generate_video", "edit_image",
+                    "read_image", "generate_emoji")
+
+
+def is_intentional_upweight(source: str) -> bool:
+    """Byte-identical copies that MUST survive the dedup gate - otherwise
+    the dedup silently undoes the upweight (the mentor-failure lesson)."""
+    return source.startswith("mentor-failure#") or source.startswith("media-upweight#")
+
+
+def media_upweight_copies(episodes: list[dict], copies: int) -> list[dict]:
+    """Emit `copies` extra byte-identical duplicates of every episode whose
+    FINAL assistant turn is a media tool call (the causal-loss target - the
+    exam demands CALLS, so honest-error-recovery finals stay at weight 1).
+    Copies carry a media-upweight#N:<source> tag; the dedup gate exempts
+    that prefix via is_intentional_upweight, same contract as
+    mentor-failure#. Returns [] when copies <= 0 (v3 default)."""
+    if copies <= 0:
+        return []
+    out: list[dict] = []
+    for record in episodes:
+        messages = record.get("messages", [])
+        last_assistant = next((str(m.get("content", ""))
+                               for m in reversed(messages)
+                               if m.get("role") == "assistant"), "")
+        if not any(f'"{tool}"' in last_assistant for tool in MEDIA_CALL_TOOLS):
+            continue
+        for copy_index in range(copies):
+            duplicate = json.loads(json.dumps(record))
+            duplicate["source"] = (f"media-upweight#{copy_index + 1}:"
+                                   f"{record.get('source', '?')}")
+            out.append(duplicate)
+    return out
+
+
 def media_tool_counts(records: list[dict]) -> dict[str, int]:
     """Rows mentioning each media tool call anywhere in the conversation."""
     counts = {tool: 0 for tool in MEDIA_FLOORS}
@@ -1183,6 +1227,17 @@ def build(out_path: Path) -> dict:
     convos, convo_stats = load_conversations(DEFAULT_CONVOS)
     arabic, arabic_count = load_arabic_seed(DEFAULT_ARABIC_SEED)
     generated = generated_episodes()
+    # v4 media upweight - OFF by default (v3 experiment stays clean); fire
+    # with AALI_MEDIA_UPWEIGHT=3. Copies are byte-identical and dedup-exempt
+    # (is_intentional_upweight), so the trainer sees them as real rows.
+    try:
+        media_upweight = int(os.getenv("AALI_MEDIA_UPWEIGHT",
+                                       str(MEDIA_UPWEIGHT_DEFAULT)))
+    except ValueError:
+        media_upweight = MEDIA_UPWEIGHT_DEFAULT
+    if media_upweight > 0:
+        generated += media_upweight_copies(generated, media_upweight)
+    report["media_upweight"] = media_upweight
 
     report["sources"] = {
         "sft_mix": {"kept": len(mix), "skipped": mix_skipped, **mix_stats},
@@ -1204,7 +1259,8 @@ def build(out_path: Path) -> dict:
         # The x3 upweight copies are INTENTIONAL duplicates (owner directive:
         # "so he can not fail like u") - exempt them, or the dedup gate
         # silently undoes the upweight and failures train at weight 1.
-        intentional_upweight = source.startswith("mentor-failure#")
+        # media-upweight# copies (v4) get the same exemption.
+        intentional_upweight = is_intentional_upweight(source)
         if pair_hash in seen and not intentional_upweight:
             report["excluded"].setdefault("duplicates", 0)
             report["excluded"]["duplicates"] += 1

@@ -514,6 +514,52 @@ def test_media_error_recovery_episodes_use_honest_finals() -> None:
     assert "doesn't exist" in payload["content"]
 
 
+def test_media_upweight_copies_only_call_emitting_episodes() -> None:
+    """v4 draft: copies target the causal-loss target - episodes whose FINAL
+    assistant turn is a media CALL. Honest-error-recovery finals (final after
+    a failed call mid-conversation) stay at weight 1: the exam grades calls."""
+    call_row = {"messages": [_msg("user", "draw a cat"),
+                             _msg("assistant", '{"tool": "generate_image", "arguments": {}}')],
+                "source": "img-call"}
+    recovery_row = {"messages": [
+        _msg("user", "draw a cat"),
+        _msg("assistant", '{"tool": "generate_image", "arguments": {}}'),
+        _msg("user", 'Tool result: {"ok": false, "error": {"message": "x"}}'),
+        _msg("assistant", '{"tool": "final", "content": "it failed"}')],
+        "source": "img-recovery"}
+    copies = builder.media_upweight_copies([call_row, recovery_row], 2)
+    sources = [c["source"] for c in copies]
+    assert len(copies) == 2  # only the call row, x2
+    assert all(s.startswith("media-upweight#") for s in sources)
+    assert sources[0].endswith("img-call")
+
+
+def test_media_upweight_copies_are_byte_identical_and_tagged() -> None:
+    row = {"messages": [_msg("user", "clip"),
+                       _msg("assistant", '{"tool": "generate_video", "arguments": {}}')],
+           "source": "vid-call"}
+    copies = builder.media_upweight_copies([row], 3)
+    assert len(copies) == 3
+    for i, copy in enumerate(copies, start=1):
+        assert copy["source"] == f"media-upweight#{i}:vid-call"
+        # messages identical to the original (byte-identical content)
+        assert copy["messages"] == row["messages"]
+    assert builder.media_upweight_copies([row], 0) == []
+
+
+def test_dedup_exemption_covers_media_upweight_tag() -> None:
+    assert builder.is_intentional_upweight("mentor-failure#1")
+    assert builder.is_intentional_upweight("media-upweight#2:image-gen-v3-city-en")
+    assert not builder.is_intentional_upweight("sft_mix")
+    assert not builder.is_intentional_upweight("image-gen-v3-city-en")
+
+
+def test_media_upweight_disabled_by_default() -> None:
+    """v3 must stay the default recipe - the upweight fires only when the
+    owner sets AALI_MEDIA_UPWEIGHT."""
+    assert builder.MEDIA_UPWEIGHT_DEFAULT == 0
+
+
 def test_build_report_includes_media_floor_status() -> None:
     """The report must always carry the floor verdict so the pipeline log and
     any human can see it without rerunning the build."""
