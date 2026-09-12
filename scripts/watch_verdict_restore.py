@@ -51,13 +51,9 @@ BACKUP_TAG = "checkpoint2900.promoted.bak"
 
 
 def log(msg: str) -> None:
-    line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
-    print(line, flush=True)
-    try:
-        with WATCH_LOG.open("a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-    except OSError:
-        pass
+    # stdout only - launch_detached already redirects it to brain_watch.log;
+    # appending here too doubled every line.
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 
 def models_id(port: int) -> str | None:
