@@ -409,7 +409,16 @@ in parallel:
   exempt), and the trainer .bat launchers (extend_context,
   resume_training, sft_training, aali_deploy's train menu) all route
   through them — closing the terminal can no longer kill a run.
-  Tests: tests/test_launch_detached.py (7).
+  Integration markers: launch_detached sets HWK_DETACHED for its children
+  and self_detach honors it (no double fork); HWK_NO_SELF_DETACH lets
+  today_chain.py run the pipeline IN-PLACE as its serial stage (it waits
+  on the exit code), with today_chain.bat detaching the whole chain.
+  status_digest false alarms fixed: a caretaker log ending in "going to
+  sleep" is a completed duty (not STALLED); the pipeline reads RUNNING
+  from the newest UTC-stamped pipeline line (pytest junk filtered; test
+  runs can neither fake activity nor fool the board); INCOMPLETE verdicts
+  name the auto-retry. Tests: tests/test_launch_detached.py (10),
+  tests/test_status_digest.py (10).
 - **UI professional polish layer (2026-09-12 night)**: web/src/styles.css
   gained a refinement pass at the end of the file — antialiased type +
   text-wrap pretty, real glass sidebar/chat-head (color-mix + backdrop
