@@ -45,3 +45,21 @@ treats unavailable probes as telemetry-only).
 - 37/37 in tests/test_soup_smoke_gate.py; 249/249 full pytest suite.
 - Live run untouched (attempt 7, checkpoint-1000+); next probe cycles
   fail fast with the RAM reason instead of 11-minute dead timeouts.
+
+## Afternoon follow-ups (same work area, 2026-09-12)
+
+- Detach integration: HWK_DETACHED / HWK_NO_SELF_DETACH markers (no
+  double fork; today_chain stays serial; today_chain.bat detached).
+- status_digest false alarms fixed (end-of-duty caretaker, pipeline
+  RUNNING from UTC-stamped lines, pytest junk filtered, INCOMPLETE named).
+- **CRITICAL find**: the 09-09 rewrite (1d32456) had silently dropped
+  `tuned = run_exam("tuned", ...)` from main() — the LIVE run would have
+  NameError'd right after training. Restored; singleton-lock release
+  fixed (was unreachable after a return); duplicated --dry-run block
+  removed. finish_pipeline.py salvages the live run's missing tail
+  (detached watcher, soup_finish.log).
+- Probe server now BELOW_NORMAL priority (CPU serve was stealing host
+  CPU: trainer 1.5 → 3.7 s/it during cycles) and the RAM gate raised to
+  3.5 GB after a serve at "2 GB free" drove the box to 0.13 GB mid-run
+  (recovered by killing the exact port-owning PID — house rule honored).
+- Final: 277 tests green, 16 commits, tree clean.
