@@ -4,6 +4,9 @@
 # Phase 1 (now): local 1.5B instruct teacher — downloaded to D:/hwk-models
 #   (scripts/soup_pipeline.py serves this exact folder for the baseline exam).
 #   4bit QLoRA at max_length 768 fits the 8GB card WITH nothing else on it.
+#   (1024 was tried on 2026-09-12 and CUDA-OOM'd at batch_size=1 - 768 is
+#   the hard ceiling for this card; build_aali_sft_v2.py budgets every row
+#   against TRAIN_MAX_LENGTH=768 - keep the two in sync.)
 # Phase 2 (after Phase A finishes): optionally raise `base` to a 7B/8B instruct
 #   model for a stronger teacher — profile first; it will NOT fit the 8GB card
 #   next to a running server.
