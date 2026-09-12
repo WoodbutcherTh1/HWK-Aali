@@ -815,3 +815,139 @@ dialog small code { color: var(--gold-soft); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PROFESSIONAL POLISH LAYER (2026-09-12 night refinement pass)
+   Goal: quiet confidence — glass depth, calmer scrollbars, tighter type.
+   Every rule reads the theme variables, so dark AND sepia inherit it.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* — typography: crisper glyphs everywhere (big win on Arabic at small sizes) — */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+.md { font-size: 0.95rem; letter-spacing: 0.1px; }
+.md p, .md li { text-wrap: pretty; }
+.home-foot { letter-spacing: 0.02em; }
+
+/* — app chrome: real glass, not gray paint — */
+.sidebar {
+  background: color-mix(in srgb, var(--bg-side) 86%, transparent);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+}
+.chat-head {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  border-bottom-color: color-mix(in srgb, var(--line-soft) 70%, transparent);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+}
+
+/* — surfaces: layered shadows read as depth; inset hairline reads as craft — */
+.ask-box, .composer-form, .promo-card, .new-chat {
+  box-shadow:
+    0 14px 44px rgba(0, 0, 0, 0.32),
+    0 2px 8px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+.dialog-backdrop dialog {
+  box-shadow:
+    0 32px 90px rgba(0, 0, 0, 0.55),
+    0 4px 16px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.toast {
+  box-shadow:
+    0 16px 44px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+:root[data-theme="sepia"] .ask-box,
+:root[data-theme="sepia"] .composer-form,
+:root[data-theme="sepia"] .promo-card,
+:root[data-theme="sepia"] .new-chat {
+  box-shadow:
+    0 12px 34px rgba(94, 72, 34, 0.16),
+    0 2px 6px rgba(94, 72, 34, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* — active chat row: a quiet gold wash instead of a loud fill — */
+.chat-row.active {
+  box-shadow: inset 0 0 0 1px rgba(232, 179, 75, 0.16);
+}
+:root[data-theme="sepia"] .chat-row.active {
+  box-shadow: inset 0 0 0 1px rgba(164, 116, 31, 0.22);
+}
+
+/* — scrollbars: hairline thumbs that appear on hover (desktop-grade) — */
+.chat-list::-webkit-scrollbar,
+.chat::-webkit-scrollbar,
+.slash-menu::-webkit-scrollbar,
+.gh-repos::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-list::-webkit-scrollbar-thumb,
+.chat::-webkit-scrollbar-thumb,
+.slash-menu::-webkit-scrollbar-thumb,
+.gh-repos::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 8px;
+}
+.chat-list::-webkit-scrollbar-thumb:hover,
+.chat::-webkit-scrollbar-thumb:hover,
+.slash-menu::-webkit-scrollbar-thumb:hover,
+.gh-repos::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+.chat-list, .chat, .slash-menu, .gh-repos { scrollbar-width: thin; }
+
+/* — focus: precise, not flashy — */
+:focus-visible { outline: 1.5px solid rgba(232, 179, 75, 0.5); outline-offset: 2px; }
+dialog input:focus, .auth-dialog input.auth-input:focus {
+  outline: none;
+  border-color: rgba(232, 179, 75, 0.55);
+  box-shadow: 0 0 0 3px var(--gold-dim);
+}
+
+/* — motion: settle faster; snappy reads professional, floaty reads toy — */
+.msg, .chip, .quick-pill, .activity-row { animation-duration: 0.18s; }
+button, .chip, .quick-pill, .msg { transition-duration: 0.13s; }
+
+/* — hero: the wordmark gets a faint plinth so it sits, not floats — */
+.wordmark {
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05),
+    0 10px 34px rgba(0, 0, 0, 0.35);
+}
+:root[data-theme="sepia"] .wordmark { text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4); }
+.empty-state .es-orb { filter: drop-shadow(0 0 18px rgba(232, 179, 75, 0.18)); }
+
+/* — code blocks: sharper header separation for long session readability — */
+.codeblock { border-radius: 10px; }
+.codeblock-head { letter-spacing: 0.03em; }
+.codeblock pre { font-size: 0.845rem; line-height: 1.6; }
+
+@media (prefers-reduced-motion: reduce) {
+  body, .msg, .chip, .quick-pill, .activity-row, .toast { animation: none !important; }
+}
+
+/* — pill row: uniform icon boxes so the row reads as a set, not stickers — */
+.quick-pill .qp-ico {
+  font-size: 0.86rem;
+  width: 1.15em; text-align: center;
+  filter: saturate(0.88);
+  transform: translateY(0.5px);
+}
+.quick-pill { font-size: 0.8rem; letter-spacing: 0.01em; }
+
+/* — top-bar CTAs: one calm system, not two competing glows — */
+.upgrade-pill {
+  box-shadow: 0 2px 14px rgba(232, 179, 75, 0.16);
+  transition: box-shadow 0.15s ease, transform 0.15s ease, filter 0.15s ease;
+}
+.upgrade-pill:hover { box-shadow: 0 4px 20px rgba(232, 179, 75, 0.24); }
+.upgrade-pill:active { transform: translateY(0.5px); }
