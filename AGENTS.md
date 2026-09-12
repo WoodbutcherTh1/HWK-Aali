@@ -439,6 +439,20 @@ in parallel:
   idempotent behind a fresh-verdict check. Tests: tests/test_finish_pipeline.py
   (10) + a source-level regression test asserting main() grades the tuned
   adapter before the verdict.
+- **Babysitter for the LIVE pre-fix run (2026-09-12 afternoon)**: the
+  running pipeline could not be patched in-memory, and its smoke cycles
+  kept starving the trainer (host RAM growth is unbounded; a cycle drove
+  the box to 0.13 GB free) — plus a starved probe can grade empty
+  generations and 2/2 would abort a HEALTHY run. scripts/finish_babysit.py
+  (detached, soup_babysit.log) kills each cycle as it spawns: probe
+  pythons FIRST (ungraded = unavailable, never counts toward the abort),
+  then the cycle's CPU server by exact cmdline pair (serve + :20130) and
+  netstat PID — never by image name, never the exam server (:20129) or
+  the trainer (pinned by tests/test_finish_babysit.py, 8). Probe server
+  also runs at BELOW_NORMAL priority and the RAM gate is 3.5 GB (the
+  2.0 gate launched a serve that starved the box; the serve itself needs
+  3-4 GB). NOTE for next runs: these two helpers exist ONLY because the
+  live run imported pre-fix code — the fixed pipeline needs neither.
 - **UI professional polish layer (2026-09-12 night)**: web/src/styles.css
   gained a refinement pass at the end of the file — antialiased type +
   text-wrap pretty, real glass sidebar/chat-head (color-mix + backdrop
