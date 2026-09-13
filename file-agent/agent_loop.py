@@ -14,7 +14,7 @@ from typing import Any
 import requests
 
 from agent_log import log_event, new_request_id
-from file_agent import execute_tool, get_tool_definitions
+from file_agent import execute_tool, get_tool_definitions, tool_guard
 from file_agent import memory as aali_memory
 from file_agent import emoji as aali_emoji
 from file_agent import autocorrect as aali_autocorrect
@@ -917,15 +917,25 @@ def _ollama_agent_loop(
         if kind == "tool":
             tool_name = str(value)
             args = _normalize_tool_args(tool_name, arguments or {})
-            if tool_name in ("write_file", "append_file") and not str(args.get("content", "")).strip():
-                # Zero-byte write guard: reject and teach the model why.
-                result = {"ok": False, "error": {
-                    "type": "invalid_arguments",
-                    "message": "أرسل المحتوى الكامل داخل حقل content — بدون الملف يكون فارغاً."}}
+            guard_name, guard_fix = tool_guard.validate_tool_name(tool_name)
+            if guard_fix is not None:
+                log_event(request_id, "tool_name_guard", invented=tool_name,
+                          resolved=guard_name or None, method=guard_fix.get("method"),
+                          alternatives=guard_fix.get("alternatives") or [])
+            if not guard_name:
+                result = tool_guard.rejected_result(guard_fix)
             else:
-                result = _policy_gate(tool_name, args, policy, confirmed, gate_state)
-                if result is None:
-                    result = execute_tool(tool_name, args, root)
+                if guard_name != tool_name:
+                    tool_name, args = guard_name, _normalize_tool_args(guard_name, arguments or {})
+                if tool_name in ("write_file", "append_file") and not str(args.get("content", "")).strip():
+                    # Zero-byte write guard: reject and teach the model why.
+                    result = {"ok": False, "error": {
+                        "type": "invalid_arguments",
+                        "message": "أرسل المحتوى الكامل داخل حقل content — بدون الملف يكون فارغاً."}}
+                else:
+                    result = _policy_gate(tool_name, args, policy, confirmed, gate_state)
+                    if result is None:
+                        result = execute_tool(tool_name, args, root)
             tools_used += 1
             last_tool, last_result = tool_name, result
             # Repeat-guard: small models loop on the same tool call. After two
@@ -1122,8 +1132,17 @@ def _local_agent_loop(
         return response
 
     tool_name, arguments = tool_call
-    log_event(request_id, "tool_requested", tool=tool_name, arguments=arguments, mode="local")
-    result = execute_tool(tool_name, arguments, root)
+    guard_name, guard_fix = tool_guard.validate_tool_name(tool_name)
+    if guard_fix is not None:
+        log_event(request_id, "tool_name_guard", invented=tool_name,
+                  resolved=guard_name or None, method=guard_fix.get("method"),
+                  alternatives=guard_fix.get("alternatives") or [], mode="local")
+    if not guard_name:
+        result = tool_guard.rejected_result(guard_fix)
+    else:
+        tool_name = guard_name
+        log_event(request_id, "tool_requested", tool=tool_name, arguments=arguments, mode="local")
+        result = execute_tool(tool_name, arguments, root)
     log_event(request_id, "tool_result", tool=tool_name, result=result, mode="local")
     if result.get("ok"):
         response = (
@@ -1349,9 +1368,19 @@ def _local_model_loop(
             arguments=arguments,
             mode="scratch_model",
         )
-        result = _policy_gate(value, arguments, policy, confirmed, gate_state)
-        if result is None:
-            result = execute_tool(value, arguments, root)
+        guard_name, guard_fix = tool_guard.validate_tool_name(value)
+        if guard_fix is not None:
+            log_event(request_id, "tool_name_guard", invented=value,
+                      resolved=guard_name or None, method=guard_fix.get("method"),
+                      alternatives=guard_fix.get("alternatives") or [], mode="scratch_model")
+        if not guard_name:
+            result = tool_guard.rejected_result(guard_fix)
+        else:
+            if guard_name != value:
+                value = guard_name
+            result = _policy_gate(value, arguments, policy, confirmed, gate_state)
+            if result is None:
+                result = execute_tool(value, arguments, root)
         log_event(
             request_id,
             "tool_result",
@@ -1410,13 +1439,23 @@ def _run_tool_call(
         tool=tool_name,
         arguments=arguments,
     )
-    result = _policy_gate(tool_name, arguments, policy, confirmed, gate_state)
-    if result is None:
-        result = execute_tool(
-            tool_name,
-            arguments,
-            root,
-        )
+    guard_name, guard_fix = tool_guard.validate_tool_name(tool_name)
+    if guard_fix is not None:
+        log_event(request_id, "tool_name_guard", invented=tool_name,
+                  resolved=guard_name or None, method=guard_fix.get("method"),
+                  alternatives=guard_fix.get("alternatives") or [])
+    if not guard_name:
+        result = tool_guard.rejected_result(guard_fix)
+    else:
+        if guard_name != tool_name:
+            tool_name = guard_name
+        result = _policy_gate(tool_name, arguments, policy, confirmed, gate_state)
+        if result is None:
+            result = execute_tool(
+                tool_name,
+                arguments,
+                root,
+            )
     log_event(request_id, "tool_result", tool=tool_name, result=result)
     return {
         "role": "tool",
@@ -1551,9 +1590,16 @@ def _agent_loop(
 
         def _run_native_tool(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
             log_event(request_id, "tool_requested", tool=tool_name, arguments=args)
-            gate_result = _policy_gate(tool_name, args, policy, confirmed, gate_state)
-            tool_result = gate_result if gate_result is not None else execute_tool(tool_name, args, root)
-            log_event(request_id, "tool_result", tool=tool_name, result=tool_result)
+            guard_name, guard_fix = tool_guard.validate_tool_name(tool_name)
+            if guard_fix is not None:
+                log_event(request_id, "tool_name_guard", invented=tool_name,
+                          resolved=guard_name or None, method=guard_fix.get("method"),
+                          alternatives=guard_fix.get("alternatives") or [])
+            gate_result = (tool_guard.rejected_result(guard_fix) if not guard_name
+                           else _policy_gate(guard_name, args, policy, confirmed, gate_state))
+            tool_result = (gate_result if gate_result is not None
+                           else execute_tool(guard_name, args, root))
+            log_event(request_id, "tool_result", tool=guard_name, result=tool_result)
             return tool_result
 
         native_loop = providers.anthropic_loop if provider == "anthropic" else providers.gemini_loop

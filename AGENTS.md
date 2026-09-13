@@ -575,7 +575,37 @@ in parallel:
   من ~31MB إلى ~26MB — دليل تحذيري مفيد). ثم انسخ dist/*.exe إلى
   %LOCALAPPDATA%\Programs\AaliDesktop\ (نمط التحديث المعتمد).
 
-— Last updated: 2026-09-12 (reboot kill + job breakaway: the 16:28:39 reboot
+— Last updated: 2026-09-13 (**Tool-name guard (LIVE)**: file_agent/tool_guard.py —
+the serving-side validator closing the invented-tool-name hole the v4/v5
+tuned exams proved training cannot fix (x3 upweight AND 40 contrastive
+near-miss episodes both left media 0/5 with zero tool-name flips; conclusion:
+stop paying the data-shape tax, fix at runtime). Every tool dispatch site in
+agent_loop (ollama, local, scratch, openai-compat `_run_tool_call`, native
+`_run_native_tool` — all 5, pinned by a source tripwire) now validates names
+BEFORE the policy gate: real registry names pass clean (read live from
+file_tools._FUNCTIONS each call, no cache), observed inventions rename
+through an alias map (paint→generate_image, local_clip→generate_video,
+file→read_file, run/python/bash/shell→run_command, …20 mappings), one clear
+fuzzy neighbour corrects conservatively (difflib ≥0.72, ambiguity rejects),
+rejections return a teaching tool-result with alternatives (same pattern as
+the zero-byte write guard) so the model retries in-turn. Security-critical
+ordering: the policy gate sees the CORRECTED name — a guest's invented
+run(printenv) renames to run_command and is then guest_forbidden-blocked,
+never executed (verified live). Kill switch AALI_TOOL_GUARD_OFF=1;
+content-free JSONL audit (names only, never arguments) at
+D:/hwk-data/tool_guard_audit.jsonl. Tests: tests/test_tool_guard.py (39,
+incl. alias→registry tripwire); suite 387.
+
+Also 2026-09-13: v5 graduation PROMOTED (checkpoint-3873, 3/26 vs 1/26,
+serving on :20129) — but the breakdown watcher showed media 0/5,
+security 0/4, near-miss 0/7 with ZERO tool-name flips, i.e. the contrastive
+episodes did not move behavior (recorded in tasks/v5-graduation-run.md);
+Phase C chain re-armed with a tunable wait window (AALI_PHASE_C_MAX_WAIT_H,
+default 8h) waiting behind the promoted brain — freeing the card for the
+own-brain SFT is the owner's call; exam-breakdown watcher
+(scripts/watch_v5_exam_breakdown.py) + the venv-shim PID-pair lesson
+(.venv python.exe is a shim over Python312 — a PID pair is ONE process)
+recorded in the task file. Prior 2026-09-12 (reboot kill + job breakaway: the 16:28:39 reboot
 killed attempt 7 and the task-relaunched attempt 8 died in its first minute —
 a scheduled task's job object sweeps a detached child that inherited it;
 CREATE_BREAKAWAY_FROM_JOB now requested with a plain-flag fallback; status
