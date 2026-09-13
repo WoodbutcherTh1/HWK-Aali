@@ -474,7 +474,15 @@ def train(args: argparse.Namespace) -> None:
                 )
             model.load_state_dict(payload["model"])
             state = torch.load(state_path, map_location="cpu", weights_only=False)
-            optimizer.load_state_dict(state["optimizer"])
+            # bootstrap_sft_state.py stages a PRETRAINED model with a FRESH
+            # optimizer (state["optimizer"] is None, step=0) so an SFT run can
+            # resume from pretrained weights with its own LR schedule - treat
+            # that as "start counting from step 0", not a crash.
+            if state.get("optimizer") is not None:
+                optimizer.load_state_dict(state["optimizer"])
+            else:
+                print("resume: optimizer state is None (bootstrapped SFT state) "
+                      "- starting with a fresh optimizer at step 0")
             resume_step = int(state.get("step", 0))
             resume_tokens = int(state.get("tokens", 0))
             resume_epoch = int(state.get("epoch", 0))
