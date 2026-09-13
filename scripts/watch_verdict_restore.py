@@ -26,6 +26,7 @@ Log: D:/hwk-data/brain_watch.log (via launch_detached's --log redirect).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -46,8 +47,17 @@ TIMEOUT_S = 6 * 3600
 # Single source of truth for the pre-launch backup (mirrors
 # restore_checkpoint2900.BACKUP_ADAPTER; kept literal here so the watcher
 # never imports the heavy soup_pipeline stack just to poll a file).
-BACKUP_ADAPTER = Path("D:/hwk-data/soup/tuned.checkpoint2900.promoted.bak/checkpoint-2900")
-BACKUP_TAG = "checkpoint2900.promoted.bak"
+# Overridable per-run (2026-09-13): each graduation replaces a DIFFERENT
+# promoted adapter - checkpoint-3954 replaced 3843, the next run will
+# replace 3954 - so the fallback must restore the brain that was actually
+# live before the run, not a stale hardcode:
+#   AALI_BRAIN_BACKUP=D:/hwk-data/soup/tuned.<tag>/checkpoint-<n>
+#   AALI_BRAIN_BACKUP_TAG=<tag>          (the restore_check substring)
+#   AALI_RESTORE_BACKUP=<same adapter>   (passed to restore_checkpoint2900)
+BACKUP_ADAPTER = Path(os.environ.get(
+    "AALI_BRAIN_BACKUP",
+    "D:/hwk-data/soup/tuned.checkpoint2900.promoted.bak/checkpoint-2900"))
+BACKUP_TAG = os.environ.get("AALI_BRAIN_BACKUP_TAG", "checkpoint2900.promoted.bak")
 
 
 def log(msg: str) -> None:
@@ -81,13 +91,18 @@ def endpoint_live(port: int, timeout_s: int = 120) -> bool:
 
 
 def run_restore(with_exam: bool) -> bool:
-    """Restore checkpoint-2900 from the backup via the dedicated script."""
+    """Restore the pre-launch backup adapter via the dedicated script.
+    AALI_RESTORE_BACKUP keeps restore_checkpoint2900.py pointing at the SAME
+    backup this watcher verified against (no restore-the-wrong-brain races)."""
     cmd = [sys.executable, str(Path(__file__).with_name("restore_checkpoint2900.py"))]
     if with_exam:
         cmd.append("--exam")
+    env = dict(os.environ)
+    env["AALI_RESTORE_BACKUP"] = str(BACKUP_ADAPTER)
     log(f"running restore: {' '.join(cmd)}")
     proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=3600)
+                          encoding="utf-8", errors="replace", timeout=3600,
+                          env=env)
     for line in (proc.stdout or "").splitlines()[-15:]:
         log(f"  restore| {line}")
     if proc.returncode != 0:

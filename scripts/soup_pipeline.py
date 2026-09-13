@@ -507,6 +507,33 @@ def run_training() -> bool:
                             media_tool_counts(written).items())))
     except ImportError:
         log("media floors gate skipped (build_aali_sft_v2 not importable)")
+    # Near-miss gates (2026-09-13 lesson): the v4 exam graded media 0/5 with
+    # INVENTED tool names (paint/local_clip/...) - the mix must carry the
+    # contrastive corrections, and no wrong name may sit in an ASSISTANT turn
+    # (soup trains every assistant turn). Same stale-file contract as above.
+    try:
+        from build_aali_sft_v2 import (near_miss_floor_failures,
+                                       near_miss_leak_check,
+                                       near_miss_tool_counts)
+        with SFT_V2.open("r", encoding="utf-8") as handle:
+            written = [json.loads(line) for line in handle if line.strip()]
+        nm_failures = near_miss_floor_failures(near_miss_tool_counts(written))
+        if nm_failures:
+            log("near-miss floors gate FAILED: " + "; ".join(nm_failures))
+            log("rebuild with scripts/build_aali_sft_v2.py before training")
+            return False
+        nm_leaks = near_miss_leak_check(written)
+        if nm_leaks:
+            log("near-miss leak gate FAILED: wrong tool name in ASSISTANT "
+                f"turn of {len(nm_leaks)} row(s): " + ", ".join(nm_leaks[:10]))
+            log("rebuild with scripts/build_aali_sft_v2.py before training")
+            return False
+        log("near-miss gates passed: "
+            + ", ".join(f"{tool}={count}"
+                        for tool, count in sorted(
+                            near_miss_tool_counts(written).items())))
+    except ImportError:
+        log("near-miss gates skipped (build_aali_sft_v2 not importable)")
     log(f"starting soup train on {SFT_V2.name}")
     # Stream the trainer's output to a live log (the old capture-to-buffer
     # died with subprocess.run); on exit the tail goes to last_stage.txt.

@@ -85,6 +85,19 @@ _ARABIC_RE = re.compile(r"[\u0600-\u06FF]")
 # toolset (Read/Edit/Bash/Grep/Write) and even stringified arguments - such
 # turns would teach tools Aali does not have, so they are removed.
 FOREIGN_TOOLS = {"Read", "Edit", "Bash", "Grep", "Write"}
+# Plausible-but-NONEXISTENT tool names the 1.5B student actually emitted in
+# the 2026-09-13 v4 tuned exam (soup_exam_report_tuned.json): paint,
+# local_clip, audio_recorder, file, math, registration, video, drawing_tool,
+# video_quality - plus common inventions of the same shape. A name from this
+# set in an ASSISTANT turn would be trained as the protocol itself (soup puts
+# causal loss on every assistant turn), so the sanitizer drops such turns and
+# the correction episodes keep the wrong names strictly in USER turns.
+NEAR_MISS_TOOLS = frozenset({
+    "paint", "drawing_tool", "image_editor", "ocr", "text_reader",
+    "local_clip", "video", "video_quality", "audio_recorder",
+    "file", "read_files", "math", "sticker_maker", "registration",
+    "remember", "note", "emoji_maker",
+})
 _TOOL_HEAD_RE = re.compile(r'^\{\s*"tool"\s*:\s*"([^"]+)"')
 
 SYSTEM_EN = ("You are Aali. For tools reply {\"tool\": name, \"arguments\": {...}}. "
@@ -623,6 +636,256 @@ def generated_episodes() -> list[dict]:
               ("assistant", "{\"tool\": \"final\", \"content\": \"ما انرسم الستيكر - "
                "خطوط الإيموجي مو متوفرة الحين، وما حفظت شي. أجرب بعدين؟\"}")),
     ]
+    episodes += near_miss_correction_episodes()
+    return episodes
+
+
+# ---------------------------------------------------------------------------
+# near-miss corrections (2026-09-13): the v4 tuned exam scored media 0/5
+# while INVENTING plausible tool names - paint, local_clip, audio_recorder,
+# file, math, registration, drawing_tool, video_quality (none exist in
+# file_tools.py). The 1.5B had learned the JSON SHAPE but never a contrastive
+# signal pinning names to the real registry. These episodes provide it.
+# ---------------------------------------------------------------------------
+
+# The wrong name lives ONLY in a user turn: soup puts causal loss on EVERY
+# assistant turn, so a wrong name in an assistant turn would be TRAINED as
+# the protocol itself. The trained target (last assistant turn) is always a
+# call to the REAL file_tools.py tool, or a plain final when no tool fits.
+_NEAR_MISS_CALL_TOOLS = (
+    "image-paint|generate_image",
+    "image-paint2|generate_image",
+    "image-drawing-tool|generate_image",
+    "video-local-clip|generate_video",
+    "video-quality|generate_video",
+    "video-audio-recorder|generate_video",
+    "read-image-ocr|read_image",
+    "read-image-text-reader|read_image",
+    "edit-image-editor|edit_image",
+    "edit-image-paint|edit_image",
+    "read-file|read_file",
+    "read-files|read_file",
+    "memory-remember|memory",
+    "memory-note|memory",
+    "emoji-sticker-maker|generate_emoji",
+    "emoji-maker|generate_emoji",
+)
+
+# Per-family near-miss snippets (what another bot "answered") and the REAL
+# arguments the corrected call must carry. Kept deliberately simple and
+# human - these read like a user relaying another bot's broken reply.
+_NEAR_MISS_SNIPPETS = {
+    "image-paint": '{"tool": "paint", "arguments": {"image": "bay.png"}}',
+    "image-paint2": '{"tool": "paint", "arguments": {}}',
+    "image-drawing-tool": '{"tool": "drawing_tool", "arguments": {"image": "cat.png"}}',
+    "video-local-clip": '{"tool": "local_clip", "arguments": {"video_name": "bday.mp4"}}',
+    "video-quality": '{"tool": "video_quality", "arguments": {"quality": "hd"}}',
+    "video-audio-recorder": '{"tool": "audio_recorder", "arguments": {"duration": 1}}',
+    "read-image-ocr": '{"tool": "ocr", "arguments": {"image": "receipt.png"}}',
+    "read-image-text-reader": '{"tool": "text_reader", "arguments": {"image": "screenshot.png"}}',
+    "edit-image-editor": '{"tool": "image_editor", "arguments": {"image": "photo.jpg", "op": "grayscale"}}',
+    "edit-image-paint": '{"tool": "paint", "arguments": {"image": "banner.png"}}',
+    "read-file": '{"tool": "file", "arguments": {"path": "/home/aali/notes.txt"}}',
+    "read-files": '{"tool": "read_files", "arguments": {"path": "config.txt"}}',
+    "memory-remember": '{"tool": "remember", "arguments": {"text": "no pineapple on pizza"}}',
+    "memory-note": '{"tool": "note", "arguments": {"text": "wake up at 5am"}}',
+    "emoji-sticker-maker": '{"tool": "sticker_maker", "arguments": {"text": "party"}}',
+    "emoji-maker": '{"tool": "emoji_maker", "arguments": {"text": "koala"}}',
+}
+
+_NEAR_MISS_USERS = {
+    "image-paint": (
+        "Another bot replied with this and nothing happened: {S} Generate the image yourself.",
+        "جربت بوت ثاني ورجّع لي هالشي وما صار شي: {S} ارسم أنت الصورة صح."),
+    "image-paint2": (
+        'Is your drawing tool called "paint"? I need a lemonade-stand poster.',
+        'هل أداة الرسم عندك اسمها "paint"؟ أبغى بوستر بائعة ليمون.'),
+    "image-drawing-tool": (
+        "I pasted this into another chat and it failed: {S} Can your tools draw a cat?",
+        "حطيت هالشي بشات ثاني وما نفع: {S} أدواتك تقدر ترسم قطة؟"),
+    "video-local-clip": (
+        "A friend's app returned this for my birthday-reel request: {S} Make the clip yourself.",
+        "تطبيق صديقي رجّع هذا لطلب مقطع عيد ميلادي: {S} سوّ أنت المقطع."),
+    "video-quality": (
+        "Another assistant answered with just this: {S} Just generate a rough ocean-waves clip.",
+        "جواب المساعد الآخر كان هذا وبس: {S} سوي مقطع بسيط لأمواج البحر."),
+    "video-audio-recorder": (
+        "Some bot answered this when I asked for rain on a window: {S} That records sound, not video - do it right.",
+        "بوت رجّع هذا لما طلبت مطر على شباك: {S} هذي تسجيل صوت مو فيديو - سوّها صح."),
+    "read-image-ocr": (
+        "Someone told me to run this - is that even one of your tools? {S} Read the text off my receipt.",
+        "واحد قال لي شغّل هذا - أصلاً هي من أدواتك؟ {S} اقرأ النص من الفاتورة."),
+    "read-image-text-reader": (
+        'Is "text_reader" the right tool here: {S} Extract the words from screenshot.png.',
+        'أداة "text_reader" هي الصحيحة هنا: {S} استخرج الكلام من screenshot.png.'),
+    "edit-image-editor": (
+        "I tried this and it is not a real tool: {S} Convert photo.jpg to grayscale properly.",
+        "جربت هذا وما طلعت أداة حقيقية: {S} حوّل photo.jpg رمادي بطريقتك."),
+    "edit-image-paint": (
+        'My other app suggested "paint" for resizing: {S} Resize banner.png to 800 wide without overwriting it.',
+        'تطبيقي الثاني اقترح "paint" للتحجيم: {S} كبّر banner.png لعرض 800 من غير ما تكتب فوقها.'),
+    "read-file": (
+        "Another agent called this - that is not your registry: {S} Read notes.txt from the workspace.",
+        "بوت ثاني استدعى هذا - وهذي مو من أدواتك: {S} اقرأ notes.txt من مجلد العمل."),
+    "read-files": (
+        'Is it "read_files" or something else: {S} Show me what is inside config.txt.',
+        'الأداة "read_files" ولا شي ثاني: {S} اعرض لي محتوى config.txt.'),
+    "memory-remember": (
+        "I told the other chat this - do you have a real tool for that? {S} Remember my rule.",
+        "قلت للشات الثاني هذا - هل عندك أداة حقيقية لذلك؟ {S} احفظ قاعدتي."),
+    "memory-note": (
+        'Someone suggested a "note" tool for saving: {S} Save it the right way.',
+        'قالوا لي أداة "note" للحفظ: {S} سجّلها بطريقتك الصحيحة.'),
+    "emoji-sticker-maker": (
+        "A site suggested this - not in your registry, right? {S} Draw my party sticker.",
+        "موقع اقترح هذا - مو من أدواتك، صح؟ {S} ارسم لي ملصق الحفلة."),
+    "emoji-maker": (
+        'Is "emoji_maker" your sticker tool: {S} Make a sleepy koala sticker.',
+        'أداة "emoji_maker" هي للملصقات: {S} سوّ لي ملصق كوالا نعسان.'),
+}
+
+_NEAR_MISS_ARGS = {
+    "image-paint": (
+        {"prompt": "a sailboat on a calm bay at sunset, warm colors",
+         "path": "images/sailboat-bay.png"},
+        {"prompt": "قارب شراعي على خليج هادئ وقت الغروب، ألوان دافئة",
+         "path": "images/sailboat-bay-ar.png"}),
+    "image-paint2": (
+        {"prompt": "lemonade stand poster, bright hand-drawn lettering",
+         "path": "images/lemonade-poster.png"},
+        {"prompt": "بوستر بائعة ليمون، كتابة يدوية ملوّنة مرحة",
+         "path": "images/lemonade-poster-ar.png"}),
+    "image-drawing-tool": (
+        {"prompt": "a fluffy orange cat on a windowsill, simple style",
+         "path": "images/orange-cat.png"},
+        {"prompt": "قطة برتقالية كثيفة على حافة نافذة، ستايل بسيط",
+         "path": "images/orange-cat-ar.png"}),
+    "video-local-clip": (
+        {"prompt": "colorful birthday candles being blown out, warm light",
+         "path": "videos/birthday-reel.mp4"},
+        {"prompt": "شموع عيد ميلاد ملوّنة تنطفئ، إضاءة دافئة",
+         "path": "videos/birthday-reel-ar.mp4"}),
+    "video-quality": (
+        {"prompt": "ocean waves rolling onto a sandy beach, daylight",
+         "path": "videos/ocean-waves.mp4"},
+        {"prompt": "أمواج البحر تتدحرج على شاطئ رملي، نهاراً",
+         "path": "videos/ocean-waves-ar.mp4"}),
+    "video-audio-recorder": (
+        {"prompt": "raindrops running down a window at night, blurred city lights",
+         "path": "videos/rain-window.mp4"},
+        {"prompt": "قطرات مطر تنزل على شباك بالليل، أضواء المدينة مشوشة",
+         "path": "videos/rain-window-ar.mp4"}),
+    "read-image-ocr": (
+        {"path": "receipt.png"}, {"path": "receipt.png"}),
+    "read-image-text-reader": (
+        {"path": "screenshot.png"}, {"path": "screenshot.png"}),
+    "edit-image-editor": (
+        {"path": "photo.jpg", "output": "photo-gray.png", "op": "grayscale"},
+        {"path": "photo.jpg", "output": "photo-gray.png", "op": "grayscale"}),
+    "edit-image-paint": (
+        {"path": "banner.png", "output": "banner-800.png", "op": "resize", "width": 800},
+        {"path": "banner.png", "output": "banner-800.png", "op": "resize", "width": 800}),
+    "read-file": (
+        {"path": "notes.txt"}, {"path": "notes.txt"}),
+    "read-files": (
+        {"path": "config.txt"}, {"path": "config.txt"}),
+    "memory-remember": (
+        {"action": "save", "kind": "preference", "topic": "food",
+         "text": "no pineapple on pizza"},
+        {"action": "save", "kind": "preference", "topic": "food",
+         "text": "لا أناناس على البيتزا"}),
+    "memory-note": (
+        {"action": "save", "kind": "fact", "topic": "routine",
+         "text": "wakes up at 5am"},
+        {"action": "save", "kind": "fact", "topic": "routine",
+         "text": "يستيقظ في الخامسة صباحاً"}),
+    "emoji-sticker-maker": (
+        {"prompt": "smiling face with party hat and confetti, bright colors",
+         "path": "images/party-emoji.png"},
+        {"prompt": "وجه مبتسم بقبعة حفط وقصاصات ملوّنة",
+         "path": "images/party-emoji-ar.png"}),
+    "emoji-maker": (
+        {"prompt": "sleepy koala face, round simple style",
+         "path": "images/koala-emoji.png"},
+        {"prompt": "وجه كوالا نعسان، ستايل مدوّر بسيط",
+         "path": "images/koala-emoji-ar.png"}),
+}
+
+# No tool is right: a wrong-name suggestion must be answered with a PLAIN
+# final (the math control case and the congratulations case).
+_NEAR_MISS_FINALS = {
+    "math": (
+        '{"tool": "math", "arguments": {"operation": "times", "numbers": [12, 7]}}',
+        ("Another bot answered 12 times 7 with this. Answer me directly, no tool: {S}",
+         "بوت ثاني جاوب سؤال 12 × 7 بهذا. جاوبني مباشرة بدون أدوات: {S}"),
+        ("12 times 7 is 84.", "12 × 7 = 84.")),
+    "math2": (
+        '{"tool": "math", "arguments": {}}',
+        ("Should I call this for homework, or do you just answer? {S} What is 15 plus 27?",
+         "أستدعي هذا للواجب أم تجاوب مباشرة؟ {S} كم 15 زائد 27؟"),
+        ("15 plus 27 is 42 - I answer directly, no tool call needed.",
+         "15 زائد 27 يساوي 42 - أجاوب مباشرة بدون أدوات.")),
+    "registration": (
+        '{"tool": "registration", "arguments": {"type": "driving_license", "hours": "10"}}',
+        ("Why did you suggest this? {S} I only wanted you to congratulate me - I finally got my driving license!",
+         "ليش اقترحت هذا؟ {S} أنا بس أبغاك تهنّئني - أخيراً جبت رخصة القيادة!"),
+        ("Congratulations on getting your driving license! That is a real milestone - well earned.",
+         "مبروك على الرخصة! إنجاز حقيقي وتستاهله.")),
+    "registration2": (
+        '{"tool": "registration", "arguments": {}}',
+        ("The other chat replied with just this when I said I passed my exam: {S} Say it properly.",
+         "الشات الثاني رد بهذا وبس لما قلت نجحت باختباري: {S} قلها بشكل سليم."),
+        ("Congratulations on passing your exam! All that studying paid off.",
+         "مبروك النجاح في الاختبار! كل المذاكرة أثمرت.")),
+}
+
+
+def _near_miss_call(name: str, args: dict) -> str:
+    return json.dumps({"tool": name, "arguments": args}, ensure_ascii=False)
+
+
+def _near_miss_episode(name: str, system: str, user: str, assistant: str) -> dict:
+    return {"messages": [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+        {"role": "assistant", "content": assistant},
+    ], "source": name}
+
+
+def near_miss_correction_episodes() -> list[dict]:
+    """Contrastive corrections for the invented tool names the 1.5B emitted
+    in the 2026-09-13 v4 tuned exam (paint, local_clip, audio_recorder,
+    file, math, registration, drawing_tool, video_quality).
+
+    LOSS-SAFE SHAPE (soup trains every assistant turn): the wrong name appears
+    ONLY in user turns (masked from loss); the final assistant turn - the
+    causal-loss target - is always a REAL file_tools.py call, or a plain
+    final when no tool fits. 16 call families x EN/AR + 4 final families
+    x EN/AR = 36 episodes.
+    """
+    episodes: list[dict] = []
+    for entry in _NEAR_MISS_CALL_TOOLS:
+        family, real_tool = entry.split("|", 1)
+        snippet = _NEAR_MISS_SNIPPETS[family]
+        for lang in ("en", "ar"):
+            system = SYSTEM_EN if lang == "en" else SYSTEM_AR
+            user_tmpl = _NEAR_MISS_USERS[family][0 if lang == "en" else 1]
+            args = _NEAR_MISS_ARGS[family][0 if lang == "en" else 1]
+            user = user_tmpl.replace("{S}", snippet + " ")
+            episodes.append(_near_miss_episode(
+                f"nearmiss-{family}-{lang}", system, user,
+                _near_miss_call(real_tool, args)))
+    for family, (snippet, (user_en, user_ar), (final_en, final_ar)) \
+            in _NEAR_MISS_FINALS.items():
+        for lang in ("en", "ar"):
+            system = SYSTEM_EN if lang == "en" else SYSTEM_AR
+            user = (user_en if lang == "en" else user_ar) \
+                .replace("{S}", snippet + " ")
+            final = final_en if lang == "en" else final_ar
+            episodes.append(_near_miss_episode(
+                f"nearmiss-{family}-{lang}", system, user,
+                json.dumps({"tool": "final", "content": final},
+                           ensure_ascii=False)))
     return episodes
 
 
@@ -810,6 +1073,14 @@ def _sanitize_tool_messages(messages: list[dict], stats: dict) -> list[dict]:
         if name in FOREIGN_TOOLS:
             stats["foreign_tool_turns_dropped"] = \
                 stats.get("foreign_tool_turns_dropped", 0) + 1
+            skip_next_user_result = True
+            continue
+        if name in NEAR_MISS_TOOLS:
+            # An invented tool name in an assistant turn IS the disease the
+            # v4 exam exposed (paint/local_clip/... scored 0/5 on media).
+            # Never let it into the file, even if the JSON is well-formed.
+            stats["near_miss_tool_turns_dropped"] = \
+                stats.get("near_miss_tool_turns_dropped", 0) + 1
             skip_next_user_result = True
             continue
         if valid(text, name):
@@ -1210,6 +1481,68 @@ def media_floor_failures(counts: dict[str, int]) -> list[str]:
     ]
 
 
+# Near-miss floors (2026-09-13): contrastive correction episodes only work
+# if every wrong-name family the exam actually hit has its correction in the
+# written file. Counted on WRITTEN rows - the same contract as MEDIA_FLOORS.
+NEAR_MISS_FLOORS = {
+    "generate_image": 4,   # paint x2, drawing_tool (+paint edit reuse)
+    "generate_video": 6,   # local_clip, video_quality, audio_recorder
+    "read_image": 2,       # ocr, text_reader
+    "edit_image": 2,       # image_editor, paint-resize
+    "read_file": 2,        # file, read_files
+    "memory": 2,           # remember, note
+    "generate_emoji": 2,   # sticker_maker, emoji_maker
+}
+
+
+def near_miss_rows(records: list[dict]) -> list[dict]:
+    """Written rows that are near-miss correction episodes (by source tag)."""
+    return [r for r in records
+            if str(r.get("source", "")).startswith("nearmiss-")]
+
+
+def near_miss_tool_counts(records: list[dict]) -> dict[str, int]:
+    """Per-real-tool count over near-miss correction rows' FINAL assistant
+    turn (the causal-loss target the exam grades)."""
+    counts = {tool: 0 for tool in NEAR_MISS_FLOORS}
+    for record in near_miss_rows(records):
+        last = next((str(m.get("content", ""))
+                     for m in reversed(record.get("messages", []))
+                     if m.get("role") == "assistant"), "")
+        match = _TOOL_HEAD_RE.match(last.strip())
+        if match and match.group(1) in counts:
+            counts[match.group(1)] += 1
+    return counts
+
+
+def near_miss_floor_failures(counts: dict[str, int]) -> list[str]:
+    """Unmet near-miss floors (empty = pass)."""
+    return [
+        f"{tool}: {counts.get(tool, 0)} corrections (floor {floor})"
+        for tool, floor in sorted(NEAR_MISS_FLOORS.items())
+        if counts.get(tool, 0) < floor
+    ]
+
+
+def near_miss_leak_check(records: list[dict]) -> list[str]:
+    """THE loss-safety tripwire: a wrong name must never appear in an
+    ASSISTANT turn of any written row (soup trains every assistant turn -
+    a wrong name there would be trained as the protocol itself). Wrong
+    names are allowed only in user turns, where they provide the contrast."""
+    offenders: list[str] = []
+    for record in records:
+        for message in record.get("messages", []):
+            if message.get("role") != "assistant":
+                continue
+            text = str(message.get("content", "")).strip()
+            match = _TOOL_HEAD_RE.match(text)
+            if match and (match.group(1) in NEAR_MISS_TOOLS
+                          or match.group(1) in FOREIGN_TOOLS):
+                offenders.append(str(record.get("source", "?")))
+                break
+    return offenders
+
+
 def build(out_path: Path) -> dict:
     exam_hashes = load_exam_prompts(DEFAULT_EXAM)
     all_records: list[dict] = []
@@ -1319,6 +1652,16 @@ def build(out_path: Path) -> dict:
     report["media_floors_ok"] = not floor_failures
     if floor_failures:
         report["media_floor_failures"] = floor_failures
+    # Near-miss gates: corrections present per family + the loss-safety
+    # tripwire (wrong names never in assistant turns - 2026-09-13 lesson).
+    nm_counts = near_miss_tool_counts(written)
+    nm_failures = near_miss_floor_failures(nm_counts)
+    nm_leaks = near_miss_leak_check(written)
+    report["near_miss_tool_counts"] = nm_counts
+    report["near_miss_floors_ok"] = not nm_failures
+    if nm_failures:
+        report["near_miss_floor_failures"] = nm_failures
+    report["near_miss_assistant_leaks"] = nm_leaks
     return report
 
 
@@ -1335,6 +1678,18 @@ def main() -> int:
               file=sys.stderr)
         for failure in report.get("media_floor_failures", []):
             print(f"  - {failure}", file=sys.stderr)
+        return 2
+    if not report.get("near_miss_floors_ok", False) \
+            or report.get("near_miss_assistant_leaks"):
+        # The 2026-09-13 lesson: without contrastive corrections the 1.5B
+        # invents plausible tool names (paint/local_clip/...); and a wrong
+        # name in an ASSISTANT turn would be trained as the protocol itself.
+        print("NEAR-MISS GATE FAILED - corrections missing or loss-unsafe:",
+              file=sys.stderr)
+        for failure in report.get("near_miss_floor_failures", []):
+            print(f"  - {failure}", file=sys.stderr)
+        for leak in report.get("near_miss_assistant_leaks", []):
+            print(f"  - wrong tool name in ASSISTANT turn: {leak}", file=sys.stderr)
         return 2
     return 0
 

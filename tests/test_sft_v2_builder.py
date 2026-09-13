@@ -569,3 +569,114 @@ def test_build_report_includes_media_floor_status() -> None:
     assert builder.MEDIA_FLOORS["edit_image"] >= 6
     assert builder.MEDIA_FLOORS["read_image"] >= 6
     assert builder.MEDIA_FLOORS["generate_emoji"] >= 4
+
+
+# ---------------------------------------------------------------------------
+# near-miss corrections (2026-09-13: v4 tuned exam invented tool names -
+# paint, local_clip, audio_recorder, file, math, registration - and scored
+# media 0/5 despite the calls being in the data; contrastive episodes fix it)
+# ---------------------------------------------------------------------------
+
+# The REAL file_tools.py registry - any tool name outside this set in an
+# assistant turn is a behavior Aali cannot execute.
+_REAL_TOOLS = frozenset({
+    "list_files", "read_file", "write_file", "append_file",
+    "replace_in_file", "make_directory", "move_file", "delete_file",
+    "search_files", "run_command", "read_image", "read_document",
+    "analyze_video", "make_n8n_workflow", "list_skills", "use_skill",
+    "fetch_url", "web_search", "generate_image", "generate_video",
+    "edit_image", "edit_video", "machine_ops", "memory", "generate_emoji",
+    "final",
+})
+
+
+def test_near_miss_episodes_exist_for_every_exam_invention() -> None:
+    """Every wrong name the v4 exam actually emitted must have a correction
+    episode family (EN + AR)."""
+    episodes = builder.near_miss_correction_episodes()
+    # family source tags hyphenate the invented name (video-local-clip);
+    # normalize so local_clip matches local-clip.
+    by_family = [e["source"].rsplit("-", 1)[0].replace("_", "-")
+                 for e in episodes]
+    for invented in ("paint", "local_clip", "audio_recorder", "drawing_tool",
+                     "video_quality", "file", "math", "registration"):
+        assert any(invented.replace("_", "-") in family
+                   for family in by_family), invented
+
+
+def test_near_miss_wrong_names_never_in_assistant_turns() -> None:
+    """THE loss-safety contract: soup puts causal loss on EVERY assistant
+    turn, so a wrong name there would be TRAINED as the protocol itself.
+    Wrong names may appear only in user turns; the trained target is always
+    a real registry call (or a plain final)."""
+    for episode in builder.near_miss_correction_episodes():
+        users = " ".join(m.get("content", "") for m in episode["messages"]
+                         if m.get("role") == "user")
+        assert any(name in users for name in builder.NEAR_MISS_TOOLS), \
+            episode["source"]
+        for message in episode["messages"]:
+            if message.get("role") != "assistant":
+                continue
+            text = str(message.get("content", "")).strip()
+            match = builder._TOOL_HEAD_RE.match(text)
+            if match:
+                assert match.group(1) in _REAL_TOOLS, \
+                    (episode["source"], match.group(1))
+
+
+def test_near_miss_call_targets_match_file_tools_schemas() -> None:
+    """The corrected calls must use the REAL required arguments (generate_emoji
+    takes prompt, edit_image takes path+output+op, memory takes action...)."""
+    for episode in builder.near_miss_correction_episodes():
+        last = json.loads(episode["messages"][-1]["content"])
+        tool, args = last["tool"], last.get("arguments", {})
+        if tool == "generate_image" or tool == "generate_video":
+            assert set(args) == {"prompt", "path"}, episode["source"]
+        elif tool == "generate_emoji":
+            assert "prompt" in args and "path" in args, episode["source"]
+            assert "description" not in args
+        elif tool == "edit_image":
+            assert {"path", "output", "op"} <= set(args), episode["source"]
+        elif tool == "memory":
+            assert args.get("action") in {"save", "recall", "forget",
+                                          "summary"}, episode["source"]
+
+
+def test_near_miss_floors_and_leak_check_helpers() -> None:
+    rows = builder.generated_episodes()
+    counts = builder.near_miss_tool_counts(rows)
+    assert builder.near_miss_floor_failures(counts) == [], counts
+    assert builder.near_miss_leak_check(rows) == []
+    # a wrong name in an ASSISTANT turn must be flagged
+    poisoned = [{"messages": [
+        _msg("user", "draw"),
+        _msg("assistant", '{"tool": "paint", "arguments": {}}')],
+        "source": "bad-row"}]
+    assert builder.near_miss_leak_check(poisoned) == ["bad-row"]
+    # and a below-floor count must be named
+    short = dict.fromkeys(builder.NEAR_MISS_FLOORS, 99)
+    short["generate_image"] = 1
+    failures = builder.near_miss_floor_failures(short)
+    assert any("generate_image" in f and "floor 4" in f for f in failures)
+
+
+def test_near_miss_episodes_survive_the_full_build(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end: a build with all other sources empty still writes the
+    near-miss corrections, passes both floor gates, and drops nothing."""
+    for attr in ("DEFAULT_SFT_MIX", "DEFAULT_TOOL_SFT", "DEFAULT_MENTOR",
+                 "DEFAULT_MENTOR_LAB"):
+        monkeypatch.setattr(builder, attr, tmp_path / "missing.jsonl")
+    monkeypatch.setattr(builder, "DEFAULT_CONVOS", tmp_path / "convos.jsonl")
+    monkeypatch.setattr(builder, "DEFAULT_ARABIC_SEED", tmp_path / "ar.jsonl")
+    monkeypatch.setattr(builder, "DEFAULT_EXAM", tmp_path / "exam.jsonl")
+    out_path = tmp_path / "sft_v2.jsonl"
+    report = builder.build(out_path)
+    written = [json.loads(line) for line in
+               out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    sources = [r["source"] for r in written]
+    assert sum(1 for s in sources if s.startswith("nearmiss-")) == 40
+    assert report["near_miss_floors_ok"] is True
+    assert report["near_miss_assistant_leaks"] == []
+    assert report["media_floors_ok"] is True
+    assert report["final"]["dropped_too_long"] == 0
