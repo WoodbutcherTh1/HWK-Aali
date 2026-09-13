@@ -26,6 +26,7 @@ model/scratch/final.pt (the runtime's own-brain path).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -43,7 +44,10 @@ SFT_STATE = Path("D:/hwk-models/aali-sft-4k")
 SFT_DATA = Path("D:/hwk-data/soup/sft_v2.jsonl")
 TOKENIZER = Path("D:/hwk-data/tokenizer/hwk_spm.model")
 DONE_MARKER_TEXT = "=== soup pipeline done ==="
-MAX_WAIT_S = 8 * 3600
+# 2026-09-13 lesson: the 8h GPU-wait timed out while the promoted brain held
+# the card all day. The wait window is now env-tunable so a relaunch can cover
+# verdict + overnight human decision (default unchanged at 8h).
+MAX_WAIT_S = int(float(os.getenv("AALI_PHASE_C_MAX_WAIT_H", "8")) * 3600)
 POLL_S = 120
 
 

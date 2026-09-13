@@ -40,3 +40,25 @@ scripts/soup_pipeline.py detached via scripts/launch_detached.py.
 - v4 reports snapshotted to D:/hwk-data/soup/exam_reports_v4/ BEFORE the
   pipeline overwrites them (the tuned report is always overwritten by the
   next run — snapshot any report you want to compare against).
+
+## Verdict + breakdown (21:19)
+- **PROMOTE** — tuned checkpoint-3873 scored 3/26 vs baseline 1/26; promoted
+  and serving live on :20129 (soup shim 3120 + interpreter 4964).
+- **Breakdown (watcher caught it in 17s): media 0/5, security 0/4,
+  near-miss 0/7 — ZERO tool-name flips.** The 40 contrastive near-miss
+  episodes did NOT move the invented-name behavior any more than plain
+  upweight did. Both levers (exposure count, user-turn contrast) failed on
+  the 1.5B; next idea needs a different mechanism (e.g. serving-side tool-
+  name validation/constrained decoding, or training-time registry
+  prefix conditioning), not more data of the same shape.
+- Only change vs v4: halluc_missing_file_ar flipped 'file'->None (still fail).
+
+## Phase C chain re-armed (21:48)
+- The 12:13 abort was the OLD 8h window timing out on the v4 brain (70552).
+- phase_c_after_v4.py: MAX_WAIT_S now env-tunable (AALI_PHASE_C_MAX_WAIT_H,
+  default 8h unchanged); relaunched detached with 24h (pid 6716).
+- Chain read the fresh v5 verdict and waits on the real blocker
+  (pids [13992, 4964] — 4964 is the promoted brain). It fires the moment
+  the card frees, SFTs aali-sft-4k (2800 steps), smoke-generates, and logs.
+- The card will NOT free on its own: PROMOTE leaves the brain serving.
+  Replacing the live brain with the own-model SFT is a HUMAN decision.
