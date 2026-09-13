@@ -149,6 +149,23 @@ the user exactly what you are about to do and get an explicit yes before
 passing force=true. Aali's own training runtimes (python/node) are
 protected: never try to stop them.
 
+You RUN COMMANDS on the user's behalf with run_command: a workspace-sandboxed,
+allow-listed shell (python, pip, pytest, node, npm, npx, git, gcc/cargo/go/dotnet
+and more) for building, testing and running the user's projects. Use it to
+install a project's dependencies (pip install -r requirements.txt, npm install),
+run its test suite, start a dev server or a built game/app for the user to try,
+and inspect results (git log, directory listings) before answering. Keep the
+cwd inside the workspace, prefer read-only commands first, never run anything
+destructive or system-wide, and always report the real exit status/output you
+saw — a failed build is reported as a failed build, with the error shown.
+
+You BUILD apps and games for the user end to end: write the code with the file
+tools, install dependencies with run_command, run/test it with run_command, and
+fix errors from real output before handing it over. Small is better than big:
+single-file games (python/pygame, html/js), CLI tools, small web apps you can
+verify by actually running them. Before writing a scaffold from scratch, call
+list_skills and load the build-apps skill — it has the proven recipe.
+
 You have persistent long-term memory through the memory tool (actions:
 save, recall, forget, summary) that survives restarts and new
 conversations. When the user states something durable - a decision, rule,
@@ -245,6 +262,23 @@ what you cannot do.
 لديك أيضًا مهارات (skills) وأدوات ويب: استخدم list_skills لرؤية المهارات المتاحة ثم use_skill(name) لتحميل تفاصيلها إن كانت مناسبة للمهمة قبل أن تخترع خطوات من عندك. استخدم web_search عندما تحتاج معلومة حديثة أو يطلب المستخدم البحث، ثم fetch_url على أفضل نتيجة لقراءة الصفحة فعليًا — لا تختلق محتوى رابط أبدًا. لمهام الصوت والفيديو والـ OCR استخدم analyze_video و read_image فهما يستدعيان ffmpeg وWhisper والتعرف على النص تلقائيًا؛ لا تطلب من المستخدم تثبيت أو تشغيل هذه الأدوات بنفسه.
 
 تستطيع أيضًا تشغيل الجهاز نفسه عبر machine_ops: فتح التطبيقات والملفات (open)، تثبيت أو إزالة البرامج (install/uninstall)، عرض أو إيقاف العمليات (list_processes/kill_process)، وقراءة حالة الجهاز (system_info). الفتح والعرض والقراءة آمنة دائمًا؛ أما install و uninstall و kill_process فهي تغيير دائم في النظام، لذلك اشرح للمستخدم بالضبط ما ستفعله واحصل على موافقة صريحة قبل force=true. عمليات تدريب آلي نفسها (python/node) محمية: لا تحاول إيقافها أبدًا.
+
+تنفّذ أوامر حقيقية نيابة عن المستخدم عبر run_command: صَدَف مقيدة بمجلد العمل
+وقائمة أوامر مسموحة (python و pip و pytest و node و npm و npx و git والمترجمات
+مثل gcc/cargo/go/dotnet) لبناء المشاريع واختبارها وتشغيلها. استخدمها لتثبيت
+اعتماديات المشروع (pip install -r requirements.txt، npm install)، وتشغيل
+اختباراته، وإطلاق خادم التطوير أو اللعبة الجاهزة ليجربها المستخدم، وفحص النتائج
+(git log، عرض المجلدات) قبل أن تجيب. أبقِ مجلد التنفيذ داخل مساحة العمل، وابدأ
+بالأوامر الآمنة للقراءة فقط، ولا تشغّل شيئًا مدمِّرًا أو على مستوى النظام،
+وأبلغ دائمًا بحالة الخروج والمخرجات الحقيقية التي رأيتها — فشل البناء يُبلَّغ
+كفشل مع إظهار رسالة الخطأ.
+
+تبني للمستخدم تطبيقات وألعابًا من البداية للنهاية: اكتب الكود بأدوات الملفات،
+وثبّت الاعتماديات بـ run_command، وشغّلها واختبرها بـ run_command، وأصلح
+الأخطاء من المخرجات الحقيقية قبل التسليم. الصغير أفضل من الكبير: ألعاب من ملف
+واحد (python/pygame، html/js)، أدوات سطر أوامر، تطبيقات ويب صغيرة تستطيع
+التحقق منها بتشغيلها فعلاً. وقبل كتابة هيكل من الصفر نادِ list_skills
+وحمّل مهارة build-apps — فيها الوصفة المجرَّبة.
 
 لديك ذاكرة طويلة الأمد عبر أداة memory (إجراءات: save و recall و forget و summary) تبقى بعد إغلاق البرنامج وفي المحادثات الجديدة. عندما يخبرك المستخدم بشيء دائم — قرار أو قاعدة أو تفضيل أو معلومة يتوقع أن تعرفها لاحقًا («من الآن فصاعدًا…»، «تذكّر أن…»، «دائمًا/أبدًا…») — احفظه بـ memory save. وإذا أشار إلى شيء قاله سابقًا فاستخدم memory recall قبل أن تقول إنك لا تعرف — لا تنكر معرفة ما أخبرك به دون فحص الذاكرة. اتبع أحدث تعليمة عند تعارض تعليمتين في نفس الموضوع وأخبر المستخدم بما تغيّر.
 
@@ -410,7 +444,8 @@ def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
                 "• 📄 المستندات: PDF / Word / Excel — قراءة وتلخيص بالعربية\n"
                 "• 🖼️ الوسائط: فهم الصور (OCR)، توليد وتحرير الصور، تحليل وتحرير الفيديو\n"
                 "• 🧠 ذاكرة دائمة: أتذكر قراراتك وتفضيلاتك حتى بعد إغلاق البرنامج\n"
-                "• 🧩 سير عمل n8n: أصنع لك ملفات أتمتة جاهزة للاستيراد\n\n"
+                "• 🧩 سير عمل n8n: أصنع لك ملفات أتمتة جاهزة للاستيراد\n"
+                "• 🎮 بناء تطبيقات وألعاب: أكتب الكود وأثبّت الاعتماديات وأشغّلها وأصلحها أمامك\n\n"
                 "قل لي ماذا تريد بالعربي أو الإنجليزي — وسأنفّذ خطوة بخطوة مع إبلاغك بكل شيء أفعله."
             )}
         return "final", {"content": (
@@ -422,8 +457,41 @@ def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
             "• Documents: PDF / Word / Excel reading and summaries\n"
             "• Media: image understanding (OCR), image generation & editing, video analysis\n"
             "• Persistent memory: I remember your decisions across restarts\n"
-            "• n8n workflows: ready-to-import automation files\n\n"
+            "• n8n workflows: ready-to-import automation files\n"
+            "• App & game building: I write the code, install dependencies, run and fix it\n\n"
             "Tell me what you want in Arabic or English — I'll execute step by step and keep you posted."
+        )}
+
+    # "Can you run commands / build apps & games?" — deterministic yes with
+    # the real capabilities, so the answer is always honest and complete.
+    build_triggers = (
+        "can you run commands", "can you run code", "do you run commands",
+        "run commands on my behalf", "execute commands", "can you build",
+        "can you make games", "can you make apps", "can you build apps",
+        "can you build games", "build me a game", "build me an app",
+        "make me a game", "make me an app", "create an app", "create a game",
+        "هل تستطيع تنفيذ أوامر", "هل تنفذ أوامر", "هل تشغل أوامر",
+        "هل تستطيع بناء", "هل تستطيع صنع", "هل تصنع لعبة", "هل تصنع تطبيق",
+        "هل تبني تطبيق", "هل تبني لعبة", "اصنع لي لعبة", "اصنع لي تطبيق",
+        "اعمل لي لعبة", "اعمل لي تطبيق", "ابن لي لعبة", "ابن لي تطبيق",
+        "سوي لي لعبة", "سوي لي تطبيق",
+    )
+    if any(t in lower or t in message for t in build_triggers) and len(message) < 160:
+        arabic_user = any("\u0600" <= ch <= "\u06FF" for ch in message)
+        if arabic_user:
+            return "final", {"content": (
+                "نعم ✦ أُنفّذ أوامر حقيقية وأبني تطبيقات وألعابًا كاملة:\n\n"
+                "• ⚙️ أوامر حقيقية: بايثون و pip و node و npm و git والمترجمات — داخل مجلد العمل\n"
+                "• 🎮 ألعاب وتطبيقات: أكتب الكود، أثبّت الاعتماديات، أشغّلها، وأصلح الأخطاء من مخرجاتها الحقيقية\n"
+                "• ✅ أختبر قبل التسليم: أُشغّل المشروع وأتحقق أنه يعمل قبل أن أقول «جاهز»\n\n"
+                "قل لي فكرة اللعبة أو التطبيق وسأبدأ فورًا."
+            )}
+        return "final", {"content": (
+            "Yes ✦ I run real commands and build complete apps and games:\n\n"
+            "• Real commands: python, pip, node, npm, git and compilers — inside the workspace\n"
+            "• Apps & games: I write the code, install dependencies, run it, and fix errors from real output\n"
+            "• Tested before delivery: I run the project and verify it works before saying \"done\"\n\n"
+            "Tell me your app or game idea and I'll start right away."
         )}
 
     # "List my files" — deterministic, always correct.

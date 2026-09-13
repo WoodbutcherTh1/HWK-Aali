@@ -575,7 +575,25 @@ in parallel:
   من ~31MB إلى ~26MB — دليل تحذيري مفيد). ثم انسخ dist/*.exe إلى
   %LOCALAPPDATA%\Programs\AaliDesktop\ (نمط التحديث المعتمد).
 
-— Last updated: 2026-09-13 (**Tool-name guard (LIVE)**: file_agent/tool_guard.py —
+— Last updated: 2026-09-13 (**Capability advertisement + build-apps skill (LIVE)**:
+Aali's own system prompt never mentioned run_command even though the tool was
+registered — the brain was not explicitly told it runs commands for the user or
+builds apps/games. SYSTEM_PROMPT gained EN+AR paragraphs: run_command is a
+workspace-sandboxed allow-listed shell (python/pip/pytest/node/npm/npx/git/
+compilers) for installing deps, running tests, launching dev servers and
+verifying results, with read-only-first + real-exit-status honesty rules; and an
+explicit "You BUILD apps and games end to end" paragraph (write with file tools,
+install deps, run/test, fix from REAL output, small-first shapes, load the
+build-apps skill before scaffolding from scratch). The deterministic capability
+answers ("what can you do?") now list app & game building (EN+AR), and a new
+deterministic block answers "can you run commands / build games?" (EN+AR
+triggers incl. اصنع لي لعبة/تطبيق) with a yes + the real command set.
+skills/build-apps.md added: clarify→plan→write→install→run→fix→report workflow,
+single-file-first shapes (pygame/html/CLI), no heavy frameworks unasked,
+honest unverified-reporting rule. Tests: tests/test_capabilities_advertised.py
+(11); suite 398.
+
+Also 2026-09-13 (**Tool-name guard (LIVE)**: file_agent/tool_guard.py —
 the serving-side validator closing the invented-tool-name hole the v4/v5
 tuned exams proved training cannot fix (x3 upweight AND 40 contrastive
 near-miss episodes both left media 0/5 with zero tool-name flips; conclusion:
