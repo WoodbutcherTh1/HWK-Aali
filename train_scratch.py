@@ -266,15 +266,15 @@ SCRATCH_INSTRUCTION = (
 SCRATCH_SYSTEM_LINE = "System: You are Aali.\n"
 
 
-def _sft_record_text(record: dict[str, object]) -> str:
-    """Render an SFT record in the EXACT shape the runtime serves its scratch
-    brain (agent_loop._local_model_loop + _scratch_prompt): a System line,
-    THEN the tool list (serve time puts "Available tools:" before the
-    conversation turns), then role lines, then the JSON-protocol instruction
-    and the Assistant: generation anchor. The 2026-09-14 night run proved two
-    format gaps are fatal: training on a bare Role:/content join while serving
-    a different prompt shape left the instruction out-of-distribution, and a
-    messages-first tool list sat out of position.
+def _sft_prompt_text(record: dict[str, object]) -> str:
+    """Serve-shape PROMPT: a System line, THEN the tool list (serve time puts
+    "Available tools:" before the conversation turns), then the turns LEADING
+    UP TO the final assistant answer (that answer is the completion, not
+    context), then the JSON-protocol instruction ending at the Assistant:
+    anchor - exactly what agent_loop._local_model_loop + _scratch_prompt
+    prepend at generation time. The 2026-09-14 night run proved format gaps
+    here are fatal: the instruction must be IN the prompt, not somewhere
+    after the answer.
     """
     try:  # live tool names when the agent package is importable
         from file_agent.file_tools import get_tool_definitions as _defs
@@ -283,21 +283,116 @@ def _sft_record_text(record: dict[str, object]) -> str:
         tools_line = f"Available tools: {', '.join(n for n in names if n)}\n"
     except Exception:
         tools_line = ""
-    return (SCRATCH_SYSTEM_LINE + tools_line + _message_text(record)
-            + SCRATCH_INSTRUCTION)
+    messages = record.get("messages")
+    if not isinstance(messages, list):
+        raise ValueError("Each JSONL record must contain a messages list")
+    leading = list(messages)
+    while (leading and isinstance(leading[-1], dict)
+           and leading[-1].get("role") == "assistant"):
+        leading.pop()  # the final answer is the completion, never prompt text
+    parts = [f"{m.get('role', '').capitalize()}: {m.get('content', '')}"
+             for m in leading if isinstance(m, dict)]
+    turns = "\n".join(parts) + ("\n" if parts else "")
+    return SCRATCH_SYSTEM_LINE + tools_line + turns + SCRATCH_INSTRUCTION
+
+
+def _sft_completion_text(record: dict[str, object]) -> str:
+    """The FINAL assistant turn - the text the model must generate after the
+    anchor at serve time (a natural answer or the JSON tool/final object).
+    Earlier turns stay in the prompt so multi-turn episodes train
+    turn-by-turn, mirroring how history accumulates at serving."""
+    messages = record.get("messages")
+    if not isinstance(messages, list):
+        raise ValueError("Each JSONL record must contain a messages list")
+    for message in reversed(messages):
+        if (isinstance(message, dict) and message.get("role") == "assistant"
+                and isinstance(message.get("content"), str)):
+            return message["content"]
+    raise ValueError("Record has no assistant turn to complete")
+
+
+def _sft_record_text(record: dict[str, object]) -> str:
+    """Full training row: PROMPT + " " + COMPLETION. The tokenizer's EOS
+    lands after the completion (encode add_special_tokens=True), so the model
+    learns to answer after the anchor and STOP. The 09:10 run (run 3) ended
+    every row on the bare anchor (the answer sat BEFORE the instruction), so
+    the model learned "anchor -> EOS" and served empty replies. The completion
+    joins with a single space so the row reads "Assistant: <answer>" exactly
+    like serve-time generation after the anchor."""
+    return _sft_prompt_text(record) + " " + _sft_completion_text(record)
+
+
+def _sft_loss_mask(record: dict[str, object]) -> tuple[str, str]:
+    """Split the full row text into (PROMPT, COMPLETION) for completion-only
+    loss masking. Returns (row_text, completion_text) where row_text is what
+    _sft_record_text returns - the completion is the row's SUFFIX, so masking
+    is just 'ignore everything before len(row) - len(completion)'.
+    Kept as a function so the contract has a single pin-able definition and
+    the tests can verify prompt/completion agree with _sft_record_text."""
+    completion = _sft_completion_text(record)
+    row = _sft_record_text(record)
+    return row, completion
 
 
 class SftDataset:
-    def __init__(self, records: list[dict[str, object]], tokenizer, context: int, seed: int) -> None:
+    """Tokenized SFT rows with COMPLETION-ONLY loss masking.
+
+    Runs 1-3 (2026-09-14) computed loss over the WHOLE row, so the constant
+    boilerplate (System line, tool list, instruction, role lines) dominated
+    the gradient - the model memorized format constants while the answer
+    tokens (the actual task) got a small, diluted share. Every row carries
+    the same prefix, so the boilerplate loss quickly saturates and the
+    remaining signal is tiny. Standard SFT masks the prompt: loss lands only
+    on the completion tokens (+ EOS). Targets for prompt positions are -100
+    (the model's ignore_index), so the learning signal is the answer.
+    """
+
+    def __init__(self, records: list[dict[str, object]], tokenizer, context: int, seed: int,
+                 *, mask_prompt: bool = True) -> None:
         self.context = context
         self.rng = random.Random(seed)
+        self.mask_prompt = mask_prompt
         self.sequences: list[list[int]] = []
+        self.masks: list[list[int]] = []
         for record in records:
-            ids = tokenizer.encode(_sft_record_text(record))
+            row_text, completion = _sft_loss_mask(record)
+            ids = tokenizer.encode(row_text)  # [BOS] row [EOS]
             if len(ids) > context:
-                ids = ids[-context:]  # keep the assistant tail (final answer)
+                # keep the assistant tail (final answer + EOS): rows are
+                # PROMPT + completion, so slicing from the end can only eat
+                # prompt boilerplate - the completion is trained either way.
+                ids = ids[-context:]
+            if len(ids) < 2:
+                continue
+            if self.mask_prompt:
+                # completion-only masking: everything before the completion's
+                # first token is -100 territory. The completion is the row's
+                # SUFFIX followed only by the tokenizer's EOS, so the boundary
+                # is computable without re-tokenizing the prompt: tokenize the
+                # completion alone (add_special_tokens=False) and walk back
+                # from the row's end. Concat-risk (a boundary token merging
+                # prompt+completion) is handled by verifying the tail matches;
+                # on mismatch, fall back to no masking for that row.
+                completion_ids = tokenizer.encode(completion, add_special_tokens=False)
+                # row_ids = [BOS] ... completion [EOS]: the completion must sit
+                # EXACTLY between the prompt and the trailing EOS. Comparing
+                # against the slice BEFORE the EOS (not the raw tail - the raw
+                # tail ends with EOS and can never equal completion_ids).
+                tail_ok = (
+                    len(completion_ids) > 0
+                    and len(ids) > len(completion_ids) + 1
+                    and ids[-(len(completion_ids) + 1):-1] == completion_ids
+                )
+                if tail_ok:
+                    prompt_len = len(ids) - len(completion_ids) - 1  # -1: trailing EOS
+                else:
+                    prompt_len = 0  # rare concat artifact: train the whole row
+                mask = [0] * prompt_len + [1] * (len(ids) - prompt_len)
+            else:
+                mask = [1] * len(ids)
             if len(ids) >= 2:
                 self.sequences.append(ids)
+                self.masks.append(mask)
         if not self.sequences:
             raise SystemExit("SFT dataset is empty after filtering.")
 
@@ -305,11 +400,17 @@ class SftDataset:
         return len(self.sequences)
 
     def batches(self, batch_size: int, pad_id: int) -> Iterator[tuple[Tensor, Tensor]]:
+        """Yield (inputs, targets) with completion-only loss masking baked into
+        targets: prompt positions are -100 (the model's ignore_index) when
+        mask_prompt is on. The last unmasked target of every row is the row's
+        own EOS so the model keeps learning to STOP after the answer."""
         order = list(range(len(self.sequences)))
         while True:
             self.rng.shuffle(order)
             for start in range(0, len(order), batch_size):
-                chunk = [self.sequences[i] for i in order[start : start + batch_size]]
+                idx = order[start : start + batch_size]
+                chunk = [self.sequences[i] for i in idx]
+                chunk_masks = [self.masks[i] for i in idx]
                 # 2026-09-14 lesson (identity-collapse): targets MUST be the
                 # inputs shifted by one. The model computes loss over full-
                 # length logits (hwk_model.model forward: "The dataset
@@ -317,12 +418,23 @@ class SftDataset:
                 # model to copy its input token - loss 0.0009, and the served
                 # brain degenerated to an infinite "::::" attractor. Same
                 # shift contract as _blocks_to_xy (pretrain path).
+                # 2026-09-14 second lesson (diluted gradient): targets for
+                # PROMPT positions are -100 when mask_prompt is on - the
+                # constant boilerplate (System/tools/instruction) must not
+                # dominate the gradient; only the completion (+EOS) teaches.
                 width = max(len(seq) - 1 for seq in chunk)
                 inputs = torch.full((len(chunk), width), pad_id, dtype=torch.long)
                 targets = torch.full((len(chunk), width), -100, dtype=torch.long)
                 for row, seq in enumerate(chunk):
                     inputs[row, : len(seq) - 1] = torch.tensor(seq[:-1], dtype=torch.long)
-                    targets[row, : len(seq) - 1] = torch.tensor(seq[1:], dtype=torch.long)
+                    row_targets = torch.tensor(seq[1:], dtype=torch.long)
+                    row_mask = chunk_masks[row]
+                    if self.mask_prompt:
+                        # shift the mask left with the targets: target position
+                        # t holds token seq[t+1], trained when mask[t+1] == 1
+                        keep = torch.tensor([bool(m) for m in row_mask[1:]], dtype=torch.bool)
+                        row_targets = torch.where(keep, row_targets, torch.tensor(-100, dtype=torch.long))
+                    targets[row, : len(seq) - 1] = row_targets
                 yield inputs, targets
 
 

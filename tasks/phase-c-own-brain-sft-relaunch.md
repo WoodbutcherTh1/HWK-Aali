@@ -1,7 +1,7 @@
 # Phase C — SFT Aali's own brain (relaunch after power-off)
 
 - owner: buffy (this PC, Freebuff night session)
-- status: in-progress (retrain in flight with the shift fix)
+- status: in-progress (run 5 in flight: masking + row-shape + generation guards)
 - started: 2026-09-14 ~00:40 local
 
 ## Why
@@ -40,6 +40,31 @@ both degenerate, which pointed past serving-format to the trainer itself:
 - Retrain launched 07:36 local detached (phase_c_chain.log): loss 0.81 and
   falling at step 120 (vs 0.0009 copy-loss in the broken run), eval_loss
   0.335 declining, ~45k tok/s, ETA ~30 min.
+
+## Run 5 (2026-09-14 evening) — the salad run root-caused: FOUR defects
+Run 4 (this morning's retrain, eval_loss 0.77) produced bilingual word salad
+in the smoke. Three more trainer defects found past the shift bug:
+
+4. **Diluted gradient**: loss ran over the WHOLE row, so the constant
+   boilerplate (System line, tool list, instruction, role lines) dominated
+   the gradient — format memorized, answers weak. SftDataset now carries
+   completion-only loss masks (-100 on prompt targets; the row's EOS stays
+   unmasked so the model learns to STOP; mask_prompt=False = legacy escape).
+5. **Row shape**: rows are PROMPT (System, tools, leading turns, instruction,
+   "Assistant:" anchor) + " " + COMPLETION (the final assistant turn), EOS
+   after the answer (_sft_prompt_text / _sft_completion_text /
+   _sft_record_text; _sft_loss_mask pins the (row, completion) contract).
+6. **Generation guards**: hwk_model/generation.py — CTRL-style repetition
+   penalty 1.15 (generated tokens only, applied before argmax so greedy
+   loops break too) + <unk> banned from sampling (⁇ never spoken;
+   ban_unk=False restores).
+
+Verification: suite 423 green (test_sft_dataset_shift.py rewritten ~20
+locks, new test_generation_guards.py). Run-4 model archived as
+D:/hwk-models/aali-sft-4k.broken-run4-salad; re-bootstrapped from Phase B
+(context-4k, 109.6M weights, fresh optimizer, step=0); chain relaunched
+detached 17:29 local (phase_c_chain.log pid 61356). Early curve: loss ~2.1
+at step 150 and falling, eval 0.98 declining, ~45.7k tok/s, ETA ~30 min.
 
 ## Remaining plan (rest of the window)
 1. When training lands: re-probe with _probe_phase_c_brain.py (serve shape).
