@@ -116,10 +116,14 @@ def smoke_generate() -> str:
     from hwk_model import load_checkpoint  # noqa: E402
     from hwk_model.bpe_tokenizer import load_bpe  # noqa: E402
     from hwk_model.generation import generate_text  # noqa: E402
+    import agent_loop  # noqa: E402
 
     model, _payload = load_checkpoint(SFT_STATE / "final.pt", device="cpu")
     model.eval()
     tokenizer = load_bpe(str(TOKENIZER))
+    # Serve-shape prompt: the 2026-09-14 night probe proved a bare
+    # prompt+instruction sample MISJUDGES the model - the runtime serves
+    # System -> tools -> turns -> instruction, so the smoke must too.
     instruction = (
         "\nReply with either a natural-language answer or exactly one JSON object. "
         'For a tool use {"tool":"tool_name","arguments":{...}}. '
@@ -131,8 +135,13 @@ def smoke_generate() -> str:
     ]
     lines: list[str] = []
     for prompt in prompts:
+        transcript = (
+            f"System: {agent_loop.SYSTEM_PROMPT}\n"
+            f"Available tools: {agent_loop._scratch_tool_summary()}\n"
+            f"User: {prompt}\n"
+        )
         try:
-            sample = generate_text(model, tokenizer, prompt + instruction,
+            sample = generate_text(model, tokenizer, transcript + instruction,
                                    max_new_tokens=96, temperature=0.3)
         except Exception as exc:
             sample = f"<generation failed: {exc}>"

@@ -253,16 +253,51 @@ def _tokens_from_dir(
 # SFT loader (jsonl messages)
 # ---------------------------------------------------------------------------
 
+SCRATCH_INSTRUCTION = (
+    "\nReply with either a natural-language answer or exactly one JSON object. "
+    'For a tool use {"tool":"tool_name","arguments":{...}}. '
+    'For a final JSON answer use {"tool":"final","content":"..."}.'
+    "\nAssistant:")
+
+# Serve time (_local_model_loop) opens the transcript with "System: ...".
+# The full SYSTEM_PROMPT text is constant context that would eat the row
+# token budget, so training rows carry a short System line with the SAME
+# shape instead - the model learns the format, not the prompt text.
+SCRATCH_SYSTEM_LINE = "System: You are Aali.\n"
+
+
+def _sft_record_text(record: dict[str, object]) -> str:
+    """Render an SFT record in the EXACT shape the runtime serves its scratch
+    brain (agent_loop._local_model_loop + _scratch_prompt): a System line,
+    THEN the tool list (serve time puts "Available tools:" before the
+    conversation turns), then role lines, then the JSON-protocol instruction
+    and the Assistant: generation anchor. The 2026-09-14 night run proved two
+    format gaps are fatal: training on a bare Role:/content join while serving
+    a different prompt shape left the instruction out-of-distribution, and a
+    messages-first tool list sat out of position.
+    """
+    try:  # live tool names when the agent package is importable
+        from file_agent.file_tools import get_tool_definitions as _defs
+        names = [d.get("function", {}).get("name") for d in _defs()
+                 if isinstance(d, dict)]
+        tools_line = f"Available tools: {', '.join(n for n in names if n)}\n"
+    except Exception:
+        tools_line = ""
+    return (SCRATCH_SYSTEM_LINE + tools_line + _message_text(record)
+            + SCRATCH_INSTRUCTION)
+
+
 class SftDataset:
     def __init__(self, records: list[dict[str, object]], tokenizer, context: int, seed: int) -> None:
         self.context = context
         self.rng = random.Random(seed)
         self.sequences: list[list[int]] = []
         for record in records:
-            ids = tokenizer.encode(_message_text(record))
+            ids = tokenizer.encode(_sft_record_text(record))
             if len(ids) > context:
                 ids = ids[-context:]  # keep the assistant tail (final answer)
-            self.sequences.append(ids)
+            if len(ids) >= 2:
+                self.sequences.append(ids)
         if not self.sequences:
             raise SystemExit("SFT dataset is empty after filtering.")
 
@@ -275,12 +310,19 @@ class SftDataset:
             self.rng.shuffle(order)
             for start in range(0, len(order), batch_size):
                 chunk = [self.sequences[i] for i in order[start : start + batch_size]]
-                width = max(len(seq) for seq in chunk)
+                # 2026-09-14 lesson (identity-collapse): targets MUST be the
+                # inputs shifted by one. The model computes loss over full-
+                # length logits (hwk_model.model forward: "The dataset
+                # provides the shift"), so targets==inputs here trained the
+                # model to copy its input token - loss 0.0009, and the served
+                # brain degenerated to an infinite "::::" attractor. Same
+                # shift contract as _blocks_to_xy (pretrain path).
+                width = max(len(seq) - 1 for seq in chunk)
                 inputs = torch.full((len(chunk), width), pad_id, dtype=torch.long)
                 targets = torch.full((len(chunk), width), -100, dtype=torch.long)
                 for row, seq in enumerate(chunk):
-                    inputs[row, : len(seq)] = torch.tensor(seq, dtype=torch.long)
-                    targets[row, : len(seq)] = torch.tensor(seq, dtype=torch.long)
+                    inputs[row, : len(seq) - 1] = torch.tensor(seq[:-1], dtype=torch.long)
+                    targets[row, : len(seq) - 1] = torch.tensor(seq[1:], dtype=torch.long)
                 yield inputs, targets
 
 
