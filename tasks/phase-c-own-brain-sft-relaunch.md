@@ -66,6 +66,20 @@ D:/hwk-models/aali-sft-4k.broken-run4-salad; re-bootstrapped from Phase B
 detached 17:29 local (phase_c_chain.log pid 61356). Early curve: loss ~2.1
 at step 150 and falling, eval 0.98 declining, ~45.7k tok/s, ETA ~30 min.
 
+## Run 5 OUTCOME (18:10-18:18) — progress, NOT deployable
+2800 steps / 38 min, exit 0, eval_loss 0.77 (whole-run masked task — not
+comparable to the 0.0009 identity-collapse run). Smoke verdict:
+- AR prompt: REAL Arabic sentence now (run 4 was pseudo-Quran salad) but
+  drifts and stops early ("باختصار ما إذا كان الطلب على الملف if...»").
+- EN prompt: still loops — "emojis:" ×14 EVEN WITH the repetition penalty;
+  language mixing persists.
+- No ⁇ unk glyphs (ban worked).
+Verdict: DO NOT replace model/scratch/final.pt yet. A 110M brain at 4
+epochs/91M tokens is still weak on the 1.5B-targeted mix. Next levers (human
+call): more SFT epochs on a distilled/cleaner small-model mix, stronger loop
+suppression (no-repeat-ngram window), lower serving temperature with the
+guards, or accept the scratch brain needs a bigger Phase C budget.
+
 ## Remaining plan (rest of the window)
 1. When training lands: re-probe with _probe_phase_c_brain.py (serve shape).
 2. Human decision: replace file-agent/model/scratch/final.pt (copy final.pt
