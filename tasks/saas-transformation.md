@@ -1,6 +1,7 @@
 owner: Buffy (Freebuff agent session)
 status: in-progress
 started: 2026-09-14
+resumed: 2026-09-15 night (owner away ~5h; Lead Agent=DeepSeek/Gemma appointed — see tasks/lead-agent-inbox.md)
 
 ## Mission
 Transform Aali into "Aali Cloud" — a multi-tenant SaaS code agent with
@@ -37,6 +38,19 @@ Full mission brief was supplied by the owner in-session.
   per-user memory namespaces + /api/brain/status). No new deps.
 - STEP 5: aali_node/ (sandbox.py first — security-critical), then the
   pywebview shell + confirmations + tray.
+
+## 2026-09-15 night session scope (Buffy)
+- STEP 4 (saas wiring) + STEP 5 sandbox.py + headless daemon, tests green,
+  small local commits. NO push (owner must review; coordination with the
+  Lead Agent happens through tasks/lead-agent-inbox.md).
+- RESULT: STEP 4 was already shipped (commit 367a810) — task list was stale.
+  STEP 5 core DONE: aali_node/sandbox.py + daemon.py, 41 new tests
+  (sandbox jail/consent/redaction + daemon session + LIVE hub↔node WS
+  roundtrip in tests/test_aali_node_live.py, hub venv).
+  Suite: 562 passed / 2 skipped (.venv), 149 passed / 1 skipped (hub subset
+  in .venv-hub). Redaction extracted to file_agent/redaction.py (stdlib-only)
+  so the Node runs without `requests`. Next: pywebview shell + confirm
+  dialogs + tray; Hub update_server wiring into the Node.
 - VPS provisioning + Cloudflare Tunnel + real secrets (owner).
 
 ## Lessons (for the next agent)
