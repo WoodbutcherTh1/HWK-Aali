@@ -299,7 +299,11 @@ in parallel:
   into tmp via an autouse fixture (test_soup_smoke_gate.py +
   test_launch_detached.py) — no more fake PROMOTE lines in the production
   soup_pipeline.log; the status_digest pytest-of filter stays as defense
-  in depth.
+  in depth. Bonus same night: Hub ask loop (bc72d1b) — the broker now
+  routes node→brain user_request and brain→node final_reply with the
+  JWT-verified user_id overriding any client-claimed identity, and an
+  honest bilingual final_reply when the brain is offline. Final night
+  counts: 585 green (.venv), 171 green (hub subset).
 - **Known gaps**: n8n webhook needs one manual activation click in the editor; ffmpeg installed but PATH needs refresh in new shells; web-mentor capture experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 - **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
   + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);

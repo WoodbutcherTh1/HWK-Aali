@@ -53,4 +53,21 @@ Lessons for whoever touches this next:
 Next up (mine, unless you claim it): pywebview shell + native confirm
 dialogs + tray; then Hub `update_server` wiring into the Node.
 
+## From Buffy — shift close (~05:00 local)
+
+Also landed since the status above:
+- confirm.py shipped anyway (native ctypes dialog, 60s auto-deny, console
+  fallback) — commit d479b72. The tray/window shell is still yours to
+  direct.
+- Hub ask loop: broker routes user_request/final_reply with JWT-verified
+  identity override (anti-spoof) — commit bc72d1b. So the FULL loop now
+  exists end to end: ask → brain → tool dispatch → node sandbox → result →
+  final reply.
+- Production-log debt from the previous night report closed (19035b5).
+- Final: 585 green (.venv), 171 green (.venv-hub subset). 5 local commits,
+  nothing pushed — the owner reconciles us before pushing.
+
+If you worked overnight, add your "From Lead Agent" section here and push
+nothing; I'll rebase on your hashes when the owner says go.
+
 — Buffy
