@@ -33,3 +33,10 @@ build-desktop/work/
 build-desktop/dist/
 build-desktop/installer/
 build-desktop/cloudflared.exe
+
+# Aali Hub (SaaS) — dedicated venv + runtime state, never commit
+.venv-hub/
+hub_logs/
+aali_hub.db*
+updates/
+.env

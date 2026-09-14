@@ -1,0 +1,37 @@
+# Aali Hub — multi-arch (AMD64 + ARM64) container image.
+# Build:  docker build -f Dockerfile.hub -t aali-hub .
+# Run:    docker run -p 8080:8080 --env-file .env aali-hub
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# FastAPI stack only — the Hub never needs the training/media deps.
+COPY requirements-hub.txt ./
+RUN pip install --no-cache-dir -r requirements-hub.txt
+
+# The Hub imports the shared signed-protocol module from file-agent/.
+COPY aali_hub ./aali_hub
+COPY file-agent/file_agent/__init__.py ./file-agent/file_agent/__init__.py
+COPY file-agent/file_agent/protocol.py ./file-agent/file_agent/protocol.py
+
+# Non-root runtime user.
+RUN useradd --create-home --uid 10001 aali
+RUN mkdir -p /data /var/log/aali && chown -R aali:aali /data /var/log/aali
+USER aali
+
+# Volume-backed state: SQLite DB + update artifacts live here.
+ENV AALI_HUB_DB=/data/aali_hub.db \
+    AALI_HUB_LOG_DIR=/var/log/aali \
+    AALI_UPDATE_DIR=/data/updates \
+    AALI_HUB_HOST=0.0.0.0 \
+    AALI_HUB_PORT=8080
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')" || exit 1
+
+CMD ["python", "-m", "aali_hub.main"]

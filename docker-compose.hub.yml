@@ -1,0 +1,31 @@
+# Aali Hub — docker compose for the VPS.
+#   docker compose --file docker-compose.hub.yml up -d
+# Secrets live in .env next to this file (never committed):
+#   AALI_HUB_JWT_SECRET=... AALI_BRAIN_TOKEN=... AALI_PROTOCOL_MASTER_KEY=...
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.hub
+    image: aali-hub:latest
+    container_name: aali-hub
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - hub-data:/data
+    environment:
+      # paths INSIDE the container are volume-backed
+      AALI_HUB_DB: /data/aali_hub.db
+      AALI_HUB_LOG_DIR: /var/log/aali
+      AALI_UPDATE_DIR: /data/updates
+      AALI_HUB_HOST: 0.0.0.0
+      AALI_HUB_PORT: "8080"
+      # brain location (the owner's PC, reached via tunnel/VPN when SaaS mode lands)
+      AALI_BRAIN_URL: ${AALI_BRAIN_URL:-http://127.0.0.1:5055}
+      AALI_BRAIN_WAKE_TIMEOUT: "30"
+
+volumes:
+  hub-data:

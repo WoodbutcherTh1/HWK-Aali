@@ -1,0 +1,10 @@
+# Aali Hub dependency set — install into the dedicated hub venv only.
+#   python -m venv .venv-hub && .venv-hub/Scripts/pip install -r requirements-hub.txt
+# These are NOT training venv dependencies (AGENTS.md: no new heavy deps there).
+fastapi>=0.110
+uvicorn[standard]>=0.29
+websockets>=12.0
+pyjwt>=2.8
+argon2-cffi>=23.1
+httpx>=0.27
+cryptography>=42.0

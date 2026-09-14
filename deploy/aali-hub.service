@@ -1,0 +1,31 @@
+# Aali Hub systemd unit (bare-metal / VM install alternative to Docker).
+#
+#   sudo cp deploy/aali-hub.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now aali-hub
+#
+# Expects the repo at /opt/aali (adjust below) with the hub venv at
+# /opt/aali/.venv-hub and secrets in /etc/aali/hub.env (root-only readable).
+
+[Unit]
+Description=Aali Hub - broker for Aali Cloud (brains, nodes, /v1 clients)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aali
+Group=aali
+WorkingDirectory=/opt/aali
+EnvironmentFile=/etc/aali/hub.env
+ExecStart=/opt/aali/.venv-hub/bin/python -m aali_hub.main
+Restart=always
+RestartSec=5
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/aali /data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
