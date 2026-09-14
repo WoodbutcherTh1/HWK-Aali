@@ -274,6 +274,32 @@ in parallel:
   thumbnails, image previews in the user bubble (served via /api/file),
   send enabled with files-only (no text). Verified live: recipe.txt Q&A and
   PNG OCR against the running brain.- **Aali Cloud SaaS foundation (2026-09-14, Buffy — in progress)**: tasks/saas-transformation.md. DONE: bilingual plan (docs/SAAS_ARCHITECTURE.md); STEP 1 tool execution targets (file_tools.TOOL_EXECUTION: 12 server / 12 client / memory=both + CONFIRM_REQUIRED incl. conditional write_file-overwrite) + tool_orchestrator.py (pure routing, unknown=unroutable); STEP 2 file_agent/protocol.py (versioned HMAC-SHA256 messages, HKDF per-session keys, replay window, backoff); STEP 3 aali_hub/ core (auth JWT w/ stdlib fallback, users_db argon2 w/ PBKDF2 fallback, fair-RR queue + quotas + circuit breaker, WoL, model_registry, update_server, content-free audit, admin_api, openai_compat /v1 proxy w/ API-key auth + metering, ws_gateway w/ per-leg signing, app factory) + Dockerfile.hub + compose + systemd unit + .venv-hub (requirements-hub.txt). Suite 505 green in the training venv (ZERO new deps there — hub deps stay in .venv-hub, gitignored); hub subset 93 green. Node shell DECIDED: Python+pywebview+PyInstaller (Aali-Desktop pattern), daemon also headless for bash/zsh/PowerShell/CMD. Lesson pinned in the task file: PEP 563 + FastAPI needs module-level WebSocket/imports (function-local = query-param degradation) — no in-function Pydantic models.
+- **SaaS STEP 5 node core (2026-09-15 night, Buffy)**: aali_node/ package —
+  sandbox.py (SecureSandbox: workspace jail via the brain's own _resolve
+  plus UNC/ADS/drive/NUL structural refusals, per-tool PATH_ARGS table so
+  file CONTENT with colons is never misjudged as a path escape,
+  either-side-wins confirmation reconciliation, 120s timeout cap,
+  redacted output) + daemon.py (NodeSession leg-key verification + headless
+  WS daemon `python -m aali_node --hub … --token <JWT>`, stop-event for
+  embedders, handler crashes can no longer kill a live connection) +
+  confirm.py (native Windows MessageBoxW via ctypes zero-dep with 60s
+  auto-deny, Arabic-first bilingual summaries, console y/N fallback,
+  `--native-confirm` = GUI mode). LIVE e2e: real uvicorn Hub + real daemon
+  over real WebSockets (tests/test_aali_node_live.py, hub venv; the
+  asyncio.to_thread daemon-thread hang lesson is in the test docstring).
+  Redaction extracted to file_agent/redaction.py (stdlib-only, memory.py
+  re-exports) so the Node needs no `requests`. pywebview pinned in
+  requirements-hub.txt; the pywebview shell itself is the NEXT step and
+  UI/UX direction belongs to the Lead Agent (see
+  tasks/lead-agent-inbox.md). Suites: 580 green (.venv), 167 green (hub
+  subset in .venv-hub). STEP 4 found already-shipped (367a810) — task list
+  was stale, now corrected. Commits: 4f6823e, 65a2c22, d479b72 (no push,
+  owner review pending). Also closed the cosmetic debt from the earlier
+  night report: gate tests now reroute sp.PIPELINE_LOG/LOG_TAIL/REPORTS
+  into tmp via an autouse fixture (test_soup_smoke_gate.py +
+  test_launch_detached.py) — no more fake PROMOTE lines in the production
+  soup_pipeline.log; the status_digest pytest-of filter stays as defense
+  in depth.
 - **Known gaps**: n8n webhook needs one manual activation click in the editor; ffmpeg installed but PATH needs refresh in new shells; web-mentor capture experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 - **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
   + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);

@@ -26,6 +26,18 @@ import launch_detached as ld  # noqa: E402
 import soup_pipeline as sp  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_pipeline_write_targets(tmp_path: Path,
+                                   monkeypatch: pytest.MonkeyPatch):
+    """Same debt fix as test_soup_smoke_gate.py: pipeline writes stay in tmp
+    so no fake verdict line can reach the production soup_pipeline.log."""
+    reports = tmp_path / "soup"
+    reports.mkdir()
+    monkeypatch.setattr(sp, "PIPELINE_LOG", tmp_path / "soup_pipeline.log")
+    monkeypatch.setattr(sp, "LOG_TAIL", tmp_path / "soup_pipeline_last_stage.txt")
+    monkeypatch.setattr(sp, "REPORTS", reports)
+
+
 # ---------------------------------------------------------------------------
 # launch_detached.build_command: relative exe -> absolute (against the
 # caller's cwd, before the child changes directory)

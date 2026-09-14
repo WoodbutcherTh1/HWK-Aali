@@ -24,6 +24,33 @@ import soup_pipeline as sp  # noqa: E402
 from soup_exam import SMOKE_CASE_IDS, select_cases  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_pipeline_write_targets(tmp_path: Path,
+                                   monkeypatch: pytest.MonkeyPatch):
+    """Debt fix (2026-09-15): route every pipeline write into tmp.
+
+    The gate tests instantiate REAL pipeline code whose module-level paths
+    point at production files under D:/hwk-data — fake 'PROMOTED → …
+    pytest-…' verdict lines used to land in the production soup_pipeline.log
+    (cosmetic, but confusing and flagged in the night report). One fixture
+    here (and in test_launch_detached.py) stops it at the source; the
+    status_digest 'pytest-of' line filter stays as defense in depth.
+    """
+    reports = tmp_path / "soup"
+    reports.mkdir()
+    monkeypatch.setattr(sp, "PIPELINE_LOG", tmp_path / "soup_pipeline.log")
+    monkeypatch.setattr(sp, "LOG_TAIL", tmp_path / "soup_pipeline_last_stage.txt")
+    monkeypatch.setattr(sp, "REPORTS", reports)
+
+
+def test_pipeline_write_targets_are_isolated(tmp_path: Path) -> None:
+    """Pin the isolation contract: gate tests never touch production logs."""
+    assert sp.PIPELINE_LOG != Path("D:/hwk-data/soup_pipeline.log")
+    assert str(tmp_path) in str(sp.PIPELINE_LOG)
+    assert str(tmp_path) in str(sp.REPORTS)
+    assert str(tmp_path) in str(sp.LOG_TAIL)
+
+
 # ---------------------------------------------------------------------------
 # select_cases (soup_exam.py): the probe runs a subset; typos must fail loudly
 # ---------------------------------------------------------------------------
