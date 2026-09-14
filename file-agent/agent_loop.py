@@ -27,14 +27,25 @@ _MEMORY_CACHE: dict[str, Any] = {"block": "", "ts": 0.0}
 
 def _memory_block() -> str:
     """Rendered memory block for the large system prompts, cached briefly so
-    tool-calling iterations don't re-read the memory file every turn."""
+    tool-calling iterations don't re-read the memory file every turn.
+
+    SaaS mode (STEP 4): the cache is keyed by the ACTIVE memory scope — a
+    request for a different user always re-renders, so one user's scoped
+    memories can never leak into another request's prompt.
+    """
     now = time.monotonic()
-    if now - float(_MEMORY_CACHE["ts"]) > MEMORY_REFRESH_SECONDS:
+    try:
+        scope_key = str(aali_memory.memory_dir())
+    except Exception:  # noqa: BLE001
+        scope_key = ""
+    if (_MEMORY_CACHE.get("path") != scope_key
+            or now - float(_MEMORY_CACHE["ts"]) > MEMORY_REFRESH_SECONDS):
         try:
             _MEMORY_CACHE["block"] = aali_memory.render_block()
         except Exception:  # noqa: BLE001 - memory must never break a request
             _MEMORY_CACHE["block"] = ""
         _MEMORY_CACHE["ts"] = now
+        _MEMORY_CACHE["path"] = scope_key
     return str(_MEMORY_CACHE["block"])
 
 
@@ -1865,8 +1876,13 @@ def agent_loop(
     gate_state: dict[str, Any] | None = None,
     provider: str = "auto",
     request_id: str | None = None,
+    memory_dir: str | Path | None = None,
 ) -> str:
     """Run the agent and record the complete request lifecycle.
+
+    memory_dir: SaaS mode (STEP 4) — per-user memory namespace bound for the
+    duration of THIS call (contextvar; the model cannot influence it).
+    None keeps the default local memory store.
 
     policy: "auto" (default), "aggressive", or "always_ask" — see
     _POLICY_PROMPTS. confirmed: set True to bypass the always_ask gate for
@@ -1891,9 +1907,10 @@ def agent_loop(
         model=model,
         max_iterations=max_iterations,
     )
-    record_turn("user", user_message)
-    _invalidate_memory_cache()
+    scope_token = aali_memory.set_memory_scope(memory_dir)
     try:
+        record_turn("user", user_message)
+        _invalidate_memory_cache()
         final_response = _agent_loop(
             user_message,
             workspace_root,
@@ -1922,6 +1939,8 @@ def agent_loop(
             duration_ms=elapsed_ms,
         )
         raise
+    finally:
+        aali_memory.reset_memory_scope(scope_token)
 
     elapsed_ms = int(
         (datetime.now(timezone.utc) - started_at).total_seconds() * 1000

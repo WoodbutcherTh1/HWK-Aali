@@ -400,6 +400,14 @@ def api_ask():
     # picking one here never means sending a key through the chat.
     provider = str(payload.get("provider", "auto"))
 
+    # SaaS scope (STEP 4): in saas mode a Hub-verified user gets their own
+    # workspace + memory namespace; local mode is untouched.
+    saas = _apply_saas_scope(payload)
+    loop_kwargs: dict = {}
+    if saas["user_id"]:
+        loop_kwargs["workspace_root"] = saas["workspace"]
+        loop_kwargs["memory_dir"] = saas["memory_dir"]
+
     # Attachments: stored names are re-derived on the server (never trust the
     # client-supplied analysis) and their extracted context prepended.
     stored_names = [str(s) for s in (payload.get("attachments") or [])
@@ -428,7 +436,7 @@ def api_ask():
     try:
         reply = agent_loop(
             message,
-            WORKSPACE_ROOT,
+            loop_kwargs.get("workspace_root", WORKSPACE_ROOT),
             mode=mode,
             print_final=False,
             history=_history(record),
@@ -436,6 +444,7 @@ def api_ask():
             confirmed=confirmed,
             gate_state=gate_state,
             provider=provider,
+            memory_dir=saas["memory_dir"],
         )
         ok = True
         status = 200
@@ -529,6 +538,10 @@ def api_ask_stream():
     confirmed = bool(payload.get("confirm", False))
     provider = str(payload.get("provider", "auto"))
 
+    # SaaS scope (STEP 4): same per-user contract as /api/ask.
+    saas = _apply_saas_scope(payload)
+    loop_kwargs = {"memory_dir": saas["memory_dir"]} if saas["user_id"] else {}
+
     # Attachments (same contract as /api/ask): validate stored names, load
     # fresh analysis from disk, append context to the message.
     stored_names = [str(s) for s in (payload.get("attachments") or [])
@@ -564,9 +577,12 @@ def api_ask_stream():
     def _run() -> None:
         try:
             reply = agent_loop(
-                message, WORKSPACE_ROOT, mode=mode, print_final=False,
+                message,
+                loop_kwargs.get("workspace_root", WORKSPACE_ROOT),
+                mode=mode, print_final=False,
                 history=_history(record), policy=policy, confirmed=confirmed,
                 gate_state=gate_state, provider=provider, request_id=request_id,
+                memory_dir=saas["memory_dir"],
             )
             result["ok"], result["reply"] = True, reply
         except AgentLoopError as exc:
@@ -715,7 +731,119 @@ def api_session_delete(sid: str):
 @app.route("/api/health", methods=["GET"])
 def api_health():
     """Liveness probe for all clients: returns workspace and status."""
-    return {"ok": True, "service": "aali", "workspace": str(WORKSPACE_ROOT)}
+    body: dict = {"ok": True, "service": "aali",
+                  "workspace": str(WORKSPACE_ROOT)}
+    uc = _user_context()
+    try:
+        body["mode"] = uc.aali_mode() if uc is not None else "local"
+    except Exception:
+        body["mode"] = "local"  # packaging without aali_hub stays local
+    return body
+
+
+# ————— SaaS mode: brain status + per-user scope (STEP 4) —————
+
+def _user_context():
+    """Import aali_hub.user_context, bootstrapping the repo root if needed.
+
+    Returns None when the aali_hub package is not shipped alongside the brain
+    (pure-local deployments) — every caller then degrades to local mode.
+    """
+    try:
+        from aali_hub import user_context as _uc
+        return _uc
+    except ImportError:
+        pass
+    import sys as _sys
+    _root = str(Path(__file__).resolve().parents[1])
+    if _root not in _sys.path:
+        _sys.path.insert(0, _root)
+    try:
+        from aali_hub import user_context as _uc
+        return _uc
+    except ImportError:
+        return None
+
+
+def _saas_user_id() -> str | None:
+    """The Hub-verified user id for this request, or None.
+
+    Trust model: in saas mode ONLY the Hub reaches the brain, and the Hub
+    sets X-Aali-User to a validated id AFTER authenticating the caller.
+    Local callers (loopback admin) may also pass it explicitly.
+    """
+    uid = (request.headers.get("X-Aali-User") or "").strip()
+    if not uid:
+        return None
+    uc = _user_context()
+    if uc is None:
+        return None
+    try:
+        return uc.validate_user_id(uid)
+    except Exception:
+        return None
+
+
+def _apply_saas_scope(payload: dict) -> dict:
+    """Scope a request's workspace + memory to the Hub-verified user.
+
+    Returns the effective settings dict (also usable by /api/ask/stream).
+    In saas mode with no valid user header, workspace/memory fall back to
+    the local defaults (the Hub itself runs on this host and may not send
+    the header for internal calls).
+    """
+    settings = {"workspace": None, "memory_dir": None, "user_id": None}
+    uc = _user_context()
+    if uc is None or uc.aali_mode() != "saas":
+        return settings
+    uid = _saas_user_id()
+    if uid:
+        settings["workspace"] = uc.user_root(uid)
+        settings["memory_dir"] = uc.user_memory_dir(uid)
+        settings["user_id"] = uid
+    return settings
+
+
+@app.route("/api/brain/status", methods=["GET"])
+def api_brain_status():
+    """SaaS readiness probe for the Hub: model loaded, load, sessions.
+
+    Deliberately reports counts and paths only — never user content.
+    """
+    uc = _user_context()
+    gpu = {"available": False}
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            used, total = out.stdout.strip().splitlines()[0].split(",")[:2]
+            gpu = {"available": True, "vram_used_mib": int(used.strip()),
+                   "vram_total_mib": int(total.strip())}
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "mode": uc.aali_mode() if uc is not None else "local",
+        "model": {"loaded": True, "provider": "soup"},
+        "gpu": gpu,
+        "active_sessions": len(_sessions),
+        "workspace": str(WORKSPACE_ROOT),
+    }
+
+
+@app.route("/api/user/info", methods=["GET"])
+def api_user_info():
+    """Which scope this caller occupies (SaaS smoke-check for the Hub)."""
+    settings = _apply_saas_scope({})
+    return {
+        "ok": True,
+        "user_id": settings["user_id"],
+        "scoped": settings["user_id"] is not None,
+        "workspace": str(settings["workspace"] or WORKSPACE_ROOT),
+    }
 
 
 @app.route("/api/tools", methods=["GET"])

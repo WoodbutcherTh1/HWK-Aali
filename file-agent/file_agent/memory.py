@@ -35,6 +35,28 @@ MEMORY_DIR_ENV = "AALI_MEMORY_DIR"
 MEMORY_FILE_NAME = "aali_memory.json"
 CONVERSATION_LOG_NAME = "aali_conversations.jsonl"
 
+# --- per-request memory scope (SaaS mode, STEP 4) ---------------------------
+# The Hub-verified user's memory directory is bound for the duration of ONE
+# agent_loop call via a contextvar: every memory function that resolves its
+# path through memory_dir() picks it up WITHOUT any signature changes, and —
+# critically — the MODEL cannot influence it (it is set by the server, never
+# from tool arguments). agent_loop sets it inside its own worker thread, so
+# it works identically for inline (Flask) and threaded (SSE stream) calls.
+from contextvars import ContextVar
+
+_MEMORY_SCOPE: ContextVar[str | Path | None] = ContextVar(
+    "aali_memory_scope", default=None)
+
+
+def set_memory_scope(target: str | Path | None) -> Any:
+    """Bind the memory directory for the current thread; returns a token."""
+    return _MEMORY_SCOPE.set(Path(target) if target is not None else None)
+
+
+def reset_memory_scope(token: Any) -> None:
+    """Restore the previous memory scope (pair with set_memory_scope)."""
+    _MEMORY_SCOPE.reset(token)
+
 KINDS = ("decision", "preference", "fact", "instruction")
 MAX_ENTRIES = 200          # prune target for the memory store
 MAX_TEXT_CHARS = 2000      # stored per entry
@@ -88,10 +110,17 @@ def redact_secrets(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def memory_dir(dir_override: str | Path | None = None) -> Path:
-    """Resolve the memory directory (env var wins over the default home path)."""
+    """Resolve the memory directory for THIS call.
+
+    Precedence: explicit argument → per-thread SaaS scope (contextvar,
+    set by agent_loop) → env var → the default home path.
+    """
     if dir_override is not None:
         path = Path(dir_override)
     else:
+        scoped = _MEMORY_SCOPE.get()
+        if scoped is not None:
+            return Path(scoped)
         env = os.getenv(MEMORY_DIR_ENV, "").strip()
         path = Path(env) if env else Path.home() / ".aali"
     return path

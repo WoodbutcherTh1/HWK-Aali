@@ -1093,6 +1093,25 @@ def get_tool_definitions() -> list[dict[str, Any]]:
 
 
 def execute_tool(name: str, arguments: dict[str, Any], workspace_root: str | Path) -> dict[str, Any]:
+    # ————— SaaS admission gate (STEP 4) —————
+    # In saas mode the brain NEVER touches user machines directly: client-
+    # target tools must be dispatched to the user's Node, not executed here.
+    # Local mode (default) skips this entirely.
+    if os.getenv("AALI_MODE", "local").strip().lower() == "saas":
+        from file_agent import tool_orchestrator as _orch
+        decision = _orch.dispatch(name, args=arguments)
+        if decision["route"] != "server":
+            return {
+                "ok": False,
+                "error": {
+                    "type": "client_tool_remote",
+                    "message": (
+                        f"'{name}' runs on the user's machine in Aali Cloud "
+                        "mode; it must be dispatched to their Node, not "
+                        "executed on the brain. Propose the call and wait "
+                        "for the tool_result."),
+                },
+            }
     function = _FUNCTIONS.get(name)
     if function is None:
         return {"ok": False, "error": {"type": "unknown_tool", "message": f"Unknown tool: {name}"}}
