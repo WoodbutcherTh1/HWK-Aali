@@ -25,6 +25,7 @@ Windows PC (8GB-VRAM GPU, 16GB RAM, ~2TB across C:/D:/X:):
 
 | Path | What it is |
 |---|---|
+| `AALI_ARCHITECTURE.md` | Bilingual (AR/EN) architecture doc — system design, data sources, training history, PC control, CLI, multi-machine protocol. Read alongside this file. |
 | `file-agent/` | Flask app (`app.py`), agent loop, tool layer (`file_agent/`), model code (`hwk_model/`) |
 | `file-agent/hwk_model/` | Model architecture + tokenizer wrappers (RoPE transformer, BPE loader) |
 | `web/` | Arabic-first web client (static, GitHub-Pages ready) |
@@ -272,9 +273,8 @@ in parallel:
   the message — Aali answers from real content. UI: upload chips with image
   thumbnails, image previews in the user bubble (served via /api/file),
   send enabled with files-only (no text). Verified live: recipe.txt Q&A and
-  PNG OCR against the running brain.- **Known gaps**: n8n webhook needs one manual activation click in the editor;
-  ffmpeg installed but PATH needs refresh in new shells; web-mentor capture
-  experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
+  PNG OCR against the running brain.- **Aali Cloud SaaS foundation (2026-09-14, Buffy — in progress)**: tasks/saas-transformation.md. DONE: bilingual plan (docs/SAAS_ARCHITECTURE.md); STEP 1 tool execution targets (file_tools.TOOL_EXECUTION: 12 server / 12 client / memory=both + CONFIRM_REQUIRED incl. conditional write_file-overwrite) + tool_orchestrator.py (pure routing, unknown=unroutable); STEP 2 file_agent/protocol.py (versioned HMAC-SHA256 messages, HKDF per-session keys, replay window, backoff); STEP 3 aali_hub/ core (auth JWT w/ stdlib fallback, users_db argon2 w/ PBKDF2 fallback, fair-RR queue + quotas + circuit breaker, WoL, model_registry, update_server, content-free audit, admin_api, openai_compat /v1 proxy w/ API-key auth + metering, ws_gateway w/ per-leg signing, app factory) + Dockerfile.hub + compose + systemd unit + .venv-hub (requirements-hub.txt). Suite 505 green in the training venv (ZERO new deps there — hub deps stay in .venv-hub, gitignored); hub subset 93 green. Node shell DECIDED: Python+pywebview+PyInstaller (Aali-Desktop pattern), daemon also headless for bash/zsh/PowerShell/CMD. Lesson pinned in the task file: PEP 563 + FastAPI needs module-level WebSocket/imports (function-local = query-param degradation) — no in-function Pydantic models.
+- **Known gaps**: n8n webhook needs one manual activation click in the editor; ffmpeg installed but PATH needs refresh in new shells; web-mentor capture experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 - **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
   + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);
   Obsidian vault export (scripts/build_brain_vault.py, hooked into the night

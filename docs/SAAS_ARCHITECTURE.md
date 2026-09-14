@@ -238,11 +238,12 @@ Additional SaaS rules:
 
 The mission brief says: on ambiguity, STOP and ask — do not guess.
 
-1. **Node shell**: Tauri (smaller binary, Rust toolchain needed) vs
-   Electron (heavier, JS-only). Recommendation: Tauri with the Python
-   sidecar doing all security-relevant work.
+1. ~~**Node shell**~~ **DECIDED (2026-09-14)**: Python + pywebview +
+   PyInstaller — the proven Aali-Desktop pattern; the agent daemon also
+   runs headless so bash/zsh/PowerShell/CMD all work via CLI mode. Tauri
+   stays a documented future option.
 2. **Hub host**: which VPS (provider/OS)? Port 8080 + Cloudflare Tunnel
-   assumed.
+   assumed. Dockerfile.hub + compose + systemd are ready to deploy.
 3. **Code signing**: EV/OV cert (Windows), Apple Developer ID (macOS) —
    purchase decision; unsigned builds ship with warnings until then.
 4. **Email sending** for verify/reset (Hub auth): which provider?
@@ -258,12 +259,13 @@ The mission brief says: on ambiguity, STOP and ask — do not guess.
 | `docs/SAAS_ARCHITECTURE.md` (this file) | **DONE** |
 | STEP 1 — `TOOL_EXECUTION` + orchestrator + tests | **DONE** |
 | STEP 2 — `protocol.py` + tests | **DONE** |
-| STEP 3 — `aali_hub/` full module | PLANNED (needs venv + owner go) |
+| STEP 3 — `aali_hub/` full module + Docker + systemd | **DONE** (core live, in `.venv-hub`; WS gateway + auth + queue + registry + updates + audit + admin + `/v1` proxy) |
 | STEP 4 — `AALI_MODE=saas` in `app.py` | PLANNED |
 | STEP 5 — Aali Node app + installers | PLANNED (shell decision pending) |
 | STEP 6-9 — security hardening, CI/CD, docs set | PLANNED |
 | STEP 10 — distribution layer (HF/OpenRouter/OpenCode/vLLM) | PLANNED (`/v1` on brain already LIVE) |
 
-Local mode, the live brain, and the 427-test suite are untouched by this
-workstream except for the additive `TOOL_EXECUTION`/orchestrator/protocol
-modules, which ship with tests.
+Local mode, the live brain, and the full test suite are untouched by this
+workstream: suite is **505 green** in the training venv (zero new deps
+there) and the Hub subset is green in the dedicated `.venv-hub`
+(`requirements-hub.txt`).
