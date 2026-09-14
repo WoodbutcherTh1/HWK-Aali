@@ -140,7 +140,9 @@ class Broker:
         # tool_call id → proposing brain's conn id
         self._pending_results: dict[str, str] = {}
         self.stats = {"inbound_dropped": 0, "node_offline": 0,
-                      "dispatched": 0, "relayed": 0}
+                      "dispatched": 0, "relayed": 0,
+                      "asks_forwarded": 0, "brain_offline": 0,
+                      "replies_relayed": 0}
 
     # ------------------------------------------------------------------
     # hello
@@ -250,6 +252,48 @@ class Broker:
             self.stats["relayed"] += 1
             return [Outbound(brain_conn,
                              P.sign_message(message, brain.leg_key()))]
+
+        # ---- node sends a chat turn for the brain (2026-09-15) -----------
+        if info.role == "node" and msg_type == P.TYPE_USER_REQUEST:
+            try:
+                P.parse_message(message, info.leg_key(),
+                                expect=P.TYPE_USER_REQUEST)
+            except P.ProtocolError:
+                self.stats["inbound_dropped"] += 1
+                return []
+            brain = self.manager.brain()
+            if brain is None or not brain.alive:
+                self.stats["brain_offline"] += 1
+                # honest, immediate answer instead of a silent black hole
+                notice = P.make_final_reply(
+                    info.user_id,
+                    "Aali's brain is offline right now, so I cannot answer "
+                    "yet. / العقل غير متصل حالياً، لا أستطيع الإجابة الآن.")
+                return [Outbound(info.conn_id,
+                                 P.sign_message(notice, info.leg_key()))]
+            # anti-spoof: the identity is the JWT-verified one — a node
+            # cannot ask on behalf of another user by editing the payload
+            message["user_id"] = info.user_id
+            self.stats["asks_forwarded"] += 1
+            return [Outbound(brain.conn_id,
+                             P.sign_message(message, brain.leg_key()))]
+
+        # ---- brain returns the final reply -------------------------------
+        if info.role == "brain" and msg_type == P.TYPE_FINAL_REPLY:
+            try:
+                P.parse_message(message, brain_leg_key(info.token),
+                                expect=P.TYPE_FINAL_REPLY)
+            except P.ProtocolError:
+                self.stats["inbound_dropped"] += 1
+                return []
+            user_id = str(message.get("user_id") or "")
+            node = self.manager.node_for_user(user_id)
+            if node is None:
+                self.stats["node_offline"] += 1
+                return []
+            self.stats["replies_relayed"] += 1
+            return [Outbound(node.conn_id,
+                             P.sign_message(message, node.leg_key()))]
 
         self.stats["inbound_dropped"] += 1
         return []

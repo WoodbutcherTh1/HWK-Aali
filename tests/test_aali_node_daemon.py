@@ -199,6 +199,78 @@ def test_broker_sends_nothing_when_node_offline(tmp_path: Path) -> None:
     assert broker.stats["node_offline"] == 1
 
 
+# ---------------------------------------------------------------------------
+# ask loop: user_request (node→brain) + final_reply (brain→node)
+# ---------------------------------------------------------------------------
+def _register_node_and_brain(manager: ConnectionManager) -> str:
+    jwt = hub_auth.mint_token("user-1", "user", JWT_SECRET, ttl_sec=3600)
+    manager.register(ConnectionInfo(conn_id="node1", role="node",
+                                    user_id="user-1", node_id="n",
+                                    token=jwt, session_id="sess1"))
+    manager.register(ConnectionInfo(conn_id="brain1", role="brain",
+                                    token=BRAIN_TOKEN))
+    return jwt
+
+
+def test_broker_forwards_ask_with_verified_identity() -> None:
+    manager = ConnectionManager()
+    broker = Broker(manager, jwt_secret=JWT_SECRET, brain_token=BRAIN_TOKEN)
+    jwt = _register_node_and_brain(manager)
+    leg_key = P.derive_session_key(jwt, "sess1")
+    ask = P.make_user_request("evil-user", "sess1", "مرحبا")  # spoof attempt
+    actions = broker.handle_message("node1", P.sign_message(ask, leg_key))
+    assert len(actions) == 1 and actions[0].conn_id == "brain1"
+    forwarded = actions[0].message
+    # the JWT-verified identity overrides whatever the node claimed
+    assert forwarded["user_id"] == "user-1"
+    P.verify_message(forwarded, brain_leg_key(BRAIN_TOKEN))
+    assert broker.stats["asks_forwarded"] == 1
+
+
+def test_broker_answers_node_when_brain_offline() -> None:
+    manager = ConnectionManager()
+    broker = Broker(manager, jwt_secret=JWT_SECRET, brain_token=BRAIN_TOKEN)
+    jwt = hub_auth.mint_token("user-1", "user", JWT_SECRET, ttl_sec=3600)
+    manager.register(ConnectionInfo(conn_id="node1", role="node",
+                                    user_id="user-1", node_id="n",
+                                    token=jwt, session_id="sess1"))
+    leg_key = P.derive_session_key(jwt, "sess1")
+    ask = P.make_user_request("user-1", "sess1", "hello?")
+    actions = broker.handle_message("node1", P.sign_message(ask, leg_key))
+    assert len(actions) == 1 and actions[0].conn_id == "node1"
+    notice = actions[0].message
+    P.verify_message(notice, leg_key)
+    assert notice["type"] == P.TYPE_FINAL_REPLY
+    assert "offline" in notice["reply"]
+    assert broker.stats["brain_offline"] == 1
+
+
+def test_broker_relays_final_reply_to_node() -> None:
+    manager = ConnectionManager()
+    broker = Broker(manager, jwt_secret=JWT_SECRET, brain_token=BRAIN_TOKEN)
+    jwt = _register_node_and_brain(manager)  # same token = same leg key
+    reply = P.make_final_reply("user-1", "Here is your answer.",
+                               suggestions=["next?"])
+    actions = broker.handle_message(
+        "brain1", P.sign_message(reply, brain_leg_key(BRAIN_TOKEN)))
+    assert len(actions) == 1 and actions[0].conn_id == "node1"
+    P.verify_message(actions[0].message,
+                     P.derive_session_key(jwt, "sess1"))
+    assert actions[0].message["reply"] == "Here is your answer."
+    assert broker.stats["replies_relayed"] == 1
+
+
+def test_broker_drops_reply_for_offline_user() -> None:
+    manager = ConnectionManager()
+    broker = Broker(manager, jwt_secret=JWT_SECRET, brain_token=BRAIN_TOKEN)
+    manager.register(ConnectionInfo(conn_id="brain1", role="brain",
+                                    token=BRAIN_TOKEN))
+    reply = P.make_final_reply("ghost", "...")
+    assert broker.handle_message(
+        "brain1", P.sign_message(reply, brain_leg_key(BRAIN_TOKEN))) == []
+    assert broker.stats["node_offline"] == 1
+
+
 def test_json_roundtrip_of_signed_messages(tmp_path: Path) -> None:
     session = make_session(tmp_path)
     call = signed_call("list_files", {"path": "."}, session.leg_key)
