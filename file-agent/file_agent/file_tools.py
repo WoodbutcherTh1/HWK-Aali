@@ -896,6 +896,78 @@ _FUNCTIONS: dict[str, ToolFunction] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Execution targets (SaaS mode — docs/SAAS_ARCHITECTURE.md STEP 1).
+#
+# Where a tool runs when AALI_MODE=saas:
+#   server — heavy / brain-resident tools (web, SD image/video, doc+video
+#            parsing, skills, n8n); executed on the brain only.
+#   client — workspace-touching tools; ALWAYS dispatched to the user's Node
+#            and executed inside the user's own sandbox. Never executed on
+#            the brain in saas mode: the brain never touches user machines
+#            directly, it only proposes calls.
+#   both   — callable from either side (memory: stored server-side per-user,
+#            callable from either the brain or the Node).
+#
+# Local mode (AALI_MODE=local) ignores this table entirely — every tool
+# keeps executing directly, exactly as before.
+TOOL_EXECUTION: dict[str, str] = {
+    # server-side (brain)
+    "web_search": "server",
+    "fetch_url": "server",
+    "generate_image": "server",
+    "generate_video": "server",
+    "edit_image": "server",
+    "edit_video": "server",
+    "generate_emoji": "server",
+    "read_document": "server",
+    "analyze_video": "server",
+    "make_n8n_workflow": "server",
+    "list_skills": "server",
+    "use_skill": "server",
+    # client-side (user's Node)
+    "list_files": "client",
+    "read_file": "client",
+    "write_file": "client",
+    "append_file": "client",
+    "replace_in_file": "client",
+    "delete_file": "client",
+    "move_file": "client",
+    "search_files": "client",
+    "make_directory": "client",
+    "run_command": "client",
+    "machine_ops": "client",
+    "read_image": "client",
+    # either side (server stores per-user)
+    "memory": "both",
+}
+
+# Tools that ALWAYS require explicit user confirmation via a native OS
+# dialog on the user's machine (docs/SAAS_ARCHITECTURE.md §5). 60s silence
+# = auto-deny. write_file joins this set only when it would replace an
+# existing file (overwrite=true); the sandbox structurally forbids writing
+# outside the workspace, so there is no "outside workspace" case.
+CONFIRM_REQUIRED: frozenset[str] = frozenset({
+    "run_command",
+    "delete_file",
+    "move_file",
+    "machine_ops",
+})
+
+
+def confirm_required(tool: str, args: dict[str, Any] | None = None) -> bool:
+    """Return True when a tool call needs an explicit user confirmation.
+
+    ``args`` only matters for conditional tools: ``write_file`` requires
+    confirmation iff it would overwrite an existing file.
+    """
+    if tool in CONFIRM_REQUIRED:
+        return True
+    if tool == "write_file" and isinstance(args, dict):
+        return bool(args.get("overwrite") is True)
+    return False
+
+
 def _definition(name: str, description: str, properties: dict[str, Any],
                 required: list[str]) -> dict[str, Any]:
     return {
