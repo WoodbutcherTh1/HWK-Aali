@@ -99,12 +99,26 @@ class NodeSession:
 def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
              allow_commands: bool = True,
              session_id: str | None = None,
-             stop: "threading.Event | None" = None) -> int:
+             stop: "threading.Event | None" = None,
+             native_confirm: bool = False) -> int:
     """Connect to the Hub, serve tool calls until interrupted. Exit code.
 
     ``stop``: optional threading.Event — setting it ends the receive loop
     cleanly (used by embedders/tests that run this in a thread).
+    ``native_confirm``: pop native OS dialogs for dangerous calls (the GUI
+    shell's mode); default is the console y/N prompt.
     """
+    # wire the sandbox FIRST so configuration errors surface before the
+    # transport check (a misconfigured node must fail fast, not report a
+    # missing websocket package instead of its real problem)
+    session_id = session_id or uuid.uuid4().hex
+    node_id = os.getenv("AALI_NODE_ID") or f"node-{secrets.token_hex(4)}"
+    from aali_node.confirm import make_confirm_hook
+    box = SB.SecureSandbox(workspace_root, allow_commands=allow_commands,
+                           confirm_hook=make_confirm_hook(
+                               use_native=native_confirm))
+    session = NodeSession(box, session_id, node_id, token)
+
     try:
         import websockets  # lazy: keeps sandbox unit-testable everywhere
     except ImportError:
@@ -112,11 +126,6 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
               "daemon (pip install websockets). The sandbox itself works "
               "without it.", file=sys.stderr)
         return 2
-
-    session_id = session_id or uuid.uuid4().hex
-    node_id = os.getenv("AALI_NODE_ID") or f"node-{secrets.token_hex(4)}"
-    box = SB.SecureSandbox(workspace_root, allow_commands=allow_commands)
-    session = NodeSession(box, session_id, node_id, token)
 
     ws_url = hub_url.rstrip("/") + "/ws/node"
 
@@ -196,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="the ONLY directory this Node may touch")
     parser.add_argument("--no-commands", action="store_true",
                         help="disable run_command entirely on this Node")
+    parser.add_argument("--native-confirm", action="store_true",
+                        help="ask via native OS dialogs instead of the "
+                             "console (GUI-shell mode)")
     args = parser.parse_args(argv)
 
     if not args.token:
@@ -208,7 +220,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     return run_node(args.hub, args.token, args.workspace,
-                    allow_commands=not args.no_commands)
+                    allow_commands=not args.no_commands,
+                    native_confirm=args.native_confirm)
 
 
 if __name__ == "__main__":
