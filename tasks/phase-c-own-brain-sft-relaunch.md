@@ -80,6 +80,26 @@ call): more SFT epochs on a distilled/cleaner small-model mix, stronger loop
 suppression (no-repeat-ngram window), lower serving temperature with the
 guards, or accept the scratch brain needs a bigger Phase C budget.
 
+## Run 6 OUTCOME (19:33-19:49) — loops broken, salad remains: CAPACITY ceiling
+Setup: sft_small.jsonl (3,353 rows: 1,448 shortest-JSON tool + 1,841 AR
+natural + 28 EN natural/seeds x4), 2500 steps ~ 6 epochs, eval 2.50 -> 1.11.
+The deep probe (phase_c_probe.log) also proved the UNTRAINED Phase B base
+loops tool-name JSON (string_files x13, make_directory x14) - loop-proneness
+is the base model, and run-5's emojis loop is the same JSON attractor.
+Smoke verdict: the no-repeat-ngram ban WORKED mechanically (no x14 loops,
+no unk glyphs) but both answers remain word salad with language mixing
+("pip is able to s...", "أو أو أو.png").
+CONCLUSION: trainer (shift, masking, row shape), decoder (penalty, ngram
+ban, unk ban) and data (mix audit + rebalance) are all FIXED and test-pinned
+- what remains is the BASE MODEL: 110M params + 3.3B pretraining tokens is
+below the fluency floor, and no SFT recipe fixes that. Run-6 model archived
+as aali-sft-4k.run6-salad-noban-fixes... (see AGENTS.md). Next is a
+PHASE-D-SCALE owner decision: (a) keep checkpoint-3873 as the live brain and
+treat the own-brain as research; (b) Phase D pretraining continuation
+(10-20B tokens, GPU-weeks on the 8GB card) before any SFT retry;
+(c) distill from the promoted teacher into the small model with a
+serving-shaped, quality-gated corpus. model/scratch/final.pt stays untouched.
+
 ## Remaining plan (rest of the window)
 1. When training lands: re-probe with _probe_phase_c_brain.py (serve shape).
 2. Human decision: replace file-agent/model/scratch/final.pt (copy final.pt
