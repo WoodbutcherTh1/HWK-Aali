@@ -5,6 +5,15 @@
 دائمة، وسائط، وأمان مُدرَّس. عربي أولاً، ثنائي اللغة، ويعمل بالكامل على
 خادمك.
 
+> 📐 **الوثيقة المعمارية الكاملة:** [`AALI_ARCHITECTURE.md`](AALI_ARCHITECTURE.md) —
+> نظرة ثنائية اللغة (عربي/إنجليزي) على المعمارية، مصادر البيانات، تاريخ التدريب،
+> التحكم بالحاسوب، الطرفية، وبروتوكول تعدد الأجهزة — موجهة للمطورين والوكلاء
+> البرمجيين معًا.
+> 📐 **Full architecture doc:** [`AALI_ARCHITECTURE.md`](AALI_ARCHITECTURE.md) —
+> a bilingual (AR/EN) deep dive into the architecture, data sources, training
+> history, PC control, CLI, and multi-machine protocol — written for both
+> human developers and AI agents.
+
 ![جولة في واجهة آلي](docs/assets/aali_tour.gif)
 
 > آلي **منتج** يُقدَّم للمستخدمين: خادم واحد، عملاء متعددين (ويب، سطح المكتب،
@@ -99,6 +108,7 @@ scripts\aali_cli.bat
 
 | المسار | المحتوى |
 |---|---|
+| [`AALI_ARCHITECTURE.md`](AALI_ARCHITECTURE.md) | الوثيقة المعمارية الشاملة (عربي/إنجليزي) — المعمارية، البيانات، التدريب، التحكم، الطرفية، تعدد الأجهزة |
 | `file-agent/` | خادم آلي: الوكيل، طبقة الأدوات، المفاتيح، الجلسات |
 | `web/` | واجهة الويب (عربية أولاً RTL) — تُبنى إلى `web/dist` وتُخدم من `/ui/` |
 | `ios/` | تطبيق iOS أصلي (SwiftUI) |
