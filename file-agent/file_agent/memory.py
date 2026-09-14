@@ -85,24 +85,11 @@ class MemoryError(ValueError):
 # ride along. We keep the sentence but replace the secret with a redaction
 # marker so the fact is still remembered without the secret existing anywhere
 # outside the user's machine.
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(?:sk|pk|rk)-[A-Za-z0-9_\-]{8,}\b"),                # openai-style keys
-    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]{8,}\b"),                  # bearer tokens
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),                        # github tokens
-    re.compile(r"(?i)\bAKIA[0-9A-Z]{12,}\b"),                             # aws access keys
-    re.compile(r"(?i)\bxox[baprs]-[A-Za-z0-9\-]{8,}\b"),                  # slack tokens
-    re.compile(r"(?i)(api[_\-]?key|api[_\-]?secret|password|passwd|token|secret)\s*[:=]\s*\S+"),
-    re.compile(r"(?i)(مفتاح|كلمة\s+السر|الباسورد)\s*[:=]?\s*\S+"),          # Arabic secret mentions
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),                    # private keys
-)
-_SECRET_MARKER = "[REDACTED-SECRET]"
-
-
-def redact_secrets(text: str) -> str:
-    """Replace credential-looking substrings with a redaction marker."""
-    for pattern in _SECRET_PATTERNS:
-        text = pattern.sub(_SECRET_MARKER, text)
-    return text
+# Implementation lives in file_agent.redaction (stdlib-only) so the Node and
+# the Hub can redact without importing this module's `requests` dependency;
+# the name is re-exported here for backward compatibility.
+from file_agent.redaction import redact_secrets  # noqa: E402, F401
+from file_agent.redaction import SECRET_MARKER as _SECRET_MARKER  # noqa: E402, F401, PLC2701  (legacy private-name consumers)
 
 
 # ---------------------------------------------------------------------------
