@@ -1,11 +1,14 @@
-"""Generation guards: repetition penalty + unk ban.
+"""Generation guards: repetition penalty + no-repeat-ngram ban + unk ban.
 
-2026-09-14 lesson (Phase C run-3): the runtime serves the scratch brain with
-greedy decoding (temperature=0), and a small model under greedy decoding
-walks straight into token loops (run-3 smoke: "وَلكِنْ وَلكِنْ وَلكِنْ",
-earlier: "::::"). Separately, '⁇' in the smoke output is sentencepiece's
-literal rendering of the <unk> id (3) - a model must never SPEAK unk.
-generate_text now penalizes already-generated tokens (CTRL-style) and bans
+2026-09-14 lessons (Phase C run-3/run-5): the runtime serves the scratch
+brain with greedy decoding (temperature=0), and a small model under greedy
+decoding walks straight into token loops (run-3 smoke: "وَلكِنْ وَلكِنْ
+وَلكِنْ", earlier: "::::"). Run-5 proved the soft repetition penalty alone
+cannot hold it ("emojis:" x14 WITH penalty=1.15), so a hard no-repeat-ngram
+ban (the HF standard) was added on top. Separately, '⁇' in the smoke output
+is sentencepiece's literal rendering of the <unk> id (3) - a model must
+never SPEAK unk. generate_text now: penalizes already-generated tokens
+(CTRL-style), hard-bans tokens that would complete a seen n-gram, and bans
 unk from sampling by default.
 """
 
@@ -78,7 +81,8 @@ def test_greedy_loop_breaks_with_repetition_penalty() -> None:
     with patch("hwk_model.generation.torch.tensor", torch.tensor, create=True):
         out = generate_text(fake, _Tokenizer(), "prompt",
                             max_new_tokens=6, temperature=0,
-                            repetition_penalty=1.15, ban_unk=False)
+                            repetition_penalty=1.15, ban_unk=False,
+                            no_repeat_ngram_size=0)
 
     # token 42 may appear once; after generating it its logit drops below 43's
     assert out.split().count("42") <= 1, out
@@ -172,8 +176,90 @@ def test_penalty_window_respects_context_size() -> None:
 
 
 def test_ban_unk_default_is_true() -> None:
-    """The signature default must keep the unk ban ON (safe by default)."""
+    """The signature defaults must keep the unk ban ON and the n-gram ban at
+    the standard n=3 (safe by default)."""
     import inspect
     sig = inspect.signature(generate_text)
     assert sig.parameters["ban_unk"].default is True
     assert sig.parameters["repetition_penalty"].default == 1.15
+    assert sig.parameters["no_repeat_ngram_size"].default == 3
+
+
+# ---------------------------------------------------------------- n-gram ban
+
+
+def test_banned_by_ngram_completions_of_seen_trigram() -> None:
+    """_banned_by_ngram(generated=[5,6,7,5,6], n=3) must ban 7: generating 7
+    would re-form the trigram (5,6,7) that already appeared."""
+    from hwk_model.generation import _banned_by_ngram
+    assert _banned_by_ngram([5, 6, 7, 5, 6], 3) == {7}
+
+
+def test_banned_by_ngram_n1_and_n2_contracts() -> None:
+    """n=1 forbids ANY repeated token; n=2 forbids only the token that would
+    CLOSE a seen bigram (from [5,6,5] generating 6 re-forms (5,6) but 5 would
+    start the unseen bigram (5,5)); windows shorter than n-1 ban nothing."""
+    from hwk_model.generation import _banned_by_ngram
+    assert _banned_by_ngram([5, 6, 5], 1) == {5, 6}
+    assert _banned_by_ngram([5, 6, 5], 2) == {6}
+    assert _banned_by_ngram([5], 3) == set()
+    assert _banned_by_ngram([], 2) == set()
+    assert _banned_by_ngram([5, 6, 7], 0) == set()
+
+
+def test_no_repeat_ngram_breaks_trigram_loop_end_to_end() -> None:
+    """A run-5-shaped loop: the model's greedy favorite is ALWAYS token 30
+    ("emojis:" x14). With n=3 the first three 30s go through, but the token
+    that would complete a second (30,30,30) trigram is hard-banned - the
+    runner-up (35) appears instead and the triple can never repeat."""
+    logits = torch.full((40,), -10.0)
+    logits[30] = 12.0  # the runaway favorite, every step
+    logits[35] = 6.0   # permanent runner-up
+    logits[2] = -3.0   # EOS loses while unbaned
+
+    fake, _calls = _model_logits_queue([logits])  # queue repeats the last row
+
+    out = generate_text(fake, _Tokenizer(), "prompt", max_new_tokens=6,
+                        temperature=0, repetition_penalty=1.0, ban_unk=False)
+    # '30 30 30' may appear at most ONCE - the second closure was banned.
+    assert out.count("30 30 30") <= 1, out
+    assert "35" in out.split(), out
+
+
+def test_full_vocab_ban_is_skipped_not_fatal() -> None:
+    """When the bans would cover the ENTIRE vocabulary (tiny 4-token vocab:
+    n=1 ban on all generated {0,1,2} + unk {3}), the bans are skipped for
+    that step so argmax stays defined - generation continues with the raw
+    favorite instead of crashing."""
+    logits = torch.full((4,), -10.0)
+    logits[2] = 9.0
+    logits[1] = 8.0
+    logits[0] = 7.0
+    logits[3] = 6.0  # unk id in this fake tokenizer
+
+    # Steps emit 0, 1, 2 (each boosted); step 4's n=1 ban would cover
+    # {0,1,2} + unk {3} = the whole vocabulary -> skip, raw argmax (1) wins.
+    rows = []
+    for favorite in (0, 1, 2, 1):
+        row = logits.clone()
+        row[favorite] = 12.0
+        rows.append(row)
+    fake, calls = _model_logits_queue(rows)
+
+    class _TinyTokenizer(_Tokenizer):
+        unk_id = 3
+        eos_id = -1  # never matches: lets the run reach the full-ban step
+
+        def encode(self, text: str, *, add_special_tokens: bool = True) -> list[int]:
+            return [10]  # keep the prompt 1 token; vocab ids stay 0..3
+
+        def decode(self, tokens: list[int]) -> str:
+            return " ".join(str(t) for t in tokens)
+
+    out = generate_text(fake, _TinyTokenizer(), "prompt", max_new_tokens=4,
+                        temperature=0, repetition_penalty=1.0,
+                        ban_unk=True, no_repeat_ngram_size=1)
+    # No crash; the 4th step ran and its output is the raw argmax (1) -
+    # i.e. the skipped bans let the raw favorite through instead of crashing.
+    assert len(calls) == 4
+    assert out.split()[-1] == "1" and out.split().count("1") == 2, out

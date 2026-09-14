@@ -49,6 +49,12 @@ DONE_MARKER_TEXT = "=== soup pipeline done ==="
 # verdict + overnight human decision (default unchanged at 8h).
 MAX_WAIT_S = int(float(os.getenv("AALI_PHASE_C_MAX_WAIT_H", "8")) * 3600)
 POLL_S = 120
+# 2026-09-14 run-6 levers (env-tunable): the small-model mix
+# (scripts/build_aali_sft_small.py -> sft_small.jsonl) and a step count that
+# matches it (~420 optimizer steps/epoch at grad-accum 8; 2500 = ~6 epochs).
+SFT_DATA_ENV = os.getenv("AALI_PHASE_C_DATA", str(SFT_DATA))
+MAX_STEPS = int(os.getenv("AALI_PHASE_C_STEPS", "2800"))
+LEARNING_RATE = os.getenv("AALI_PHASE_C_LR", "2e-5")
 
 
 def log(msg: str) -> None:
@@ -89,17 +95,17 @@ def wait_gpu_free() -> bool:
 def run_sft() -> bool:
     cmd = [
         sys.executable, str(ROOT / "train_scratch.py"),
-        "--data", str(SFT_DATA),
+        "--data", SFT_DATA_ENV,
         "--tokenizer", str(TOKENIZER),
         "--output-dir", str(SFT_STATE),
         "--context", "4096", "--d-model", "768", "--heads", "12", "--layers", "12",
         "--batch-size", "1", "--gradient-accumulation", "8", "--grad-checkpoint",
-        "--max-steps", "2800", "--save-steps", "250", "--log-steps", "10",
-        "--learning-rate", "2e-5", "--warmup-steps", "100",
+        "--max-steps", str(MAX_STEPS), "--save-steps", "250", "--log-steps", "10",
+        "--learning-rate", LEARNING_RATE, "--warmup-steps", "100",
         "--dtype", "bf16", "--resume",
     ]
-    log(f"Phase C SFT starting: {SFT_STATE.name} on {SFT_DATA.name} "
-        f"(2800 steps ~ 4 epochs, ctx 4096, lr 2e-5)")
+    log(f"Phase C SFT starting: {SFT_STATE.name} on {Path(SFT_DATA_ENV).name} "
+        f"({MAX_STEPS} steps, lr {LEARNING_RATE}, ctx 4096)")
     with SFT_LOG.open("w", encoding="utf-8") as handle:
         proc = subprocess.run(cmd, stdout=handle, stderr=subprocess.STDOUT)
     ok = proc.returncode == 0 and (SFT_STATE / "final.pt").exists()
