@@ -69,6 +69,30 @@ def test_provider_chain_prefers_remote_brain(_clean_remote_env, monkeypatch):
     assert loop.call_args.kwargs["provider_label"] == "aali_remote"
 
 
+def test_own_model_passes_full_endpoint_url(monkeypatch, tmp_path):
+    """promoted.json carries the API ROOT (:20129/v1) but _openai_compat_loop
+    expects a FULL endpoint URL (cloud callers pass .../chat/completions).
+    The own-model branch must append /chat/completions — passing the bare
+    root posted to /v1 and got HTTP 404, so the promoted brain was never
+    reachable and Aali silently fell back to Ollama (2026-09-14 23:20)."""
+    promoted = tmp_path / "promoted.json"
+    promoted.write_text(
+        '{"base_url": "http://127.0.0.1:20129/v1", "model": "checkpoint-3873"}',
+        encoding="utf-8")
+    monkeypatch.setattr(agent_loop, "PROMOTED_FILE", promoted, raising=False)
+    monkeypatch.setattr(agent_loop, "OWN_MODEL_URL", "", raising=False)
+    monkeypatch.delenv("AALI_OWN_MODEL", raising=False)
+    with mock.patch.object(agent_loop, "_openai_compat_loop",
+                           return_value="OK") as loop, \
+         mock.patch.object(agent_loop, "_ollama_available", return_value=False):
+        out = agent_loop.agent_loop("hi", workspace_root=".",
+                                    request_id="t", mode="local")
+    assert out == "OK"
+    assert loop.call_args.kwargs["base_url"] == \
+        "http://127.0.0.1:20129/v1/chat/completions"
+    assert loop.call_args.kwargs["provider_label"] == "aali_own"
+
+
 def test_falls_back_when_remote_brain_fails_midflight(_clean_remote_env, monkeypatch):
     """If the remote brain dies mid-loop, the chain continues locally."""
     monkeypatch.setattr(agent_loop, "REMOTE_BRAIN_URL", "http://192.168.1.10:5055", raising=False)

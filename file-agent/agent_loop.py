@@ -1600,7 +1600,13 @@ def _agent_loop(
             log_event(request_id, "provider_selected", provider="aali_own", model=own["model"])
             response = _openai_compat_loop(
                 user_message, root, request_id,
-                base_url=own["base_url"], api_key=OWN_MODEL_API_KEY,
+                # _openai_compat_loop expects the FULL endpoint URL (cloud
+                # callers pass .../chat/completions); promoted.json carries the
+                # API ROOT (http://127.0.0.1:20129/v1). Passing the root posted
+                # to /v1 and got 404 — the brain was never actually reachable
+                # through this path (2026-09-14 23:20 postmortem).
+                base_url=f"{own['base_url'].rstrip('/')}/chat/completions",
+                api_key=OWN_MODEL_API_KEY,
                 model=own["model"], max_iterations=max_iterations, history=history,
                 policy=policy, confirmed=confirmed, gate_state=gate_state,
                 provider_label="aali_own",
