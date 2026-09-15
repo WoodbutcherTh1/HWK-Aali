@@ -104,6 +104,40 @@ Full mission brief was supplied by the owner in-session.
   Remaining in STEP 5: code-signing (owner certs), VPS + real secrets
   (owner), UI direction (Lead Agent inbox questions still open).
 
+## 2026-09-15, day session II — owner decisions + Q4/Q5/Q8 built (Buffy)
+
+Owner pushed (5cfcbe0..3da822a → origin/main) and answered the open
+questions by best practice; implemented same-session:
+- **Q4 first-run config**: aali_node/node_config.py (owner-only JSON,
+  chmod 600 on POSIX + refusal to loosen existing modes, token_file
+  indirection for rotation, unknown keys refused, secrets() redaction,
+  cache-guarded secret reads) + daemon --config/--save-config with
+  precedence flag > env > saved config > builtin; explicit --no-commands
+  always wins; CLI never prints tokens. The config lives OUTSIDE the
+  install so an update swap can never delete it.
+- **Q5 update banner**: daemon publishes structured `update_staged`
+  (version only — content-free rule intact) on a verified stage; the shell
+  renders a dismissible gold banner; empty on every failure path
+  (refused/crashed checks never fake a staged update).
+- **Q8 secrets**: scripts/aali_hub_secrets.py (repo-refusing, idempotent,
+  owner-only, redacted stdout) + the REAL production path: env keys that
+  are 64-hex now load as Ed25519 via update_server.load_signing_key
+  (seed=private, expect_public=True for pub hex; verify_manifest derives
+  the public key from a private key so a Node holding only the seed can
+  verify). Before this, an env key could only ever be HMAC — the docstring
+  promised Ed25519 auto-selection that never existed. Real production
+  secrets generated to D:/hwk-data/aali-hub-secrets/ (6 files incl.
+  hub.env). Ed25519 sign→verify roundtrip proven live through the same
+  sign_manifest/verify_manifest pair the wire uses.
+- Q3/Q6 documented as rejected (in-box note), Q7/Q9/Q10 decided/directive.
+- Tests: +60 (node config 24, CLI wiring 13, banner/ed25519 13, plus
+  prior-count corrections). Suites: 675 passed / 9 skipped (.venv),
+  130 passed / 4 skipped (hub subset incl. live WS e2e).
+- Lesson (hit again): 64-hex seed and 64-hex PUBLIC are textually
+  identical — key-material intent must be stated (expect_public), never
+  guessed; the first version of load_signing_key silently turned a public
+  key into a signing key.
+
 ## 2026-09-15, later still — STEP 5 UI layer (Buffy)
 Shell shipped as described above. UI/UX direction from the Lead Agent was
 NOT in the inbox at build time; the shell follows the product's existing

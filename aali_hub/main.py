@@ -41,12 +41,14 @@ class HubState:
                              brain_token=config.brain_token)
         # Update store: active only when a signing key is configured —
         # update_server (HMAC mode) refuses an empty key by design, and an
-        # unsigned update surface must simply not exist. Ed25519 is used
-        # automatically when the `cryptography` package is installed.
+        # unsigned update surface must simply not exist. An env key that
+        # parses as an Ed25519 seed hex selects Ed25519 automatically
+        # (production; load_signing_key); anything else stays HMAC.
         self.updates: UpdateStore | None = None
         if config.update_signing_key:
+            from aali_hub.update_server import load_signing_key
             self.updates = UpdateStore(
-                config.update_dir, config.update_signing_key,
+                config.update_dir, load_signing_key(config.update_signing_key),
                 keep_versions=config.update_keep_versions)
 
 

@@ -152,7 +152,7 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
              session_id=session_id, workspace=str(workspace_root),
              allow_commands=allow_commands, native_confirm=native_confirm,
              stats=dict(session.stats), connected_since=None,
-             last_event="", last_error="")
+             last_event="", last_error="", update_staged="")
 
     if update_hub:
         # transport-independent: a Node that cannot serve WebSockets can
@@ -266,7 +266,10 @@ def _run_update_check(update_hub: str, token: str, verification_key: str,
         else:
             print(f"aali_node: staged verified update → {staged} "
                   "(activate by restarting through the new install)")
-            _publish(last_event=f"verified update staged: {staged.name}")
+            # structured field for the shell's banner (Q5): the VERSION only
+            # — staging paths and artifact names never go to the UI
+            _publish(last_event=f"verified update staged: {staged.name}",
+                     update_staged=staged.name)
     except updater.NodeUpdateError as exc:
         # fail-closed refusal (bad signature / hash / zip) — logged, and
         # the Node keeps serving the version it already trusts
@@ -290,17 +293,20 @@ def main(argv: list[str] | None = None) -> int:
         prog="aali_node",
         description="Aali Node — user-side execution daemon for Aali Cloud",
     )
-    parser.add_argument("--hub", default=os.getenv("AALI_HUB_URL",
-                                                   "ws://127.0.0.1:8080"),
-                        help="Hub WebSocket base URL (default env "
-                             "AALI_HUB_URL or ws://127.0.0.1:8080)")
-    parser.add_argument("--token", default=os.getenv("AALI_NODE_TOKEN", ""),
-                        help="access JWT from the Hub login (or env "
-                             "AALI_NODE_TOKEN)")
-    parser.add_argument("--workspace",
-                        default=os.getenv("AALI_NODE_WORKSPACE",
-                                          str(Path.home() / "AaliWorkspace")),
-                        help="the ONLY directory this Node may touch")
+    # NOTE: connection settings default to None and are resolved AFTER
+    # parsing with the precedence flag > env > saved config > builtin
+    # default (see below) — argparse cannot express that order by itself.
+    parser.add_argument("--hub", default=None,
+                        help="Hub WebSocket base URL (env AALI_HUB_URL; "
+                             "default ws://127.0.0.1:8080)")
+    parser.add_argument("--token", default=None,
+                        help="access JWT from the Hub login (env "
+                             "AALI_NODE_TOKEN, or the saved first-run "
+                             "config)")
+    parser.add_argument("--workspace", default=None,
+                        help="the ONLY directory this Node may touch "
+                             "(env AALI_NODE_WORKSPACE; default "
+                             "~/AaliWorkspace)")
     parser.add_argument("--session-id",
                         default=os.getenv("AALI_NODE_SESSION", ""),
                         help="pin the session id (leg keys derive from "
@@ -311,17 +317,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--native-confirm", action="store_true",
                         help="ask via native OS dialogs instead of the "
                              "console (GUI-shell mode)")
-    parser.add_argument("--update-hub", default=os.getenv("AALI_UPDATE_HUB"),
+    parser.add_argument("--update-hub", default=None,
                         help="opt-in auto-update: Hub base URL, e.g. "
                              "http://hub.example:8080 (env AALI_UPDATE_HUB)")
-    parser.add_argument("--update-key",
-                        default=os.getenv("AALI_NODE_UPDATE_KEY"),
-                        help="update-manifest verification key (HMAC "
-                             "shared secret; env AALI_NODE_UPDATE_KEY)")
+    parser.add_argument("--update-key", default=None,
+                        help="update-manifest verification key (env "
+                             "AALI_NODE_UPDATE_KEY, or the saved config)")
     parser.add_argument("--shell", action="store_true",
                         help="GUI mode: pywebview window + system tray "
                              "instead of the console (native confirmations "
                              "are always on in the shell)")
+    parser.add_argument("--config",
+                        default=os.getenv("AALI_NODE_CONFIG", ""),
+                        help="load hub/token/workspace from a saved "
+                             "first-run config file (owner-only JSON; "
+                             "explicit flags win over it; env "
+                             "AALI_NODE_CONFIG)")
+    parser.add_argument("--save-config", action="store_true",
+                        help="persist --hub/--token/--workspace/--update-* "
+                             "to the first-run config file (owner-only "
+                             "permissions), then continue")
     parser.add_argument("--activate-update", action="store_true",
                         help="swap a previously STAGED update into this "
                              "install (staged under <install>/staged/ by "
@@ -329,9 +344,76 @@ def main(argv: list[str] | None = None) -> int:
                              "it; the Node does NOT serve in this mode")
     args = parser.parse_args(argv)
 
+    # ---- first-run config (Q4): resolve connection settings -------------
+    # Precedence: explicit flag > environment > saved config > builtin.
+    # A flag the user typed this run ALWAYS wins; env is a machine-level
+    # setting; the saved config is the first-run convenience layer.
+    from aali_node.node_config import NodeConfigError, load_node_config
+
+    saved = None
+    if args.config:
+        try:
+            saved = load_node_config(args.config)
+        except NodeConfigError as exc:
+            print(f"aali_node: --config failed: {exc}", file=sys.stderr)
+            return 2
+
+    def _resolve(cli_value: "str | None", env_name: str,
+                 config_value: "str | None", fallback: str) -> str:
+        if cli_value is not None:
+            return cli_value
+        env_val = os.getenv(env_name, "")
+        if env_val:
+            return env_val
+        if config_value is not None and config_value != "":
+            return config_value
+        return fallback
+
+    args.hub = _resolve(args.hub, "AALI_HUB_URL",
+                        saved.hub_url if saved else None,
+                        "ws://127.0.0.1:8080")
+    args.token = _resolve(args.token, "AALI_NODE_TOKEN",
+                          saved.token if saved else None, "")
+    args.workspace = _resolve(
+        args.workspace, "AALI_NODE_WORKSPACE",
+        saved.workspace if saved else None,
+        str(Path.home() / "AaliWorkspace"))
+    args.update_hub = _resolve(
+        args.update_hub, "AALI_UPDATE_HUB",
+        saved.update_hub if saved else None, "") or None
+    args.update_key = _resolve(
+        args.update_key, "AALI_NODE_UPDATE_KEY",
+        (saved.update_key or None) if saved else None, "") or None
+    # saved allow_commands applies only when the config is in play AND the
+    # user did not pass --no-commands this run (checked again below)
+    allow_commands_flag = saved.allow_commands if saved else True
+
+    if args.save_config:
+        from aali_node.node_config import NodeConfig
+        if not args.token:
+            print("aali_node: --save-config needs --token (secrets are "
+                  "not prompted for)", file=sys.stderr)
+            return 2
+        try:
+            cfg = NodeConfig({
+                "hub_url": args.hub,
+                "token": args.token,
+                "workspace": args.workspace,
+                "allow_commands": not args.no_commands,
+                "update_hub": args.update_hub or "",
+                "update_key": args.update_key or "",
+            })
+            path = cfg.save(_default_config_path())
+            print(f"aali_node: config saved ({path}) — owner-only "
+                  "permissions; future runs can use --config")
+        except Exception as exc:
+            print(f"aali_node: could not save config: {exc}", file=sys.stderr)
+            return 2
+
     if not args.token:
         print("aali_node: no token — log in via the Hub "
-              "(POST /auth/login) and pass --token or set AALI_NODE_TOKEN",
+              "(POST /auth/login), pass --token / set AALI_NODE_TOKEN, "
+              "or save a first-run config with --save-config",
               file=sys.stderr)
         return 2
     if len(args.token) > 4096:
@@ -340,16 +422,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.update_hub and not args.update_key:
         print("aali_node: --update-hub needs --update-key (or env "
-              "AALI_NODE_UPDATE_KEY) — refusing to check updates it "
-              "could not verify", file=sys.stderr)
+              "AALI_NODE_UPDATE_KEY, or update_key in the saved config) "
+              "— refusing to check updates it could not verify",
+              file=sys.stderr)
         return 2
 
     install_root = _detect_install_root()
 
+    # explicit --no-commands ALWAYS wins over the saved config value
+    allow_commands = (not args.no_commands) and allow_commands_flag
+
     if args.shell:
         from aali_node.shell import run_shell
         return run_shell(args.hub, args.token, args.workspace,
-                         allow_commands=not args.no_commands,
+                         allow_commands=allow_commands,
                          update_hub=args.update_hub,
                          update_key=args.update_key,
                          install_root=install_root)
@@ -392,12 +478,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     return run_node(args.hub, args.token, args.workspace,
-                    allow_commands=not args.no_commands,
+                    allow_commands=allow_commands,
                     session_id=args.session_id or None,
                     native_confirm=args.native_confirm,
                     update_hub=args.update_hub,
                     update_key=args.update_key,
                     install_root=install_root)
+
+
+def _default_config_path() -> "Path":
+    """First-run config location (node_config default; testable seam)."""
+    from aali_node.node_config import default_config_path
+    return default_config_path()
 
 
 def _detect_install_root() -> "Path":

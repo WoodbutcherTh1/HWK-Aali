@@ -5,6 +5,48 @@ UI/UX direction. Buffy (Freebuff coding agent) works through the shared repo;
 this file is the message board. Leave notes here, claim areas via your own
 `tasks/<name>.md`, never edit another agent's claim file.
 
+## From the OWNER (via Buffy) — 2026-09-15, day session — the open questions are ANSWERED
+
+The owner reviewed the four open UI questions and the owner-items list and
+decided by best practice; Buffy implemented the implications same-session
+(suites 675 green .venv / 130 green hub subset, commit below):
+
+- **Q3 menu bar: REJECTED.** In-page buttons stay. A native menu bar is an
+  extra platform-specific layer for zero information gain in a 2-action UI;
+  the tray already carries show/quit.
+- **Q4 first-run token entry: BUILT** — `aali_node/node_config.py` + daemon
+  `--config` / `--save-config`. Owner-only JSON at
+  `%APPDATA%/AaliNode/aali-node.json` (POSIX: `~/.aali-node/`, chmod 600),
+  precedence flag > env > saved config > builtin; `token_file` indirection
+  for rotation; secrets redacted in every view. The shell stays a viewer;
+  once the daemon boots from saved config no token touches the UI.
+- **Q5 staged-update banner: BUILT** — the daemon publishes a structured
+  content-free `update_staged` field (VERSION only) and the shell renders a
+dismissible gold banner ("تحديث مُوقَّع جاهز للتفعيل — الإصدار …").
+- **Q6 windowed exe: REJECTED for now.** The headless CLI is the daemon's
+  primary contract; a windowed exe would hide CLI output. Revisit only with
+  a real GUI-first distribution story.
+- **Q7 code-signing: OPEN, owner-only** (EV cert purchase). Everything else
+  is signed-verify-by-default; SmartScreen warnings are the known cost.
+- **Q8 VPS + secrets: secrets DONE** — `scripts/aali_hub_secrets.py`
+  generated the real production set into `D:/hwk-data/aali-hub-secrets/`
+  (JWT secret, brain token, protocol master, **Ed25519 seed + public hex**,
+  ready-to-source `hub.env`; owner-only perms, never overwrites, never in
+  the repo). The production Ed25519 path is now REAL: env keys that parse as
+  seed hex load as Ed25519 (`load_signing_key`), HMAC stays the fallback —
+  before this session an env key could only ever be HMAC. Owner still owes
+  the VPS itself; deploy = copy `hub.env` → `/etc/aali-hub/env`, chmod 600,
+  source before uvicorn.
+- **Q9 HuggingFace/OpenRouter: DECIDED — defer.** Not needed until layer-0
+  external distribution goes live; revisit after the Hub has real users.
+- **Q10 Wake-on-LAN: DIRECTIVE** — the Hub must stay honest: without
+  `AALI_WOL_MAC` configured, WoL advertises itself as unavailable instead of
+  pretending to wake the brain. (The wol module already behaves this way;
+  now it is policy, not accident.) Owner runs the NIC/BIOS check when the
+  VPS exists.
+
+— recorded by Buffy on the owner's behalf
+
 ## From Buffy — 2026-09-15, night watch
 
 - Baseline: suite 521 passed / 1 skipped in the training venv. Tree clean at

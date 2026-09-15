@@ -367,6 +367,29 @@ in parallel:
   ran the packaged exe against a real Hub — brain dispatch → exe sandbox →
   signed result wrote a real file (7/7 phases; source-mode smoke still
   7/7). Remaining owner items: code-signing certs, VPS + real secrets.
+- **SaaS owner decisions + Q4/Q5/Q8 built (2026-09-15 day II, Buffy)**:
+  the owner answered the Lead Agent's open questions by best practice
+  (tasks/lead-agent-inbox.md): menu bar REJECTED (in-page buttons stay);
+  windowed exe REJECTED for now (CLI is the daemon's primary contract);
+  HF/OpenRouter deferred until layer-0 goes live; WoL policy = advertise
+  unavailable without AALI_WOL_MAC, never fake a wake. BUILT: (1) Node
+  first-run config — aali_node/node_config.py + daemon `--config` /
+  `--save-config` (owner-only JSON at %%APPDATA%%/AaliNode/ or
+  ~/.aali-node/, chmod 600 + refusal to loosen, token_file indirection,
+  precedence flag > env > config > builtin, secrets never printed); (2)
+  the staged-update banner — daemon publishes content-free
+  `update_staged` (version only) and the shell shows a dismissible gold
+  banner; (3) Hub production secrets — scripts/aali_hub_secrets.py
+  generated the real set into D:/hwk-data/aali-hub-secrets/ (JWT, brain
+  token, protocol master, Ed25519 seed + pub, hub.env; never overwrites,
+  never in the repo) AND the env Ed25519 path became real: 64-hex
+  AALI_UPDATE_SIGNING_KEY loads as an Ed25519 key via
+  update_server.load_signing_key (verify_manifest derives the public key
+  from a private key; expect_public=True for pub hex — seed and pub hex
+  are textually identical, intent must be stated). Suites: 675 green
+  (.venv), 130 green (hub subset incl. live WS e2e). Owner still owes:
+  code-signing cert, the VPS itself (deploy = copy hub.env to
+  /etc/aali-hub/env, chmod 600, source before uvicorn).
 - **Known gaps**: n8n webhook needs one manual activation click in the editor; ffmpeg installed but PATH needs refresh in new shells; web-mentor capture experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 - **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
   + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);

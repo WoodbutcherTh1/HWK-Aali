@@ -31,7 +31,8 @@ except ImportError:
     _HAS_ED25519 = False
 
 __all__ = ["UpdateStore", "UpdateError", "sign_manifest", "verify_manifest",
-           "HAS_ED25519", "build_manifest"]
+           "HAS_ED25519", "build_manifest", "load_signing_key",
+           "generate_signing_keypair"]
 
 HAS_ED25519 = _HAS_ED25519
 
@@ -66,14 +67,23 @@ def sign_manifest(manifest: dict[str, Any], key: Any) -> dict[str, Any]:
 
 
 def verify_manifest(manifest: dict[str, Any], key: Any) -> bool:
-    """Verify a manifest signature (constant-time comparisons)."""
+    """Verify a manifest signature (constant-time comparisons).
+
+    Accepts an Ed25519PublicKey, an Ed25519PrivateKey (the public key is
+    derived — a Node provisioned with the seed hex can verify without a
+    second config value), or an HMAC shared secret string.
+    """
     signature = manifest.get("signature")
     if not signature:
         return False
     unsigned = {k: v for k, v in manifest.items()
                 if k not in ("signature",)}
     alg = manifest.get("sig_alg", "hmac-sha256")
-    if alg == "ed25519" and _HAS_ED25519 and isinstance(key, Ed25519PublicKey):
+    if alg == "ed25519" and _HAS_ED25519:
+        if isinstance(key, Ed25519PrivateKey):
+            key = key.public_key()
+        if not isinstance(key, Ed25519PublicKey):
+            return False
         try:
             key.verify(bytes.fromhex(signature), _canonical(unsigned))
             return True
@@ -85,6 +95,62 @@ def verify_manifest(manifest: dict[str, Any], key: Any) -> bool:
     expected = hmac_mod.new(secret, _canonical(unsigned),
                             hashlib.sha256).hexdigest()
     return hmac_mod.compare_digest(str(signature), expected)
+
+
+def load_signing_key(raw: str | bytes, expect_public: bool = False) -> Any:
+    """Turn ``AALI_UPDATE_SIGNING_KEY`` into a signing/verifying key object.
+
+    Formats, in order:
+    - Ed25519 seed hex (64 hex chars) → the PRODUCTION algorithm: the seed
+      is the private key, and the matching Ed25519PublicKey is derived from
+      it (scripts/aali_hub_secrets.py prints both from one seed).
+    - any other non-empty string → HMAC-SHA256 shared secret (dev-grade).
+
+    With ``expect_public=True`` a 64-hex value is loaded as an
+    Ed25519PUBLIC key (update_pub_hex.txt) — seed and public hex have the
+    same textual shape, so the intent must be stated, never guessed; a
+    non-hex value with expect_public=True is refused.
+
+    This is what makes the documented 'Ed25519 auto-selected' path real for
+    env-configured Hubs: previously an env key could ONLY ever be HMAC,
+    regardless of the cryptography package being installed.
+    """
+    if isinstance(raw, bytes):
+        text = raw.decode("utf-8", errors="strict").strip()
+    else:
+        text = str(raw).strip()
+    if not text:
+        raise UpdateError("empty signing key")
+    if _HAS_ED25519 and len(text) == 64 and \
+            all(c in "0123456789abcdefABCDEF" for c in text):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey, Ed25519PublicKey)
+        if expect_public:
+            return Ed25519PublicKey.from_public_bytes(bytes.fromhex(text))
+        return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(text))
+    if expect_public:
+        raise UpdateError(
+            "expected an Ed25519 public key (64 hex chars) — refusing to "
+            "guess what this key material is")
+    return text
+
+
+def generate_signing_keypair() -> tuple[str, str]:
+    """(seed_hex, public_hex) — requires the cryptography package."""
+    if not _HAS_ED25519:
+        raise UpdateError(
+            "Ed25519 needs the 'cryptography' package (pip install "
+            "cryptography) — or use an HMAC secret (any long string)")
+    from cryptography.hazmat.primitives import serialization
+    key = Ed25519PrivateKey.generate()
+    seed = key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption())
+    pub = key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw)
+    return seed.hex(), pub.hex()
 
 
 def build_manifest(version: str, min_version: str, url: str, sha256: str, *,

@@ -22,6 +22,22 @@ Design notes
   environments can import this module for tests.
 - The pure view logic (ShellState) is headless-testable; webview/pystray are
   touched only inside run_shell / build_tray_icon.
+
+Owner decisions folded in (2026-09-15, answering the Lead Agent's open
+questions — see tasks/lead-agent-inbox.md):
+- Q3 menu bar: REJECTED — in-page buttons stay. A native menu bar is an
+  extra platform-specific layer for zero information gain in a 2-action
+  UI; the tray already carries show/quit.
+- Q4 first-run token entry: BUILT as a persisted config (aali_node/
+  node_config.py + daemon --config/--save-config). The shell remains a
+  viewer over the daemon contract; once the daemon boots from saved
+  config, no token ever touches the UI.
+- Q5 staged-update banner: BUILT — the daemon publishes a structured
+  ``update_staged`` field (version only, content-free like the rest of
+  the status contract) and the shell renders a dismissible gold banner.
+- Q6 windowed exe: REJECTED for now — the headless CLI is the daemon's
+  primary contract; a windowed exe would hide CLI output. Revisit only
+  with a real GUI-first distribution story.
 """
 from __future__ import annotations
 
@@ -103,6 +119,7 @@ class ShellState:
             "workspace": str(snapshot.get("workspace") or ""),
             "allow_commands": bool(snapshot.get("allow_commands", True)),
             "connected_since": float(since) if since else None,
+            "update_staged": str(snapshot.get("update_staged") or ""),
             "stats": stats,
             "log": self._log,
         }
@@ -162,6 +179,14 @@ _PAGE = """<!DOCTYPE html>
   button:hover { border-color: var(--gold); color: var(--gold); }
   button.warn:hover { border-color: var(--bad); color: var(--bad); }
   .traynote { color: var(--dim); font-size: 11px; margin-top: 8px; text-align: center; }
+  .ubanner { display: flex; align-items: center; gap: 8px;
+             background: #3a3323; border: 1px solid var(--gold);
+             border-radius: 10px; padding: 9px 11px; margin-bottom: 10px;
+             font-size: 12.5px; color: var(--gold); }
+  .ubanner button { flex: 0 0 auto; background: transparent;
+                    border: 1px solid var(--line); border-radius: 8px;
+                    padding: 4px 10px; color: var(--dim); font-size: 11px; }
+  .ubanner button:hover { color: var(--text); border-color: var(--dim); }
 </style>
 </head>
 <body>
@@ -172,6 +197,10 @@ _PAGE = """<!DOCTYPE html>
       <div class="sub" id="state">…</div>
     </div>
   </header>
+  <div class="ubanner" id="ubanner" hidden>
+    <span id="umsg"></span>
+    <button onclick="dismissUpdate()">حسناً</button>
+  </div>
   <div class="cards">
     <div class="card"><b id="n-exec">0</b><span>عمليات نُفذت</span></div>
     <div class="card"><b id="n-deny">0</b><span>رفضت</span></div>
@@ -190,11 +219,23 @@ _PAGE = """<!DOCTYPE html>
 <script>
   const esc = s => String(s).replace(/[&<>"]/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let dismissedUpdate = '';   // session-scoped: a pending update returns
+                              // on the next app start until it activates
+  function dismissUpdate() {
+    dismissedUpdate = document.getElementById('umsg').textContent;
+    document.getElementById('ubanner').hidden = true;
+  }
   async function tick() {
     try {
       const v = await pywebview.api.snapshot();
       document.getElementById('dot').className = 'dot ' + v.state_class;
       document.getElementById('state').textContent = v.state_ar;
+      const ub = document.getElementById('ubanner');
+      const umsg = document.getElementById('umsg');
+      umsg.textContent = v.update_staged
+        ? ('تحديث مُوقَّع جاهز للتفعيل — الإصدار ' + v.update_staged
+           + ' (يُفعَّل عند إعادة تشغيل العقدة)') : '';
+      ub.hidden = !(v.update_staged && umsg.textContent !== dismissedUpdate);
       document.getElementById('n-exec').textContent = v.stats.executed || 0;
       document.getElementById('n-deny').textContent = v.stats.denied || 0;
       document.getElementById('n-err').textContent = v.stats.errors || 0;
@@ -300,8 +341,9 @@ def run_shell(hub_url: str, token: str, workspace_root: str | Path, *,
               install_root: "str | Path | None" = None) -> int:
     """GUI entry: daemon thread + window + tray. Blocks until exit."""
     if not token:
-        print("aali_node shell: no token — pass --token or set "
-              "AALI_NODE_TOKEN", file=sys.stderr)
+        print("aali_node shell: no token — pass --token, set "
+              "AALI_NODE_TOKEN, or save a first-run config "
+              "(--save-config, then --config)", file=sys.stderr)
         return 2
 
     try:
