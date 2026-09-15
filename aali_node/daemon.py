@@ -304,6 +304,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="GUI mode: pywebview window + system tray "
                              "instead of the console (native confirmations "
                              "are always on in the shell)")
+    parser.add_argument("--activate-update", action="store_true",
+                        help="swap a previously STAGED update into this "
+                             "install (staged under <install>/staged/ by "
+                             "--update-hub), optionally restarting into "
+                             "it; the Node does NOT serve in this mode")
     args = parser.parse_args(argv)
 
     if not args.token:
@@ -327,6 +332,44 @@ def main(argv: list[str] | None = None) -> int:
                          allow_commands=not args.no_commands,
                          update_hub=args.update_hub,
                          update_key=args.update_key)
+
+    if args.activate_update:
+        from aali_node.activate import (spawn_detached_activation,
+                                        staged_version)
+        install_root = Path(args.workspace).resolve().parent
+        staged_dir = install_root / "staged"
+        if not staged_dir.is_dir():
+            print("aali_node: nothing staged under "
+                  f"{staged_dir} — run with --update-hub first",
+                  file=sys.stderr)
+            return 2
+        newest = max((d for d in staged_dir.iterdir() if d.is_dir()),
+                     key=lambda d: d.name, default=None)
+        if newest is None:
+            print("aali_node: staged/ exists but holds no version",
+                  file=sys.stderr)
+            return 2
+        try:
+            staged_version(newest)
+            print(f"aali_node: activating staged update {newest.name} …")
+        except Exception as exc:
+            print(f"aali_node: staged directory invalid: {exc}",
+                  file=sys.stderr)
+            return 2
+        if not spawn_detached_activation(
+                newest, install_root,
+                restart_args=["--hub", args.hub, "--token", args.token,
+                              "--workspace", args.workspace,
+                              "--native-confirm"]
+                + (["--update-hub", args.update_hub,
+                    "--update-key", args.update_key]
+                   if args.update_hub else [])):
+            print("aali_node: could not launch the activation worker",
+                  file=sys.stderr)
+            return 1
+        print("aali_node: activation worker launched — this Node exits; "
+              "the log is activate_update.log next to the install")
+        return 0
 
     return run_node(args.hub, args.token, args.workspace,
                     allow_commands=not args.no_commands,
