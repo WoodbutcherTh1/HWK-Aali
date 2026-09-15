@@ -143,7 +143,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", action="store_true",
                         help="keep the temp install for inspection")
+    parser.add_argument("--frozen-exe", default="",
+                        metavar="PATH",
+                        help="smoke the PACKAGED Node exe (PyInstaller "
+                             "build-desktop/dist/aali-node.exe) instead of "
+                             "the source daemon: phase 3 dispatch runs "
+                             "against the exe; staging/activation phases "
+                             "are skipped (frozen activation is refused by "
+                             "design — updates swap on source deploys)")
     args = parser.parse_args()
+    frozen_exe = Path(args.frozen_exe).resolve() if args.frozen_exe else None
+    if frozen_exe is not None and not frozen_exe.is_file():
+        print(f"--frozen-exe: no such file: {frozen_exe}")
+        return 2
 
     tmp = Path(tempfile.mkdtemp(prefix="aali-node-smoke-"))
     print(f"smoke root: {tmp}" + ("  (--keep)" if args.keep else ""))
@@ -223,50 +235,77 @@ def main() -> int:
             return _finish(args, tmp)
 
         # publish a REAL 0.2.0 artifact through the admin surface
+        # (frozen smoke skips the update channel: the exe's activation is
+        # refused by design, so there is nothing to stage into)
         ver = "0.2.0"
-        buf = io.BytesIO()
-        stage_zip = tmp / f"artifact-{ver}.zip"
-        _make_node_install(tmp / f"artifact-src-{ver}", ver)
-        with zipfile.ZipFile(buf, "w") as zf:
-            for f in sorted((tmp / f"artifact-src-{ver}").rglob("*")):
-                if f.is_file():
-                    zf.write(f, f.relative_to(tmp / f"artifact-src-{ver}"))
-        stage_zip.write_bytes(buf.getvalue())
-        code, body = _http_json(
-            f"{base}/api/admin/updates/publish?version={ver}&min_version=0",
-            token=owner_token, raw=stage_zip.read_bytes())
-        if code == 200:
-            _ok("publish 0.2.0", "signed artifact accepted")
+        if frozen_exe is None:
+            buf = io.BytesIO()
+            stage_zip = tmp / f"artifact-{ver}.zip"
+            _make_node_install(tmp / f"artifact-src-{ver}", ver)
+            with zipfile.ZipFile(buf, "w") as zf:
+                for f in sorted((tmp / f"artifact-src-{ver}").rglob("*")):
+                    if f.is_file():
+                        zf.write(f, f.relative_to(tmp / f"artifact-src-{ver}"))
+            stage_zip.write_bytes(buf.getvalue())
+            code, body = _http_json(
+                f"{base}/api/admin/updates/publish?version={ver}&min_version=0",
+                token=owner_token, raw=stage_zip.read_bytes())
+            if code == 200:
+                _ok("publish 0.2.0", "signed artifact accepted")
+            else:
+                _fail("publish 0.2.0", f"HTTP {code}")
+                return _finish(args, tmp)
         else:
-            _fail("publish 0.2.0", f"HTTP {code}")
-            return _finish(args, tmp)
+            _ok("publish skipped (frozen mode)")
 
         # ---- phase 2: real daemon + update staging ---------------------------
-        _phase("phase 2 — real daemon stages the update")
+        _phase("phase 2 — real daemon stages the update" if frozen_exe is None
+               else "phase 2 — frozen exe daemon up")
         install = tmp / "install"
         _make_node_install(install, "0.1.0")
         workspace = tmp / "ws"
         workspace.mkdir()
         daemon_log = open(tmp / "daemon.log", "w", encoding="utf-8")  # noqa: SIM115
-        daemon_proc = subprocess.Popen(
-            [py, "-m", "aali_node",
-             "--hub", f"ws://127.0.0.1:{port}",
-             "--token", user_token,
-             "--workspace", str(workspace),
-             "--session-id", "smokesess",
-             "--update-hub", base, "--update-key", SIGNING_KEY],
-            cwd=str(install),
-            env=dict(env, PYTHONPATH=str(install)),
-            stdout=daemon_log, stderr=subprocess.STDOUT)
-        staged = install / "staged" / ver / "aali_node" / "__init__.py"
-        deadline = time.monotonic() + 20.0
-        while time.monotonic() < deadline and not staged.is_file():
-            time.sleep(0.2)
-        if staged.is_file():
-            _ok("update staged", f"{staged.parent.parent} (verified)")
+        if frozen_exe is not None:
+            # the PACKAGED exe IS the daemon (its console entry); no update
+            # check — a frozen install must never stage into the repo's dist
+            daemon_cmd = [str(frozen_exe),
+                          "--hub", f"ws://127.0.0.1:{port}",
+                          "--token", user_token,
+                          "--workspace", str(workspace),
+                          "--session-id", "smokesess"]
+            daemon_env = env
         else:
-            _fail("update staged", "daemon never staged 0.2.0 in time")
-            return _finish(args, tmp)
+            daemon_cmd = [py, "-m", "aali_node",
+                          "--hub", f"ws://127.0.0.1:{port}",
+                          "--token", user_token,
+                          "--workspace", str(workspace),
+                          "--session-id", "smokesess",
+                          "--update-hub", base, "--update-key", SIGNING_KEY]
+            daemon_env = dict(env, PYTHONPATH=str(install))
+        daemon_proc = subprocess.Popen(
+            daemon_cmd, cwd=str(install), env=daemon_env,
+            stdout=daemon_log, stderr=subprocess.STDOUT)
+        if frozen_exe is not None:
+            # no staging to wait for — give the exe a moment to connect,
+            # then let phase 3's dispatch-with-retry prove the live loop
+            time.sleep(2.0)
+            if daemon_proc.poll() is not None:
+                _fail("frozen daemon up", "exe exited immediately "
+                      f"(rc={daemon_proc.returncode})")
+                return _finish(args, tmp)
+            _ok("frozen daemon up", frozen_exe.name)
+            staged = None
+        else:
+            staged = install / "staged" / ver / "aali_node" / "__init__.py"
+            deadline = time.monotonic() + 20.0
+            while time.monotonic() < deadline and not staged.is_file():
+                time.sleep(0.2)
+            if staged.is_file():
+                _ok("update staged", f"{staged.parent.parent} (verified)")
+            else:
+                _fail("update staged", "daemon never staged 0.2.0 in time")
+                return _finish(args, tmp)
 
         # ---- phase 3: real brain leg dispatch ---------------------------------
         _phase("phase 3 — brain dispatch → node sandbox")
@@ -335,6 +374,10 @@ def main() -> int:
         # user token; the result status proves the whole signed chain.
 
         # ---- phase 4: activation swap ----------------------------------------
+        if frozen_exe is not None:
+            _phase("phase 4 — activation swap (skipped: frozen exe)")
+            _ok("activation skipped (frozen mode)")
+            return _finish(args, tmp)
         _phase("phase 4 — activation swap (staged 0.2.0 → install)")
         from aali_node.activate import activate_update, install_version
         new_version = activate_update(install / "staged" / ver, install)

@@ -85,10 +85,24 @@ Full mission brief was supplied by the owner in-session.
   contract). Suites: 615 green (.venv), 157 green hub subset incl. live WS
   e2e. Lesson: keep the status contract venv-agnostic from day one —
   find_spec guards like the house tests, rc in (1,2) tolerance.
-- Next (not started, needs owner/Lead Agent input): activation step (swap
-  + restart), PyInstaller packaging + code-signing (owner certificates),
-  Hub VPS provisioning + real secrets (owner).
-- VPS provisioning + Cloudflare Tunnel + real secrets (owner).
+- NEXT DONE (2026-09-15, day session — Buffy): NODE PACKAGING SHIPPED.
+  aali-node.spec + launch_aali_node.py shim + scripts/build_node.bat →
+  build-desktop/dist/aali-node.exe (onefile, console entry, HWK icon +
+  version resource, follows the proven Aali-Desktop pattern; PyInstaller
+  lives in .venv-desktop only — training venv untouched). The exe IS the
+  daemon: same argv contract as `python -m aali_node` (headless + --shell).
+  PROOF: scripts/smoke_aali_node.py grew --frozen-exe — the packaged exe
+  connected to a real Hub and the brain dispatch → exe sandbox → signed
+  result chain wrote a real file (7/7 phases green); source-mode smoke
+  still 7/7 too. First build FAILED at launch (ModuleNotFoundError:
+  file_agent) despite building green — sandbox imports file_agent.protocol
+  at module level and the analysis pass needs file-agent/ on pathex; fixed
+  and pinned by tests/test_aali_node_packaging.py (8 tests: pathex,
+  hiddenimports, excludes=requests, shim, build deps, frozen smoke mode).
+  cryptography ships INSIDE the exe (production Ed25519 update path; HMAC
+  fallback). Frozen --activate-update stays refused (source-deploy path).
+  Remaining in STEP 5: code-signing (owner certs), VPS + real secrets
+  (owner), UI direction (Lead Agent inbox questions still open).
 
 ## 2026-09-15, later still — STEP 5 UI layer (Buffy)
 Shell shipped as described above. UI/UX direction from the Lead Agent was

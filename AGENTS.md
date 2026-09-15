@@ -348,6 +348,25 @@ in parallel:
   arrives. Tests: tests/test_aali_node_shell.py (13, headless; the real
   tray icon runs offscreen, skipped when no backend). Suites: 615 green
   (.venv), 157 green hub subset incl. the live WS e2e.
+- **SaaS STEP 5 node packaging (2026-09-15 day, Buffy)**: the آلي Node
+  ships as a Windows exe — aali-node.spec + launch_aali_node.py (entry
+  shim wiring file-agent/ into sys.path) + scripts/build_node.bat →
+  build-desktop/dist/aali-node.exe (onefile, console entry, HWK icon +
+  version resource; PyInstaller stays in .venv-desktop — training venv
+  untouched). The exe IS the daemon: identical argv contract to
+  `python -m aali_node` (headless CLI + --shell GUI + --activate-update,
+  which stays refused in frozen builds — source-deploy path). Runtime
+  deps bundled: websockets, pystray, pywebview, cryptography (the
+  PRODUCTION Ed25519 update-verification path — without it a packaged
+  Node fails closed on every real manifest). LESSON: a PyInstaller build
+  can finish green and still die at launch — sandbox.py imports
+  file_agent.protocol at module level, so "file-agent" MUST stay on the
+  spec's pathex; pinned by tests/test_aali_node_packaging.py (8: pathex,
+  hiddenimports for the lazy node modules, excludes=requests, shim, build
+  deps, frozen smoke mode). PROOF: scripts/smoke_aali_node.py --frozen-exe
+  ran the packaged exe against a real Hub — brain dispatch → exe sandbox →
+  signed result wrote a real file (7/7 phases; source-mode smoke still
+  7/7). Remaining owner items: code-signing certs, VPS + real secrets.
 - **Known gaps**: n8n webhook needs one manual activation click in the editor; ffmpeg installed but PATH needs refresh in new shells; web-mentor capture experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 - **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
   + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);

@@ -110,4 +110,26 @@ nothing; I'll rebase on your hashes when the owner says go.
   token comes from CLI/env), (3) whether staged-update notification
   deserves a visible banner once activation is built.
 
+## From Buffy — 2026-09-15, day session — the Node is now an EXE
+
+- **Packaging shipped** (the item I said was "the next STEP 5 item" at
+  shift close): aali-node.spec + launch_aali_node.py shim +
+  scripts/build_node.bat → build-desktop/dist/aali-node.exe. The exe IS
+  the headless daemon (same argv contract as `python -m aali_node`, --shell
+  still opens window+tray). First build died at launch with a green build
+  log — sandbox imports file_agent.protocol at module level and the
+  PyInstaller analysis pass needs file-agent/ on pathex; fixed and pinned
+  by tests/test_aali_node_packaging.py (8). PROOF: smoke_aali_node.py
+  --frozen-exe ran the packaged exe against a real Hub — brain dispatch →
+  exe sandbox → signed result wrote a real file, 7/7 phases. cryptography
+  ships inside the exe (production Ed25519 update path).
+- For you: the UI questions from the shell note above are still open.
+  New one: (4) the exe is console=True on purpose (headless CLI is the
+  daemon's primary contract; --shell still pops the native window) — if
+  you want a windowed exe instead, that's a one-line spec change plus a
+  decision on how CLI users get output.
+- Frozen --activate-update is refused by design (source-deploy path); if
+  you want packaged updates to swap+restart, that needs a PyInstaller
+  onedir layout or an installer-owned activation — say the word.
+
 — Buffy
