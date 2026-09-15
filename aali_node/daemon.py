@@ -24,6 +24,7 @@ import os
 import secrets
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -102,7 +103,8 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
              stop: "threading.Event | None" = None,
              native_confirm: bool = False,
              update_hub: str | None = None,
-             update_key: str | None = None) -> int:
+             update_key: str | None = None,
+             status: "dict[str, Any] | None" = None) -> int:
     """Connect to the Hub, serve tool calls until interrupted. Exit code.
 
     ``stop``: optional threading.Event — setting it ends the receive loop
@@ -113,6 +115,11 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
     the Hub's /updates surface BEFORE connecting. A failed check never
     keeps the Node from serving; a verified NEWER artifact is staged under
     ``<workspace's install root>/staged/<version>`` for a later swap.
+    ``status``: optional dict the daemon keeps updated for embedders (the
+    GUI shell polls it). CONTENT-FREE by design: state, hub_url, node_id,
+    session_id, workspace, allow_commands, native_confirm, stats counters,
+    connected_since, last_event / last_error strings. Never tool names,
+    paths, or message content.
     """
     # wire the sandbox FIRST so configuration errors surface before the
     # transport check (a misconfigured node must fail fast, not report a
@@ -125,11 +132,28 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
                                use_native=native_confirm))
     session = NodeSession(box, session_id, node_id, token)
 
+    def _publish(**fields: Any) -> None:
+        # status dict writes are atomic per key under the GIL; the shell's
+        # poller folds snapshots — a torn read is cosmetic, never harmful.
+        if status is None:
+            return
+        with contextlib.suppress(Exception):
+            status.update(fields)
+
+    def _publish_stats() -> None:
+        _publish(stats=dict(session.stats))
+
+    _publish(state="starting", hub_url=hub_url, node_id=node_id,
+             session_id=session_id, workspace=str(workspace_root),
+             allow_commands=allow_commands, native_confirm=native_confirm,
+             stats=dict(session.stats), connected_since=None,
+             last_event="", last_error="")
+
     if update_hub:
         # transport-independent: a Node that cannot serve WebSockets can
         # still be told (via its log) that a verified update is waiting
         _run_update_check(update_hub, token, update_key or token,
-                          workspace_root)
+                          workspace_root, status=status)
 
     try:
         import websockets  # lazy: keeps sandbox unit-testable everywhere
@@ -137,6 +161,7 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
         print("aali_node: the 'websockets' package is required for the "
               "daemon (pip install websockets). The sandbox itself works "
               "without it.", file=sys.stderr)
+        _publish(state="error", last_error="websockets package missing")
         return 2
 
     ws_url = hub_url.rstrip("/") + "/ws/node"
@@ -151,6 +176,8 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
             print(f"aali_node: connected to {ws_url} "
                   f"(node {node_id}, session {session_id[:8]}…, "
                   f"workspace {box.root})")
+            _publish(state="connected", connected_since=time.time(),
+                     last_event="connected to hub")
 
             async def heartbeat() -> None:
                 while True:
@@ -166,6 +193,7 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
                         raw = await asyncio.wait_for(ws.recv(),
                                                      timeout=0.25)
                     except asyncio.TimeoutError:
+                        _publish_stats()  # keep the UI ticking when idle
                         continue
                     try:
                         message = json.loads(raw)
@@ -180,28 +208,43 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
                         session.stats["errors"] += 1
                         print(f"aali_node: handler error: "
                               f"{type(exc).__name__}: {exc}", file=sys.stderr)
+                        _publish(last_event=f"handler error: "
+                                           f"{type(exc).__name__}")
                         continue
                     if reply is not None:
                         await ws.send(json.dumps(
                             P.sign_message(reply, session.leg_key)))
+                        _publish_stats()
             finally:
                 hb.cancel()
         return 0
 
     try:
-        return asyncio.run(_run())
+        rc = asyncio.run(_run())
     except KeyboardInterrupt:
         print("aali_node: stopped by user")
+        _publish(state="stopped", last_event="stopped by user")
         return 0
     except Exception as exc:
         print(f"aali_node: connection failed: {type(exc).__name__}: {exc}",
               file=sys.stderr)
+        _publish(state="error", last_error=f"{type(exc).__name__}: {exc}")
         return 1
+    _publish(state="stopped")
+    return rc
 
 
 def _run_update_check(update_hub: str, token: str, verification_key: str,
-                      workspace_root: str | Path) -> None:
+                      workspace_root: str | Path,
+                      status: "dict[str, Any] | None" = None) -> None:
     """Best-effort signed update check before connecting. Never fatal."""
+
+    def _publish(**fields: Any) -> None:
+        if status is None:
+            return
+        with contextlib.suppress(Exception):
+            status.update(fields)
+
     import aali_node
     from aali_node import updater
     try:
@@ -212,16 +255,21 @@ def _run_update_check(update_hub: str, token: str, verification_key: str,
         if staged is None:
             print("aali_node: update check: up to date "
                   f"({aali_node.__version__})")
+            _publish(last_event=f"update check: up to date "
+                                f"({aali_node.__version__})")
         else:
             print(f"aali_node: staged verified update → {staged} "
                   "(activate by restarting through the new install)")
+            _publish(last_event=f"verified update staged: {staged.name}")
     except updater.NodeUpdateError as exc:
         # fail-closed refusal (bad signature / hash / zip) — logged, and
         # the Node keeps serving the version it already trusts
         print(f"aali_node: update check failed: {exc}", file=sys.stderr)
+        _publish(last_event="update check failed (refused)")
     except Exception as exc:  # unexpected — same policy, louder
         print(f"aali_node: update check crashed: "
               f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        _publish(last_event="update check crashed")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -252,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
                         default=os.getenv("AALI_NODE_UPDATE_KEY"),
                         help="update-manifest verification key (HMAC "
                              "shared secret; env AALI_NODE_UPDATE_KEY)")
+    parser.add_argument("--shell", action="store_true",
+                        help="GUI mode: pywebview window + system tray "
+                             "instead of the console (native confirmations "
+                             "are always on in the shell)")
     args = parser.parse_args(argv)
 
     if not args.token:
@@ -268,6 +320,13 @@ def main(argv: list[str] | None = None) -> int:
               "AALI_NODE_UPDATE_KEY) — refusing to check updates it "
               "could not verify", file=sys.stderr)
         return 2
+
+    if args.shell:
+        from aali_node.shell import run_shell
+        return run_shell(args.hub, args.token, args.workspace,
+                         allow_commands=not args.no_commands,
+                         update_hub=args.update_hub,
+                         update_key=args.update_key)
 
     return run_node(args.hub, args.token, args.workspace,
                     allow_commands=not args.no_commands,

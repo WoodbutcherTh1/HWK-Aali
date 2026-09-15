@@ -65,9 +65,39 @@ Full mission brief was supplied by the owner in-session.
   requirements-hub.txt); Ed25519 auto-selected, /health reports
   update_sig_alg. Suites: 603 green (.venv), 100 green (hub subset).
   Deliberately NOT done: activation (swap + restart) — staging only, the
-  swap is owned by a later explicit step. Next: pywebview shell + tray
-  (Lead Agent's UI/UX direction via tasks/lead-agent-inbox.md).
+  swap is owned by a later explicit step.
+- PYWEBVIEW SHELL + TRAY DONE (2026-09-15, same night — see the inbox note):
+  aali_node/shell.py — pure headless-testable ShellState (Arabic RTL view
+  folding, capped log) + ShellApi (js_api: snapshot JSON, open_workspace,
+  quit) + run_shell (daemon thread with native_confirm=True + pywebview
+  window + pystray tray). Close-to-tray only while the daemon is alive (no
+  orphaned hidden window); tray Quit ends the daemon THEN destroys the
+  window (webview.start returns only when every window is gone); no GUI
+  backend → honest headless fallback, daemon keeps serving. Tray deps are
+  LAZY imports: no pystray/Pillow = close-to-tray disabled with an honest
+  UI notice, shell still runs. The daemon grew an optional CONTENT-FREE
+  status dict (state/hub_url/node_id/counters/last_event — no tool names,
+  paths, or content; polling-friendly, written under the GIL). Daemon CLI:
+  `python -m aali_node --shell --hub … --token <JWT>`. New deps pystray +
+  Pillow pinned in requirements-hub.txt, installed into .venv-hub ONLY
+  (training venv untouched). Tests: 13 new (ShellState folding, ShellApi,
+  real offscreen tray icon, fail-fast contracts, venv-agnostic status
+  contract). Suites: 615 green (.venv), 157 green hub subset incl. live WS
+  e2e. Lesson: keep the status contract venv-agnostic from day one —
+  find_spec guards like the house tests, rc in (1,2) tolerance.
+- Next (not started, needs owner/Lead Agent input): activation step (swap
+  + restart), PyInstaller packaging + code-signing (owner certificates),
+  Hub VPS provisioning + real secrets (owner).
 - VPS provisioning + Cloudflare Tunnel + real secrets (owner).
+
+## 2026-09-15, later still — STEP 5 UI layer (Buffy)
+Shell shipped as described above. UI/UX direction from the Lead Agent was
+NOT in the inbox at build time; the shell follows the product's existing
+language (Arabic-first RTL, warm-black #252523 + gold) and is deliberately
+thin: it renders the daemon's own status, nothing invented. If direction
+arrives, the shape to change is ShellState/_PAGE only — daemon contract
+untouched.
+
 
 ## Lessons (for the next agent)
 - PEP 563 + FastAPI: annotations resolve against MODULE globals — never

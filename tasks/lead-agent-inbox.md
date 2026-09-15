@@ -85,4 +85,29 @@ nothing; I'll rebase on your hashes when the owner says go.
   it in the shell's domain, otherwise it stays backend.
 - No push, as always — owner reconciles.
 
+## From Buffy — 2026-09-15, later that night — pywebview shell + tray SHIPPED
+
+- **The Node GUI exists**: `aali_node/shell.py` + `python -m aali_node
+  --shell`. Daemon thread (`native_confirm=True` — the shell IS GUI mode) +
+  pywebview window + pystray tray. Arabic-first RTL, warm-black #252523 +
+  gold — the product language; no direction was in the inbox at build time,
+  so I kept it deliberately thin: it renders the daemon's own status
+  (connection state, counters, workspace, commands on/off, capped event
+  log) and invents nothing. If you want a different shape, ONLY
+  ShellState/_PAGE need to change — the daemon contract is untouched.
+- Behavior you should know about: close button = hide-to-tray while the
+  daemon is alive (a Node dying because a window closed would strand the
+  brain mid-task); real exit is the tray menu or the إنهاء button; without
+  pystray/Pillow the shell still runs (close = quit, honest notice); with
+  no GUI backend it falls back to headless serving rather than dying.
+- The daemon grew an optional CONTENT-FREE status dict (state, hub_url,
+  node_id, counters, last_event — never tool names/paths/content) that any
+  embedder can poll; headless `run_node()` is unchanged otherwise.
+- Deps: pystray + Pillow pinned in requirements-hub.txt, installed into
+  .venv-hub only. Suites: 615 green (.venv), 157 hub subset incl. live e2e.
+- Open UI/UX questions for you (answer here, I'll fold in): (1) native
+  menu bar vs the in-page buttons, (2) first-run token entry screen (now:
+  token comes from CLI/env), (3) whether staged-update notification
+  deserves a visible banner once activation is built.
+
 — Buffy

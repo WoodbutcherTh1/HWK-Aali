@@ -331,6 +331,23 @@ in parallel:
   contract), tests/test_hub_updates_http.py (15, publish→serve→retire),
   +2 daemon tests. Suites: 603 green (.venv), 100 green (hub subset incl.
   the live WS e2e).
+- **SaaS STEP 5 shell (2026-09-15 night, Buffy)**: the Node GUI landed —
+  aali_node/shell.py + `python -m aali_node --shell`. pywebview window
+  (Arabic-first RTL, warm-black #252523 + gold) + pystray tray over the
+  headless daemon: daemon thread with native_confirm=True (the shell IS
+  GUI mode), close = hide-to-tray while the daemon is alive (a window
+  close must never strand the brain mid-task), real exit via the tray
+  menu / إنهاء button; no pystray/Pillow → close = quit with an honest
+  notice; no GUI backend → headless fallback, daemon keeps serving. The
+  daemon gained an optional CONTENT-FREE status dict any embedder can
+  poll (state/hub_url/node_id/counters/last_event — never tool names,
+  paths, or content). Tray deps (pystray, Pillow) pinned in
+  requirements-hub.txt, installed into .venv-hub only. UI direction from
+  the Lead Agent was not in the inbox at build time; the shell is
+  deliberately thin — only ShellState/_PAGE change when direction
+  arrives. Tests: tests/test_aali_node_shell.py (13, headless; the real
+  tray icon runs offscreen, skipped when no backend). Suites: 615 green
+  (.venv), 157 green hub subset incl. the live WS e2e.
 - **Known gaps**: n8n webhook needs one manual activation click in the editor; ffmpeg installed but PATH needs refresh in new shells; web-mentor capture experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 - **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
   + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);
