@@ -296,7 +296,8 @@ def build_tray_icon(title: str, workspace: str,
 def run_shell(hub_url: str, token: str, workspace_root: str | Path, *,
               allow_commands: bool = True,
               update_hub: str | None = None,
-              update_key: str | None = None) -> int:
+              update_key: str | None = None,
+              install_root: "str | Path | None" = None) -> int:
     """GUI entry: daemon thread + window + tray. Blocks until exit."""
     if not token:
         print("aali_node shell: no token — pass --token or set "
@@ -321,7 +322,7 @@ def run_shell(hub_url: str, token: str, workspace_root: str | Path, *,
             hub_url, token, workspace_root,
             allow_commands=allow_commands, native_confirm=True,
             update_hub=update_hub, update_key=update_key,
-            status=status, stop=stop)
+            status=status, stop=stop, install_root=install_root)
 
     node_thread = threading.Thread(target=_daemon, daemon=True,
                                    name="aali-node-daemon")

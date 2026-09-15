@@ -104,7 +104,8 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
              native_confirm: bool = False,
              update_hub: str | None = None,
              update_key: str | None = None,
-             status: "dict[str, Any] | None" = None) -> int:
+             status: "dict[str, Any] | None" = None,
+             install_root: "str | Path | None" = None) -> int:
     """Connect to the Hub, serve tool calls until interrupted. Exit code.
 
     ``stop``: optional threading.Event — setting it ends the receive loop
@@ -120,6 +121,10 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
     session_id, workspace, allow_commands, native_confirm, stats counters,
     connected_since, last_event / last_error strings. Never tool names,
     paths, or message content.
+    ``install_root``: where THIS Node is installed (updates stage under
+    ``<install_root>/staged/<version>/`` and --activate-update swaps
+    there). Defaults to the workspace for backward compatibility; main()
+    computes the real one (frozen exe dir / package parent).
     """
     # wire the sandbox FIRST so configuration errors surface before the
     # transport check (a misconfigured node must fail fast, not report a
@@ -153,7 +158,8 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
         # transport-independent: a Node that cannot serve WebSockets can
         # still be told (via its log) that a verified update is waiting
         _run_update_check(update_hub, token, update_key or token,
-                          workspace_root, status=status)
+                          install_root if install_root is not None
+                          else workspace_root, status=status)
 
     try:
         import websockets  # lazy: keeps sandbox unit-testable everywhere
@@ -326,17 +332,19 @@ def main(argv: list[str] | None = None) -> int:
               "could not verify", file=sys.stderr)
         return 2
 
+    install_root = _detect_install_root()
+
     if args.shell:
         from aali_node.shell import run_shell
         return run_shell(args.hub, args.token, args.workspace,
                          allow_commands=not args.no_commands,
                          update_hub=args.update_hub,
-                         update_key=args.update_key)
+                         update_key=args.update_key,
+                         install_root=install_root)
 
     if args.activate_update:
         from aali_node.activate import (spawn_detached_activation,
                                         staged_version)
-        install_root = Path(args.workspace).resolve().parent
         staged_dir = install_root / "staged"
         if not staged_dir.is_dir():
             print("aali_node: nothing staged under "
@@ -375,7 +383,21 @@ def main(argv: list[str] | None = None) -> int:
                     allow_commands=not args.no_commands,
                     native_confirm=args.native_confirm,
                     update_hub=args.update_hub,
-                    update_key=args.update_key)
+                    update_key=args.update_key,
+                    install_root=install_root)
+
+
+def _detect_install_root() -> "Path":
+    """Where THIS Node is installed (updates stage/activate there).
+
+    Frozen (PyInstaller) builds: the exe's directory. Source runs: the
+    parent of the aali_node package (the deploy root), NOT the workspace —
+    the workspace is user data and must never hold program files.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    import aali_node as _pkg
+    return Path(_pkg.__file__).resolve().parents[1]
 
 
 if __name__ == "__main__":
