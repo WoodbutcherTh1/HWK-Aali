@@ -184,7 +184,7 @@ def test_latest_manifest_download_round_trip(hub) -> None:
     assert latest.status_code == 200
     manifest = latest.json()["update"]
     assert manifest["version"] == "1.0.1"
-    assert manifest["url"] == "/updates/aali-node-1.0.1.zip"
+    assert manifest["url"] == "/updates/1.0.1/download"
 
     one = client.get("/updates/1.0.1/manifest", headers=hdrs)
     assert one.status_code == 200

@@ -137,7 +137,11 @@ class UpdateStore:
         os.replace(tmp, art_path)  # atomic on POSIX + Windows
         manifest = build_manifest(
             version, min_version,
-            url=f"/updates/{art_path.name}", sha256=sha,
+            # the CANONICAL public endpoint (update_api serves
+            # /updates/{version}/download) — a filename URL here 404s every
+            # real Node (found live by scripts/smoke_aali_node.py; the unit
+            # suite pinned the broken string instead of fetching it)
+            url=f"/updates/{version}/download", sha256=sha,
             release_notes_ar=release_notes_ar,
             release_notes_en=release_notes_en)
         signed = sign_manifest(manifest, self.signing_key)

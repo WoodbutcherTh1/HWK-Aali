@@ -294,6 +294,11 @@ def main(argv: list[str] | None = None) -> int:
                         default=os.getenv("AALI_NODE_WORKSPACE",
                                           str(Path.home() / "AaliWorkspace")),
                         help="the ONLY directory this Node may touch")
+    parser.add_argument("--session-id",
+                        default=os.getenv("AALI_NODE_SESSION", ""),
+                        help="pin the session id (leg keys derive from "
+                             "token+session; random when omitted — pin it "
+                             "when a dispatcher needs a stable session)")
     parser.add_argument("--no-commands", action="store_true",
                         help="disable run_command entirely on this Node")
     parser.add_argument("--native-confirm", action="store_true",
@@ -381,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
 
     return run_node(args.hub, args.token, args.workspace,
                     allow_commands=not args.no_commands,
+                    session_id=args.session_id or None,
                     native_confirm=args.native_confirm,
                     update_hub=args.update_hub,
                     update_key=args.update_key,
