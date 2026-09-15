@@ -13,6 +13,7 @@ from aali_hub import admin_api, audit as audit_mod
 from aali_hub import model_registry, users_db
 from aali_hub.config import HubConfig, load_config
 from aali_hub.queue import Rejected, RequestQueue
+from aali_hub.update_server import HAS_ED25519, UpdateStore
 from aali_hub.ws_gateway import Broker, ConnectionManager, build_router
 
 __all__ = ["create_app", "HubState"]
@@ -38,6 +39,15 @@ class HubState:
         self.manager = ConnectionManager()
         self.broker = Broker(self.manager, jwt_secret=config.jwt_secret,
                              brain_token=config.brain_token)
+        # Update store: active only when a signing key is configured —
+        # update_server (HMAC mode) refuses an empty key by design, and an
+        # unsigned update surface must simply not exist. Ed25519 is used
+        # automatically when the `cryptography` package is installed.
+        self.updates: UpdateStore | None = None
+        if config.update_signing_key:
+            self.updates = UpdateStore(
+                config.update_dir, config.update_signing_key,
+                keep_versions=config.update_keep_versions)
 
 
 def create_app(config: HubConfig | None = None):  # noqa: ANN201
@@ -69,6 +79,17 @@ def create_app(config: HubConfig | None = None):  # noqa: ANN201
     admin_router.set_jwt_secret(config.jwt_secret)
     openai_router.set_jwt_secret(config.jwt_secret)
 
+    # ---- updates (signed Node auto-update surface) -----------------------
+    if state.updates is not None:
+        from aali_hub import update_api
+        update_router = update_api.build_update_router(state.updates)
+        update_admin_router = update_api.build_update_admin_router(
+            state.updates, state.users_db, state.audit_log)
+        app.include_router(update_router)
+        app.include_router(update_admin_router)
+        update_router.set_jwt_secret(config.jwt_secret)          # type: ignore[attr-defined]
+        update_admin_router.set_jwt_secret(config.jwt_secret)    # type: ignore[attr-defined]
+
     # ---- health / metrics ------------------------------------------------
     @app.get("/health")
     def health() -> dict:
@@ -76,6 +97,9 @@ def create_app(config: HubConfig | None = None):  # noqa: ANN201
             "ok": True,
             "service": "aali-hub",
             "version": "0.1.0",
+            "update_sig_alg":
+                "ed25519" if (state.updates is not None and HAS_ED25519)
+                else ("hmac-sha256" if state.updates is not None else ""),
             "brain_connected": state.manager.brain() is not None,
             "nodes_connected": state.manager.live_count("node"),
             "queue_depth": state.queue.queue_depth(),

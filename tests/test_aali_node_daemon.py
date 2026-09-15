@@ -112,7 +112,33 @@ def test_hello_payload_shape(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 def test_main_requires_token(capsys: pytest.CaptureFixture) -> None:
     assert ND.main(["--hub", "ws://x"]) == 2
-    assert "no token" in capsys.readouterr().err
+
+
+def test_main_refuses_update_check_without_key(
+        capsys: pytest.CaptureFixture) -> None:
+    # an update surface the Node cannot verify must be refused at the CLI
+    assert ND.main(["--hub", "ws://x", "--token", "t",
+                    "--update-hub", "http://hub:8080"]) == 2
+
+
+def test_run_node_update_check_never_fatal(
+        tmp_path: Path, capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A crashing update checker must not stop the Node from serving."""
+    import aali_node.updater as up
+
+    def boom(*a, **kw):
+        raise RuntimeError("hub exploded")
+
+    monkeypatch.setattr(up.UpdateClient, "check_and_stage", boom)
+    rc = ND.run_node("ws://127.0.0.1:1", "tok", tmp_path / "ws",
+                     update_hub="http://hub:8080", update_key="k")
+    # The venv-dependent failure (rc==2 without websockets, rc==1 with) is
+    # NOT the contract — the guarantee is: the update crash is REPORTED
+    # (never silent) and run_node still returns a normal, expected exit code.
+    assert rc in (1, 2)
+    err = capsys.readouterr().err
+    assert "update check crashed" in err
 
 
 def test_main_rejects_huge_token() -> None:

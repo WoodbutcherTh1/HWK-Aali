@@ -49,8 +49,24 @@ Full mission brief was supplied by the owner in-session.
   roundtrip in tests/test_aali_node_live.py, hub venv).
   Suite: 562 passed / 2 skipped (.venv), 149 passed / 1 skipped (hub subset
   in .venv-hub). Redaction extracted to file_agent/redaction.py (stdlib-only)
-  so the Node runs without `requests`. Next: pywebview shell + confirm
-  dialogs + tray; Hub update_server wiring into the Node.
+  so the Node runs without `requests`.
+- UPDATE CHANNEL DONE (2026-09-15, later that night — commit below):
+  Hub surface aali_hub/update_api.py (public GET /updates/latest |
+  /{version}/manifest | /{version}/download, bearer-gated; admin-only
+  publish/list/retire, audited; routes exist ONLY when
+  AALI_UPDATE_SIGNING_KEY is set — no dev fallback by design) + Node
+  client aali_node/updater.py (CLIENT-SIDE signature + sha256
+  re-verification — never trusts the Hub; strict dotted semver where
+  unparsable versions never win and a signed unparsable version fails
+  LOUDLY; zip-slip-safe staged unzip into <install>/staged/<version>/,
+  running install untouched) + daemon opt-in --update-hub/--update-key
+  (env AALI_UPDATE_HUB / AALI_NODE_UPDATE_KEY) non-fatal pre-connect
+  check. cryptography installed into .venv-hub (was already pinned in
+  requirements-hub.txt); Ed25519 auto-selected, /health reports
+  update_sig_alg. Suites: 603 green (.venv), 100 green (hub subset).
+  Deliberately NOT done: activation (swap + restart) — staging only, the
+  swap is owned by a later explicit step. Next: pywebview shell + tray
+  (Lead Agent's UI/UX direction via tasks/lead-agent-inbox.md).
 - VPS provisioning + Cloudflare Tunnel + real secrets (owner).
 
 ## Lessons (for the next agent)

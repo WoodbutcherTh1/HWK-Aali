@@ -304,6 +304,33 @@ in parallel:
   JWT-verified user_id overriding any client-claimed identity, and an
   honest bilingual final_reply when the brain is offline. Final night
   counts: 585 green (.venv), 171 green (hub subset).
+- **SaaS update channel end-to-end (2026-09-15 night, Buffy)**: the signed
+  Node auto-update path is wired on BOTH sides. Hub: aali_hub/update_api.py —
+  public GET /updates/latest | /{version}/manifest | /{version}/download
+  (bearer-gated; manifests signature-verified and artifacts sha256-checked
+  in the store before anything leaves) + admin-only POST /api/admin/updates/
+  publish (raw-bytes body, query params, audited) / GET list / DELETE retire
+  (UpdateStore.retire refuses to remove the LAST version — retiring all
+  would fake "no updates" on every live Node). The update surface exists
+  ONLY when AALI_UPDATE_SIGNING_KEY is set (empty key = no routes; no dev
+  fallback by design — an ephemeral publish key would sign artifacts no
+  deployed Node can verify); Ed25519 auto-selected via `cryptography`
+  (added to .venv-hub, was already pinned in requirements-hub.txt);
+  /health now reports update_sig_alg. Node: aali_node/updater.py — stdlib
+  urllib client that re-verifies signature + sha256 CLIENT-SIDE (never
+  trusts the Hub), strict dotted semver (unparsable versions NEVER win;
+  a signed unparsable version fails LOUDLY, not silently), refuses
+  non-relative URLs, zip-slip-checked staged unzip into <install>/staged/
+  <version>/ (running install never touched; activation = explicit later
+  step). Daemon: opt-in --update-hub + --update-key (env AALI_UPDATE_HUB /
+  AALI_NODE_UPDATE_KEY) non-fatal pre-connect check — a crashed/refused
+  check is logged and the Node keeps serving. PEP 563 lesson hit AGAIN:
+  `request: Request` inside a factory degrades to a query param (422 on
+  every publish) — Request now imported at update_api module level.
+  Tests: tests/test_aali_node_updater.py (18, injected HTTP, fail-closed
+  contract), tests/test_hub_updates_http.py (15, publish→serve→retire),
+  +2 daemon tests. Suites: 603 green (.venv), 100 green (hub subset incl.
+  the live WS e2e).
 - **Known gaps**: n8n webhook needs one manual activation click in the editor; ffmpeg installed but PATH needs refresh in new shells; web-mentor capture experimental; sft_v2 Arabic share rebalanced to ~34% (was 1.4%).
 - **Owner brain & publish (2026-09-08/09)**: /brain live tree + /api/brain/live
   + SSE event feed (`/api/brain/events`, `/api/brain/stream`, admin-gated);

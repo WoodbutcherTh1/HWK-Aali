@@ -9,10 +9,13 @@ Modules
 sandbox      — SecureSandbox: workspace-jailed tool execution (security core)
 __main__     — headless CLI daemon (`python -m aali_node`); bash/zsh/
                PowerShell/CMD all work through it, no UI required
+confirm      — native/console consent dialogs (60s auto-deny)
+updater      — signed auto-update client (verify → sha256 → staged unzip);
+               the daemon runs it as a NON-FATAL pre-connect check
 
-Deliberately NOT here yet (next sessions): the pywebview shell, native OS
-confirmation dialogs, and the system tray. The daemon is the load-bearing
-half: the shell is UI on top of exactly these calls.
+Deliberately NOT here yet (next sessions): the pywebview shell and the
+system tray. The daemon is the load-bearing half: the shell is UI on top
+of exactly these calls.
 """
 from __future__ import annotations
 

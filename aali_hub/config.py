@@ -44,6 +44,7 @@ class HubConfig:
     access_token_ttl_sec: int = 60 * 60 * 24          # 24h
     brain_token: str = ""
     master_key: str = ""                               # protocol HMAC master
+    update_signing_key: str = ""                       # update manifest signer
 
     # brain
     brain_url: str = "http://127.0.0.1:5055"
@@ -99,11 +100,15 @@ def load_config(env: dict[str, str] | None = None) -> HubConfig:
     jwt_secret = get("AALI_HUB_JWT_SECRET")
     brain_token = get("AALI_BRAIN_TOKEN")
     master_key = get("AALI_PROTOCOL_MASTER_KEY")
+    update_signing_key = get("AALI_UPDATE_SIGNING_KEY")
     if dev:
         # ephemeral per-process secrets; safe only for tests/dev
         jwt_secret = jwt_secret or secrets.token_hex(32)
         brain_token = brain_token or secrets.token_hex(16)
         master_key = master_key or secrets.token_hex(32)
+        # NOTE: the update signing key deliberately has NO dev fallback —
+        # update_server (HMAC mode) refuses empty keys and an ephemeral
+        # publish key would sign artifacts no deployed Node could verify.
     elif not jwt_secret:
         raise RuntimeError(
             "AALI_HUB_JWT_SECRET is not set and AALI_HUB_DEV != 1 — "
@@ -121,6 +126,7 @@ def load_config(env: dict[str, str] | None = None) -> HubConfig:
         access_token_ttl_sec=get_int("AALI_HUB_TOKEN_TTL", 60 * 60 * 24),
         brain_token=brain_token,
         master_key=master_key,
+        update_signing_key=update_signing_key,
         brain_url=get("AALI_BRAIN_URL", "http://127.0.0.1:5055").rstrip("/"),
         brain_wake_timeout_sec=get_float("AALI_BRAIN_WAKE_TIMEOUT", 30.0),
         wol_mac=get("AALI_WOL_MAC"),

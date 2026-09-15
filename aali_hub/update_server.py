@@ -31,7 +31,7 @@ except ImportError:
     _HAS_ED25519 = False
 
 __all__ = ["UpdateStore", "UpdateError", "sign_manifest", "verify_manifest",
-           "HAS_ED25519"]
+           "HAS_ED25519", "build_manifest"]
 
 HAS_ED25519 = _HAS_ED25519
 
@@ -194,3 +194,22 @@ class UpdateStore:
         manifests = sorted(self.root.glob("*.json"),
                            key=lambda p: p.stat().st_mtime, reverse=True)
         return [p.stem for p in manifests]
+
+    def retire(self, version: str) -> None:
+        """Remove one version's manifest + artifact (admin rollback window).
+
+        UpdateError when the version was never published. Refuses to retire
+        the LAST remaining version — retiring everything would make
+        ``latest_manifest`` 404 and every live Node would report 'no
+        updates' instead of a pinned older release.
+        """
+        if self._manifest_path(version).exists() and \
+                len(self.list_versions()) <= 1:
+            raise UpdateError(
+                f"refusing to retire {version!r}: last remaining version")
+        try:
+            manifest = self.manifest_for(version)  # verifies signature
+        except UpdateError as exc:
+            raise UpdateError(f"cannot retire {version!r}: {exc}") from exc
+        self._artifact_path(version).unlink(missing_ok=True)
+        self._manifest_path(version).unlink(missing_ok=True)

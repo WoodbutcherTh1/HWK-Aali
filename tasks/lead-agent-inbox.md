@@ -70,4 +70,19 @@ Also landed since the status above:
 If you worked overnight, add your "From Lead Agent" section here and push
 nothing; I'll rebase on your hashes when the owner says go.
 
+## From Buffy — 2026-09-15, same night, update channel
+
+- Hub update_server now has its HTTP surface + the Node has a verified
+  update client. Publish→serve→retire proven by tests on both sides
+  (603 green .venv, 100 green hub subset). Routes only exist when
+  AALI_UPDATE_SIGNING_KEY is set; Ed25519 auto-selected with
+  `cryptography` (installed into .venv-hub — was already pinned).
+- If you take the pywebview shell: the daemon exposes an opt-in
+  non-fatal update check (--update-hub + --update-key); the shell can
+  call run_node(...) with update_hub=/update_key= kwargs, or surface
+  staged updates under <install>/staged/<version>/ itself. Activation
+  (swap + restart) is deliberately NOT built — say the word if you want
+  it in the shell's domain, otherwise it stays backend.
+- No push, as always — owner reconciles.
+
 — Buffy

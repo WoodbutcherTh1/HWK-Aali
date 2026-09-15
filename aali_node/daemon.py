@@ -100,13 +100,19 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
              allow_commands: bool = True,
              session_id: str | None = None,
              stop: "threading.Event | None" = None,
-             native_confirm: bool = False) -> int:
+             native_confirm: bool = False,
+             update_hub: str | None = None,
+             update_key: str | None = None) -> int:
     """Connect to the Hub, serve tool calls until interrupted. Exit code.
 
     ``stop``: optional threading.Event — setting it ends the receive loop
     cleanly (used by embedders/tests that run this in a thread).
     ``native_confirm``: pop native OS dialogs for dangerous calls (the GUI
     shell's mode); default is the console y/N prompt.
+    ``update_hub``/``update_key``: opt-in signed auto-update check against
+    the Hub's /updates surface BEFORE connecting. A failed check never
+    keeps the Node from serving; a verified NEWER artifact is staged under
+    ``<workspace's install root>/staged/<version>`` for a later swap.
     """
     # wire the sandbox FIRST so configuration errors surface before the
     # transport check (a misconfigured node must fail fast, not report a
@@ -118,6 +124,12 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
                            confirm_hook=make_confirm_hook(
                                use_native=native_confirm))
     session = NodeSession(box, session_id, node_id, token)
+
+    if update_hub:
+        # transport-independent: a Node that cannot serve WebSockets can
+        # still be told (via its log) that a verified update is waiting
+        _run_update_check(update_hub, token, update_key or token,
+                          workspace_root)
 
     try:
         import websockets  # lazy: keeps sandbox unit-testable everywhere
@@ -187,6 +199,31 @@ def run_node(hub_url: str, token: str, workspace_root: str | Path, *,
         return 1
 
 
+def _run_update_check(update_hub: str, token: str, verification_key: str,
+                      workspace_root: str | Path) -> None:
+    """Best-effort signed update check before connecting. Never fatal."""
+    import aali_node
+    from aali_node import updater
+    try:
+        client = updater.UpdateClient(
+            update_hub, verification_key, workspace_root,
+            current_version=aali_node.__version__)
+        staged = client.check_and_stage(token)
+        if staged is None:
+            print("aali_node: update check: up to date "
+                  f"({aali_node.__version__})")
+        else:
+            print(f"aali_node: staged verified update → {staged} "
+                  "(activate by restarting through the new install)")
+    except updater.NodeUpdateError as exc:
+        # fail-closed refusal (bad signature / hash / zip) — logged, and
+        # the Node keeps serving the version it already trusts
+        print(f"aali_node: update check failed: {exc}", file=sys.stderr)
+    except Exception as exc:  # unexpected — same policy, louder
+        print(f"aali_node: update check crashed: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="aali_node",
@@ -208,6 +245,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--native-confirm", action="store_true",
                         help="ask via native OS dialogs instead of the "
                              "console (GUI-shell mode)")
+    parser.add_argument("--update-hub", default=os.getenv("AALI_UPDATE_HUB"),
+                        help="opt-in auto-update: Hub base URL, e.g. "
+                             "http://hub.example:8080 (env AALI_UPDATE_HUB)")
+    parser.add_argument("--update-key",
+                        default=os.getenv("AALI_NODE_UPDATE_KEY"),
+                        help="update-manifest verification key (HMAC "
+                             "shared secret; env AALI_NODE_UPDATE_KEY)")
     args = parser.parse_args(argv)
 
     if not args.token:
@@ -219,9 +263,17 @@ def main(argv: list[str] | None = None) -> int:
         print("aali_node: token unreasonably long", file=sys.stderr)
         return 2
 
+    if args.update_hub and not args.update_key:
+        print("aali_node: --update-hub needs --update-key (or env "
+              "AALI_NODE_UPDATE_KEY) — refusing to check updates it "
+              "could not verify", file=sys.stderr)
+        return 2
+
     return run_node(args.hub, args.token, args.workspace,
                     allow_commands=not args.no_commands,
-                    native_confirm=args.native_confirm)
+                    native_confirm=args.native_confirm,
+                    update_hub=args.update_hub,
+                    update_key=args.update_key)
 
 
 if __name__ == "__main__":
