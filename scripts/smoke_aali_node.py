@@ -313,11 +313,24 @@ def main() -> int:
 
         result = asyncio.run(_dispatch())
         target = workspace / "smoke.txt"
-        if result.get("payload", {}).get("status") == "ok" \
+        # the wire tool_result carries status/result at TOP level (protocol
+        # v1.0.0) — the old payload["status"] read always read None and
+        # failed the phase even on success
+        if result.get("status") == "ok" \
                 and target.read_text(encoding="utf-8") == "smoke live":
             _ok("tool dispatch live", f"{target.name} written by the node")
         else:
-            _fail("tool dispatch live", f"result={result.get('payload')}")
+            # diagnose WHERE the chain dropped it: the hub's broker counters
+            # (dispatched / node_offline / inbound_dropped) + whether the
+            # sandbox file appeared (node executed but the reply was lost).
+            _code, metrics = _http_json(f"{base}/metrics")
+            metrics_text = (metrics.decode("utf-8", errors="replace")
+                            if isinstance(metrics, bytes) else str(metrics))
+            wrote = target.exists() \
+                and target.read_text(encoding="utf-8") == "smoke live"
+            _fail("tool dispatch live",
+                  f"result={result} sandbox_wrote_file={wrote} "
+                  f"broker=[{metrics_text.strip().replace(chr(10), '; ')}]")
         # the node leg the broker used is the smoke session derived from the
         # user token; the result status proves the whole signed chain.
 

@@ -279,6 +279,13 @@ def _run_update_check(update_hub: str, token: str, verification_key: str,
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles / redirected files default to cp1252: prints with
+    # '→' CRASH (no cp1252 mapping) and '…' mojibakes. Force UTF-8 on the
+    # CLI entrypoint (the smoke/mission_clock lesson; embedders calling
+    # run_node() directly keep their own stdio policy).
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, OSError):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         prog="aali_node",
         description="Aali Node — user-side execution daemon for Aali Cloud",
