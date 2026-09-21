@@ -16,7 +16,7 @@ DATA_DIR = Path(os.getenv("HWK_DATA_DIR", "D:/hwk-data")).expanduser()
 MODELS_DIR = Path(os.getenv("HWK_MODELS_DIR", "D:/hwk-models")).expanduser()
 BACKUP_DIR = Path(os.getenv("HWK_BACKUP_DIR", "X:/hwk-backups")).expanduser()
 
-RAW_DIR = DATA_DIR / "raw"
+RAW_DIR = Path(os.getenv("HWK_RAW_DIR", str(DATA_DIR / "raw"))).expanduser()
 CLEANED_DIR = DATA_DIR / "cleaned"
 TOKENS_DIR = DATA_DIR / "tokens"
 TOKENIZER_DIR = DATA_DIR / "tokenizer"

@@ -172,10 +172,18 @@ def _iter_text_stream(handle, path: Path):
                 yield text
 
 
-def iter_documents(raw_dir: Path):
-    """Yield (corpus, source_file, text) for every file in a raw corpus dir."""
-    corpus = raw_dir.name
+def iter_documents(raw_dir: Path, corpus: str | None = None):
+    """Yield (corpus, source_file, text) for every file in a raw corpus dir.
+
+    Recurses into sub-directories (merged corpora like medical keep each
+    source repo in its own subdir: medqa/, chatdoctor/) with the corpus
+    label kept from the TOP-level directory, never the subdir name.
+    """
+    corpus = raw_dir.name if corpus is None else corpus
     for path in sorted(raw_dir.iterdir()):
+        if path.is_dir():
+            yield from iter_documents(path, corpus)
+            continue
         if path.suffix == ".parquet":
             yield from ((corpus, path.name, text) for text in iter_parquet_texts(path))
         elif path.suffix == ".zst":

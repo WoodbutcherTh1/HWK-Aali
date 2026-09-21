@@ -125,8 +125,12 @@ def _target_files(repo: str, filters: list[str]) -> list[str]:
     return wanted
 
 
-def fetch_corpus(corpus: str, repo: str, filters: list[str], cap_gb: float) -> int:
-    out_dir = hwk_paths.RAW_DIR / corpus
+def fetch_corpus(corpus: str, repo: str, filters: list[str], cap_gb: float,
+                 subdir: str | None = None) -> int:
+    # subdir: when one corpus merges several repos whose file names collide
+    # (medical: med_qa and ChatDoctor both ship data/train-*.parquet), give
+    # each repo its own folder so neither silently overwrites the other.
+    out_dir = hwk_paths.RAW_DIR / corpus if not subdir else hwk_paths.RAW_DIR / corpus / subdir
     out_dir.mkdir(parents=True, exist_ok=True)
     cap = int(cap_gb * 1024**3)
     files = _target_files(repo, filters)
@@ -153,8 +157,8 @@ def fetch_all(corpora: list[str]) -> None:
         print(f"\n=== {corpus} ===")
         if corpus == "medical":
             total = 0
-            for repo, filters in MEDICAL_EXTRA:
-                total += fetch_corpus("medical", repo, filters, 2.0)
+            for sub, (repo, filters) in zip(("medqa", "chatdoctor"), MEDICAL_EXTRA):
+                total += fetch_corpus("medical", repo, filters, 2.0, subdir=sub)
             print(f"[medical] done: {total / 1e9:.2f} GB")
             continue
         repo, filters, cap = CORPORA[corpus]
