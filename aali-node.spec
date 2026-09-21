@@ -20,6 +20,8 @@ hi = [
     "aali_node.confirm",        # native ctypes dialog + console fallback
     "aali_node.updater",        # opt-in signed update check (--update-hub)
     "aali_node.shell",          # GUI mode (--shell)
+    "aali_node.node_config",    # first-run config storage (Q4)
+    "aali_node.config_screen",  # in-shell first-run config window (Q4 UI)
 ]
 if sys.platform == "win32":
     # pywebview's Windows backends (same hiddenimports as Aali-Desktop.spec)

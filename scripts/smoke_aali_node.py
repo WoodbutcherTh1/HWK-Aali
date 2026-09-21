@@ -120,7 +120,8 @@ def _make_node_install(dest: Path, version: str) -> None:
     (dest / "file_agent").mkdir(parents=True, exist_ok=True)
     (dest / "aali_hub").mkdir(parents=True, exist_ok=True)
     for name in ("sandbox.py", "daemon.py", "confirm.py",
-                 "updater.py", "shell.py", "activate.py", "__main__.py"):
+                 "updater.py", "shell.py", "activate.py", "__main__.py",
+                 "node_config.py", "config_screen.py"):
         shutil.copy2(ROOT / "aali_node" / name, dest / "aali_node" / name)
     # the updater verifies manifests through aali_hub.update_server
     # (stdlib-only, cryptography optional) — a real Node ships it too

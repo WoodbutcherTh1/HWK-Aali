@@ -337,6 +337,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="persist --hub/--token/--workspace/--update-* "
                              "to the first-run config file (owner-only "
                              "permissions), then continue")
+    parser.add_argument("--config-ui", action="store_true",
+                        help="with --shell: open the GUI first-run config "
+                             "screen even when a token is already "
+                             "available (edit or replace the saved "
+                             "config; empty secret fields keep the "
+                             "saved values)")
     parser.add_argument("--activate-update", action="store_true",
                         help="swap a previously STAGED update into this "
                              "install (staged under <install>/staged/ by "
@@ -410,21 +416,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"aali_node: could not save config: {exc}", file=sys.stderr)
             return 2
 
-    if not args.token:
+    # --shell gets a pass here: a tokenless machine opens the first-run
+    # config screen instead of this headless error (checked below).
+    if not args.token and not args.shell:
         print("aali_node: no token — log in via the Hub "
               "(POST /auth/login), pass --token / set AALI_NODE_TOKEN, "
               "or save a first-run config with --save-config",
               file=sys.stderr)
         return 2
-    if len(args.token) > 4096:
+    if args.token and len(args.token) > 4096:
         print("aali_node: token unreasonably long", file=sys.stderr)
-        return 2
-
-    if args.update_hub and not args.update_key:
-        print("aali_node: --update-hub needs --update-key (or env "
-              "AALI_NODE_UPDATE_KEY, or update_key in the saved config) "
-              "— refusing to check updates it could not verify",
-              file=sys.stderr)
         return 2
 
     install_root = _detect_install_root()
@@ -433,12 +434,63 @@ def main(argv: list[str] | None = None) -> int:
     allow_commands = (not args.no_commands) and allow_commands_flag
 
     if args.shell:
+        # Q4 UI half: a machine with no token anywhere gets the one-window
+        # first-run config screen INSTEAD of the headless error; saving
+        # flows straight into the shell. --config-ui forces it for editing
+        # (empty secret fields then mean "keep the saved value").
+        if not args.token or args.config_ui:
+            from aali_node.config_screen import run_config_screen
+            cfg = run_config_screen(
+                default_workspace=args.workspace,
+                prefill={
+                    "hub_url": args.hub,
+                    "workspace": args.workspace,
+                    "update_hub": args.update_hub or "",
+                    "allow_commands": allow_commands,
+                },
+                keep_token=args.token or "",
+                keep_update_key=args.update_key or "")
+            if cfg is None:
+                print("aali_node: no token — config screen cancelled or "
+                      "unavailable; pass --token, set AALI_NODE_TOKEN, or "
+                      "save a config with --save-config", file=sys.stderr)
+                return 2
+            # the form is authoritative for what it showed (hub, workspace,
+            # update_hub); SECRETS merge "form value, else keep flag/env":
+            # an empty secret field means "keep", never "erase"
+            args.hub = cfg.hub_url
+            args.workspace = cfg.workspace or args.workspace
+            args.update_hub = cfg.update_hub
+            args.update_key = cfg.update_key or args.update_key
+            args.token = cfg.token
+            # the form's checkbox is the saved wish; an explicit
+            # --no-commands THIS run still always wins
+            allow_commands = cfg.allow_commands and not args.no_commands
+        if not args.token:
+            print("aali_node: shell mode has no token after the config "
+                  "screen", file=sys.stderr)
+            return 2
+        if len(args.token) > 4096:
+            print("aali_node: token unreasonably long", file=sys.stderr)
+            return 2
+        if args.update_hub and not args.update_key:
+            print("aali_node: update checks need a verification key "
+                  "(--update-key / AALI_NODE_UPDATE_KEY / the saved "
+                  "config) — refusing", file=sys.stderr)
+            return 2
         from aali_node.shell import run_shell
         return run_shell(args.hub, args.token, args.workspace,
                          allow_commands=allow_commands,
                          update_hub=args.update_hub,
                          update_key=args.update_key,
                          install_root=install_root)
+
+    if args.update_hub and not args.update_key:
+        print("aali_node: --update-hub needs --update-key (or env "
+              "AALI_NODE_UPDATE_KEY, or update_key in the saved config) "
+              "— refusing to check updates it could not verify",
+              file=sys.stderr)
+        return 2
 
     if args.activate_update:
         from aali_node.activate import (spawn_detached_activation,

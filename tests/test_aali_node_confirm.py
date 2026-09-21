@@ -1,10 +1,11 @@
 """Tests for aali_node.confirm — the human-confirmation layer.
 
 Safety property of the test suite itself: NO test ever pops a real dialog.
-The native path is exercised through a monkeypatched ctypes.windll.user32
-MessageBoxW (returning immediately), and the timeout path through a fake
-thread whose join returns with no answer — the "user never clicked" case,
-i.e. exactly the 60s-timeout contract in milliseconds.
+The native path is exercised through the `_show_confirm_dialog` seam
+(monkeypatched to return immediately), the MessageBoxW fallback through a
+monkeypatched ctypes.windll.user32, and the template packing through pure
+parse-back checks — the "user never clicked" case (60s silence) always
+resolves to a denial, in milliseconds.
 """
 from __future__ import annotations
 
@@ -44,25 +45,42 @@ def test_describe_unknown_tool_still_summarizes() -> None:
 
 
 # ---------------------------------------------------------------------------
-# native dialog
+# native dialog — the custom-dialog seam (no real window in tests)
 # ---------------------------------------------------------------------------
-def test_native_confirm_user_yes(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_message_box(monkeypatch, lambda *a, **k: 6)  # IDYES
+def test_native_confirm_custom_dialog_yes(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_dialog(title, ar, en, timeout):  # noqa: ANN001
+        captured.update(title=title, ar=ar, en=en, timeout=timeout)
+        return CF._IDYES
+
+    monkeypatch.setattr(CF, "_show_confirm_dialog", fake_dialog)
     assert CF.native_confirm(True, "delete_file", {"path": "x"}) is True
+    assert "x" in captured["ar"] and "x" in captured["en"]
+    assert captured["timeout"] == CF.CONFIRM_TIMEOUT_SEC
+    assert "Aali" in captured["title"] and "آلي" in captured["title"]
 
 
-def test_native_confirm_user_no(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_message_box(monkeypatch, lambda *a, **k: 7)  # IDNO
-    assert CF.native_confirm(True, "delete_file", {"path": "x"}) is False
+def test_native_confirm_no_or_close_denies(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    for code in (CF._IDNO, 0):  # IDNO, or anything that is not IDYES
+        monkeypatch.setattr(
+            CF, "_show_confirm_dialog",
+            lambda *a, _c=code: _c)  # noqa: ARG005
+        assert CF.native_confirm(True, "delete_file", {"path": "x"}) is False
 
 
 def test_native_confirm_timeout_denies(monkeypatch: pytest.MonkeyPatch,
                                        ) -> None:
-    """No answer before the deadline = deny (the 60s rule, in ms)."""
-    def never_join(self, timeout=None):  # noqa: ANN001
-        return None
+    """No answer before the deadline = deny (the 60s rule, in ms).
 
-    monkeypatch.setattr(threading.Thread, "join", never_join)
+    The real timer lives inside the dialog; here the seam returns what the
+    timer path returns (_IDNO) — the contract under test is that silence
+    resolves to a denial, never an approval.
+    """
+    monkeypatch.setattr(CF, "_show_confirm_dialog",
+                        lambda *a: CF._IDNO)
     assert CF.native_confirm(True, "delete_file", {"path": "x"}) is False
 
 
@@ -71,19 +89,45 @@ def test_native_confirm_requires_false_short_circuits(
     def boom(*a, **k):  # pragma: no cover — must never be reached
         raise AssertionError("dialog shown for a non-confirmed call")
 
-    _patch_message_box(monkeypatch, boom)
+    monkeypatch.setattr(CF, "_show_confirm_dialog", boom)
     assert CF.native_confirm(False, "delete_file", {"path": "x"}) is True
+
+
+def test_native_confirm_custom_crash_falls_back_to_messagebox(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A broken custom dialog degrades to the classic box, still fail-safe."""
+    def boom(*a, **k):
+        raise OSError("no desktop")
+
+    monkeypatch.setattr(CF, "_show_confirm_dialog", boom)
+    _patch_message_box(monkeypatch, lambda *a, **k: 6)  # IDYES
+    assert CF.native_confirm(True, "delete_file", {"path": "x"}) is True
+
+
+def test_native_confirm_fallback_denies_or_silence(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fallback box: IDNO, or the watcher thread never gets an answer."""
+    monkeypatch.setattr(CF, "_show_confirm_dialog",
+                        lambda *a: (_ for _ in ()).throw(OSError()))
+    _patch_message_box(monkeypatch, lambda *a, **k: 7)  # IDNO
+    assert CF.native_confirm(True, "delete_file", {"path": "x"}) is False
+
+    def never_join(self, timeout=None):  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(threading.Thread, "join", never_join)
+    assert CF.native_confirm(True, "delete_file", {"path": "x"}) is False
 
 
 def test_native_confirm_crash_denies(monkeypatch: pytest.MonkeyPatch) -> None:
     # a ctypes module with no windll (non-Windows / stripped environment):
-    # attribute access raises inside native_confirm → deny, never crash
+    # custom dialog raises → fallback raises → deny, never crash
     fake_ctypes = types.ModuleType("ctypes")
     monkeypatch.setitem(__import__("sys").modules, "ctypes", fake_ctypes)
     assert CF.native_confirm(True, "delete_file", {"path": "x"}) is False
 
 
-def test_native_dialog_text_carries_both_languages(
+def test_fallback_messagebox_text_carries_both_languages(
         monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -91,10 +135,99 @@ def test_native_dialog_text_carries_both_languages(
         captured["text"] = text
         return 7
 
+    monkeypatch.setattr(CF, "_show_confirm_dialog",
+                        lambda *a: (_ for _ in ()).throw(OSError()))
     _patch_message_box(monkeypatch, fake_box)
     CF.native_confirm(True, "run_command", {"command": "echo hi"})
     assert "echo hi" in captured["text"]
     assert "Aali" in captured["text"]
+
+
+# ---------------------------------------------------------------------------
+# dialog template packing — pure, headless, parsed back the way Windows does
+# ---------------------------------------------------------------------------
+def _parse_dialog_template(buf: bytes) -> dict:
+    import struct
+
+    off = 0
+    style, ex = struct.unpack_from("<II", buf, off)
+    off += 8
+    cdit, x, y, cx, cy = struct.unpack_from("<HHHHH", buf, off)
+    off += 10
+    menu, wclass = struct.unpack_from("<HH", buf, off)
+    off += 4
+
+    def rd_wz(o: int) -> tuple[str, int]:
+        chars: list[str] = []
+        while True:
+            unit = int.from_bytes(buf[o:o + 2], "little")
+            o += 2
+            if unit == 0:
+                return "".join(chars), o
+            chars.append(chr(unit))
+
+    title, off = rd_wz(off)
+    off += 2  # point size
+    fontname, off = rd_wz(off)
+    items = []
+    for _ in range(cdit):
+        while off % 4:
+            off += 1
+        istyle, _iex = struct.unpack_from("<II", buf, off)
+        off += 8
+        ix, iy, icx, icy, iid = struct.unpack_from("<HHHHH", buf, off)
+        off += 10
+        cls = struct.unpack_from("<H", buf, off)[0]
+        off += 2
+        if cls == 0xFFFF:
+            cls = struct.unpack_from("<H", buf, off)[0]
+            off += 2
+        else:
+            _cls, off = rd_wz(off)
+            cls = None
+        # sz_Or_Ord: 0x0000 = none, 0xFFFF + ordinal, else null-terminated
+        text_ord = struct.unpack_from("<H", buf, off)[0]
+        if text_ord == 0xFFFF:
+            off += 2
+            text = struct.unpack_from("<H", buf, off)[0]
+            off += 2
+        else:
+            text, off = rd_wz(off)  # first word belongs to the string
+        off += 2  # creation-data size
+        items.append({"id": iid, "style": istyle, "x": ix, "y": iy,
+                      "cx": icx, "cy": icy, "cls": cls, "text": text})
+    return {"style": style, "ex": ex, "cdit": cdit, "cx": cx, "cy": cy,
+            "menu": menu, "wclass": wclass, "title": title,
+            "font": fontname, "items": items}
+
+
+def test_pack_dialog_template_is_valid_and_safe_first() -> None:
+    t = _parse_dialog_template(CF._pack_dialog_template("t", rtl=False))
+    assert t["cdit"] == 2
+    assert t["title"] == "t"
+    assert t["font"] == "Segoe UI"
+    assert t["menu"] == 0 and t["wclass"] == 0
+    # both items are owner-draw buttons with the deny/allow ids
+    ids = [i["id"] for i in t["items"]]
+    assert ids == [CF._IDNO, CF._IDYES]  # No first = first tabstop
+    for item in t["items"]:
+        assert item["cls"] == 0x0080  # button class atom
+        assert item["style"] & CF._BS_OWNERDRAW
+    no, yes = t["items"]
+    assert no["text"] == CF._BTN_NO_LABEL
+    assert yes["text"] == CF._BTN_YES_LABEL
+    # both sit on the same row at the bottom of the dialog
+    assert no["y"] == yes["y"]
+    assert no["y"] + no["cy"] <= t["cy"]
+    assert yes["x"] + yes["cx"] <= t["cx"]
+
+
+def test_pack_dialog_template_rtl_sets_mirroring() -> None:
+    ltr = _parse_dialog_template(CF._pack_dialog_template("t", rtl=False))
+    rtl = _parse_dialog_template(CF._pack_dialog_template("t", rtl=True))
+    assert not ltr["ex"] & CF._WS_EX_LAYOUTRTL
+    assert rtl["ex"] & CF._WS_EX_LAYOUTRTL
+    assert rtl["ex"] & CF._WS_EX_TOPMOST and ltr["ex"] & CF._WS_EX_TOPMOST
 
 
 # ---------------------------------------------------------------------------
