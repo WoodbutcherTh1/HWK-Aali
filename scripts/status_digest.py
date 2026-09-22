@@ -112,6 +112,49 @@ def phase_b() -> tuple[list[str], dict]:
     return rows, info
 
 
+def phase_d() -> list[tuple[str, str]]:
+    """Phase D (110M brain) across the per-stage logs phase_d_watchdog writes.
+
+    The youngest stage log is the live one; earlier stages that already carry a
+    COMPLETE line are summarized as done. final.pt on disk proves stage 1.
+    """
+    stages: list[tuple[float, int, Path, list[str]]] = []
+    for n in (1, 2, 3):
+        path = DATA / f"phase_d_train_stage{n}.log"
+        lines = tail(path, 8)
+        if lines:
+            stages.append((age_seconds(path) or 1e18, n, path, lines))
+    if not stages:
+        return [("💤", "Phase D idle - no stage logs (launch phase_d_watchdog.py)")]
+    stages.sort(key=lambda item: item[0])
+    mtime_age, n, _path, lines = stages[0]
+    step = eval_loss = None
+    for line in reversed(lines):
+        m = re.search(r"step=(\d+)", line)
+        if m and step is None:
+            step = int(m.group(1))
+        e = re.search(r"eval_loss=([\d.]+)", line)
+        if e and eval_loss is None:
+            eval_loss = e.group(1)
+        if step is not None and eval_loss is not None:
+            break
+    complete = any("COMPLETE" in line for line in lines)
+    if complete:
+        rows = [("✅", f"stage {n} COMPLETE ({fmt_age(mtime_age)})")]
+    elif step is None:
+        rows = [("⚠️", f"stage {n} log has no step lines - last write "
+                       f"{fmt_age(mtime_age)}")]
+    elif mtime_age > STALL_SEC:
+        rows = [("⚠️", f"stage {n} STALLED at step {step:,} - last write "
+                       f"{fmt_age(mtime_age)} (check phase_d_watchdog.log)")]
+    else:
+        rows = [("✅", f"stage {n} training: step {step:,}, eval_loss "
+                      f"{eval_loss}, last write {fmt_age(mtime_age)}")]
+    if (Path("D:/hwk-models/phase-d") / "final.pt").exists():
+        rows.append(("✅", "stage-1 weights saved (D:/hwk-models/phase-d/final.pt)"))
+    return rows
+
+
 def caretaker() -> list[tuple[str, str]]:
     lines = tail(CARE_LOG, 8)
     if not lines:
@@ -245,11 +288,12 @@ def disks() -> list[tuple[str, str]]:
 def main() -> None:
     now = datetime.now(timezone.utc).astimezone()
     train_rows, _ = phase_b()
+    pd_rows = phase_d()
     care_rows = caretaker()
     pipe_rows = pipeline()
     pi_rows = pi_ci()
     disk_rows = disks()
-    alerts = [msg for icon, msg in train_rows + care_rows + pipe_rows + pi_rows + disk_rows
+    alerts = [msg for icon, msg in train_rows + pd_rows + care_rows + pipe_rows + pi_rows + disk_rows
               if icon == "⚠️"]
 
     out = [f"# Aali status — auto-updated {now:%Y-%m-%d %H:%M} local",
@@ -258,6 +302,8 @@ def main() -> None:
     out += [f"- {a}" for a in alerts] if alerts else ["- nothing needs you right now"]
     out += ["", "## Phase B training"]
     out += [f"- {m}" for _, m in train_rows]
+    out += ["", "## Phase D (110M brain)"]
+    out += [f"- {m}" for _, m in pd_rows]
     out += ["", "## Night caretaker"]
     out += [f"- {m}" for _, m in care_rows]
     out += ["", "## Graduation pipeline"]
