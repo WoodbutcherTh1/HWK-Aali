@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  Build آلي Desktop:  portable exe + Inno Setup installer
+rem  Build  Desktop:  portable exe + Inno Setup installer
 rem  Output: build-desktop\dist\Aali-Desktop.exe
 rem          build-desktop\installer\Aali-Desktop-Setup.exe
 rem ============================================================

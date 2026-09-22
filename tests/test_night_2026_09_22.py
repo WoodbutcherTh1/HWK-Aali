@@ -192,9 +192,13 @@ def wd(tmp_path, monkeypatch):
     # never spawn anything real, never read the production lock
     monkeypatch.setattr(mod, "launch_detached",
                         lambda command, log_base: None)
+    # per-stage trainer logs derive from DATA (phase_d_train_stage{N}.log),
+    # so pointing DATA at tmp_path redirects every stage's log (2026-09-22:
+    # the old shared TRAIN_LOG global no longer exists after the 08:20
+    # double-launch refactor).
+    monkeypatch.setattr(mod, "DATA", tmp_path)
     monkeypatch.setattr(mod, "TOKENIZE_LOCK", tmp_path / "tokenize.pidlock")
     monkeypatch.setattr(mod, "WATCH_LOG", tmp_path / "watchdog.log")
-    monkeypatch.setattr(mod, "TRAIN_LOG", tmp_path / "phase_d_train.log")
     monkeypatch.setattr(mod, "STATE_FILE", tmp_path / "state.json")
     return mod
 
@@ -212,7 +216,9 @@ def test_watchdog_stage_command_contract(wd) -> None:
     cmd = wd.build_stage_command(wd.STAGES[1])
     joined = " ".join(cmd)
     assert cmd[0].endswith("python.exe")              # never a bare .py (193!)
-    assert "--dropout 0.0" in joined                  # checkpoint payload config
+    # dropout 0.1 (08:00 lesson): the payload config carries dropout=0.1 and
+    # --resume compares field-by-field; the original 0.0 killed every launch.
+    assert "--dropout 0.1" in joined
     assert "--resume" in joined
     assert "code" in joined
 
@@ -225,7 +231,8 @@ def test_watchdog_never_launches_stage3_without_new_corpora(
         "stage": 2, "max_steps": 4000,
         "output_dir": "D:/hwk-models/phase-d-code",
         "launched_at": "2026-09-22T01:00:00"})
-    monkeypatch.setattr(wd, "last_step", lambda: 4001)         # stage 2 COMPLETE
+    # signature matches the real last_step(stage) (per-stage logs refactor)
+    monkeypatch.setattr(wd, "last_step", lambda stage: 4001)   # stage 2 COMPLETE
     launched: list[dict] = []
     monkeypatch.setattr(wd, "launch_stage", lambda s: launched.append(s) or True)
     action = wd.check_cycle(heartbeat=False)
@@ -239,6 +246,9 @@ def test_watchdog_builds_stage3_from_available_corpora(
     for name in ("law", "medical", "mmlu"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "train_00000.bin").write_bytes(b"")
+        # a corpus only counts when tokenization COMPLETED (manifest present;
+        # shards without one are an interrupted run with unknown boundaries)
+        (tmp_path / name / "manifest.json").write_text("{}", encoding="utf-8")
     arg = wd.stage3_corpora_arg()
     assert arg == "pile,arabic,instruct,orca_math,reasoning,code,law,medical,mmlu"
 

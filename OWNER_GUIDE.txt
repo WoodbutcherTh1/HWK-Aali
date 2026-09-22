@@ -1,0 +1,60 @@
+================================================================
+          AALI - OWNER QUICK START GUIDE - 2026-09-22
+================================================================
+
+WHERE AALI LIVES
+  Folder : C:\Users\HmamK\OneDrive\Desktop\HWK-Aali-main
+  (all commands below are run from inside this folder)
+
+STEP 1 - START AALI (his brain = a local server)
+  Easy way : open the folder above, enter the scripts folder,
+             double-click  start_app.bat
+  Terminal :
+     cd C:\Users\HmamK\OneDrive\Desktop\HWK-Aali-main
+     scripts\start_app.bat
+  First start takes 20-60 seconds. A browser tab opens by itself.
+  (start_all.bat = full stack: server + all helpers)
+
+STEP 2 - TALK TO HIM (pick ONE - all share the same brain)
+  Web app   : http://127.0.0.1:5055/ui/
+  Desktop   : scripts\aali_desktop.bat  (app-style window)
+  Terminal  : scripts\aali_cli.bat      (colored CLI, live tools)
+  If the server is not running, the desktop and CLI apps
+  start it for you automatically.
+
+STEP 3 - CHECK HE IS ALIVE
+  A) Open  http://127.0.0.1:5055/api/health  in a browser.
+     A reply = alive. Nothing = server is down, rerun step 1.
+  B) Chat test: ask him anything; you see tool traces while he
+     works (read_file, run_command...).
+  C) CLI test: run scripts\aali_cli.bat and type /tools
+     A capability list = he is alive and listening.
+
+GOOD TO KNOW
+  - Sign-up page    : http://127.0.0.1:5055/signup
+  - Admin dashboard : http://127.0.0.1:5055/admin
+  - Same WiFi, other device: use this PC IP instead of 127.0.0.1
+    example: http://192.168.1.x:5055/ui/
+  - Sessions are shared: start on web, continue on CLI.
+  - CLI shortcuts: /new new chat  /open N resume  /help all keys
+  - He works inside a workspace folder; dangerous actions
+    (delete / print / install) always ask you first.
+  - What he can do: files, safe commands, open apps, memory
+    that survives restarts, images (OCR), PDF/Word/Excel,
+    web search, and building small apps and games.
+
+IF SOMETHING IS WRONG
+  - Page will not open  -> rerun start_app.bat, read the
+    error text in the black window.
+  - He answers nonsense -> tell the owner report file; his
+    brain files live in D:\hwk-models (do not delete).
+  - Full documentation  : README.md and AALI_ARCHITECTURE.md
+    inside his folder, plus the printed guide from 2026-09-10.
+
+PRINTING FROM THIS PC (learned 2026-09-22)
+  Your printer is "Generic / Text Only" (network 192.168.1.7).
+  It ONLY understands plain ASCII text sent raw to its port 9100.
+  - Good:  .txt files print clean via print_file (raw route)
+  - Never: PDFs / images / Arabic -> they come out as garbage;
+           print Arabic or PDF versions on a graphics printer.
+================================================================

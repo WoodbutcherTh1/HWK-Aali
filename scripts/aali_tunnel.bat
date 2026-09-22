@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 rem ============================================================
-rem  آلي — Internet  (افتح آلي للإنترنت برابط عام مؤقت)
+rem    Internet  (     )
 rem  Uses a free Cloudflare quick-tunnel: no router setup,
 rem  no ports, no account. Works while this window stays open.
 rem  Optional: put cloudflared.exe next to this script, or it
@@ -13,12 +13,12 @@ cd /d "%~dp0"
 
 set "CF=%~dp0cloudflared.exe"
 if not exist "%CF%" (
-  echo   [آلي] جاري تنزيل النفق لمرة واحدة...
+  echo   []     ...
   curl -L -o "%CF%" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -s -S
 )
 
 if not exist "%CF%" (
-  echo   ❌ تعذر تنزيل النفق. تحقق من الاتصال ثم أعد المحاولة.
+  echo      .      .
   pause
   exit /b 1
 )
@@ -26,30 +26,30 @@ if not exist "%CF%" (
 rem ---- safety gate: never expose an UNauthenticated brain to the world ----
 set "KEYFILE=D:\hwk-data\aali_master_key.txt"
 if not exist "%KEYFILE%" (
-  echo   ❌ لا يوجد مفتاح مدير. شغّل scripts\aali_share.bat أولاً لإنشائه،
-  echo      ثم أعد هذه النافذة. رابط عام بلا مفاتيح = أي شخص في العالم
-  echo      يتحدث مع آلي الذي يشغّل جهازك — مرفوض.
+  echo       .  scripts\aali_share.bat
+  echo         .     =
+  echo             .
   pause
   exit /b 1
 )
 set /p MASTER=<"%KEYFILE%"
 curl -s -m 3 -H "X-API-Key: %MASTER%" http://127.0.0.1:5055/api/health | findstr /c:"ok" >nul
 if errorlevel 1 (
-  echo   ❌ الخادم لا يعمل بوضع المفاتيح. شغّل scripts\aali_share.bat أولاً
-  echo      (يعيد تشغيل آلي بوضع multi-user مع جدار ناري محلي)، ثم أعد المحاولة.
+  echo        .  scripts\aali_share.bat
+  echo      (    multi-user    )   .
   pause
   exit /b 1
 )
 
 echo.
-echo   ✦ آلي — Internet Access
-echo   ─────────────────────────────────────
-echo   سينشئ الآن رابطاً عاماً مؤقتاً لخادم آلي المحلي.
+echo      Internet Access
+echo
+echo          .
 rem   SAFE: the server verified above requires X-API-Key, and non-admin keys
 rem   arriving over the tunnel are force-gated to the guest policy
 rem   (no run_command / delete / machine_ops) in file-agent/app.py.
-echo   أرسل الرابط لأصدقائك — يحتاج كل منهم مفتاحاً من /signup أو /admin.
-echo   (الرابط صالح ما دامت هذه النافذة مفتوحة)
+echo            /signup  /admin.
+echo   (      )
 echo.
 "%CF%" tunnel --url http://127.0.0.1:5055 --no-autoupdate
 pause

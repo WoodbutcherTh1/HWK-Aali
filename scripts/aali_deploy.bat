@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  آلي — DEPLOY (زر النشر — بيد المالك فقط)
+rem    DEPLOY (     )
 rem  Double-click this file. YOU choose what to publish.
 rem  Nothing is uploaded/pushed without you pressing y first.
 rem ============================================================
@@ -12,20 +12,20 @@ title Aali Deploy
 :menu
 cls
 echo.
-echo   ╔══════════════════════════════════════════╗
-echo   ║   آلي — زر النشر  (Hmam Kaadna)          ║
-echo   ╚══════════════════════════════════════════╝
+echo
+echo           (Hmam Kaadna)
+echo
 echo.
-echo   [1] فحص جاهزية النشر       (preflight --check)
-echo   [2] تدريب + امتحان الترقية  (soup pipeline - GPU)
-echo   [3] دمج المحوّل بالنموذج    (merge adapter)
-echo   [4] نشر على Hugging Face    (private أولاً)
-echo   [5] تجهيز Ollama            (Modelfile + GGUF steps)
-echo   [6] قائمة النشر للمنصات     (checklist + probe)
-echo   [7] دفع التحديثات إلى GitHub (commit + push)
-echo   [8] خروج
+echo   [1]          (preflight --check)
+echo   [2]  +    (soup pipeline - GPU)
+echo   [3]       (merge adapter)
+echo   [4]   Hugging Face    (private )
+echo   [5]  Ollama            (Modelfile + GGUF steps)
+echo   [6]        (checklist + probe)
+echo   [7]    GitHub (commit + push)
+echo   [8]
 echo.
-set /p CHOICE=  اختر رقمًا ثم اضغط Enter: 
+set /p CHOICE=      Enter:
 
 if "%CHOICE%"=="1" goto check
 if "%CHOICE%"=="2" goto train
@@ -45,9 +45,9 @@ goto menu
 
 :train
 echo.
-echo  سيبدأ تدريب QLoRA + امتحان الترقية على الـ GPU (قد يستغرق ساعات).
-echo  تأكد أن Phase A متوقف أو أنهى عمله.
-set /p GO=  متابعة؟ (y/N): 
+echo    QLoRA +     GPU (  ).
+echo    Phase A    .
+set /p GO=   (y/N):
 if /i "%GO%"=="y" (
   rem 2026-09-12: detached launch - the pipeline (and its hours-long train)
   rem must never live in a console window that a close/Ctrl+C would kill.
@@ -59,7 +59,7 @@ goto menu
 
 :merge
 echo.
-set /p GO=  دمج المحوّل المُرقَّى في نموذج مستقل؟ (y/N): 
+set /p GO=        (y/N):
 if /i "%GO%"=="y" ".venv\Scripts\python.exe" scripts\publish_aali.py --merge
 echo.
 pause
@@ -67,10 +67,10 @@ goto menu
 
 :hf
 echo.
-set /p REPO=  اسم المستودع (مثال: HmamK/aali-1.5b): 
+set /p REPO=    (: HmamK/aali-1.5b):
 if "%REPO%"=="" goto menu
-echo  يتم الرفع كـ PRIVATE أولاً — النشر العام بقرارك من موقع HF.
-set /p GO=  متابعة الرفع؟ (y/N): 
+echo     PRIVATE        HF.
+set /p GO=    (y/N):
 if /i "%GO%"=="y" ".venv\Scripts\python.exe" scripts\publish_aali.py --hf %REPO%
 echo.
 pause
@@ -78,7 +78,7 @@ goto menu
 
 :ollama
 echo.
-set /p NAME=  اسم النموذج في Ollama (مثال: aali): 
+set /p NAME=     Ollama (: aali):
 if "%NAME%"=="" goto menu
 ".venv\Scripts\python.exe" scripts\publish_aali.py --ollama %NAME%
 echo.
@@ -88,23 +88,23 @@ goto menu
 :openrouter
 ".venv\Scripts\python.exe" scripts\publish_aali.py --openrouter
 echo.
-echo  القائمة في: D:\hwk-data\soup\openrouter_checklist.md
+echo   : D:\hwk-data\soup\openrouter_checklist.md
 pause
 goto menu
 
 :github
 echo.
-echo  سيُطبع أولًا ما سيُدفَع (git status). لا يُدفع أي شيء قبل موافقتك.
+echo      (git status).      .
 git status --short
 echo.
-set /p MSG=  رسالة الـ commit (أو Enter لرسالة افتراضية): 
+set /p MSG=    commit ( Enter  ):
 if "%MSG%"=="" set "MSG=update: aali nightly work"
-set /p GO=  إضافة كل التغييرات والدفع الآن؟ (y/N): 
+set /p GO=       (y/N):
 if /i not "%GO%"=="y" goto menu
 git add -A
 git commit -m "%MSG%
 
-🤖 Generated with Codebuff
+? Generated with Codebuff
 Co-Authored-By: Codebuff <noreply@codebuff.com>"
 git push origin master
 echo.

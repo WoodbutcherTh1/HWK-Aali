@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -702,6 +703,58 @@ def _pick_printer(requested: str, printers: list[str]) -> str:
     return requested
 
 
+def _printer_port_and_driver(printer: str) -> tuple[str, str]:
+    """(PortName, DriverName) for a printer via PowerShell; ('', '') if unknown."""
+    if not printer:
+        return "", ""
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Printer | Where-Object { $_.Name -eq "
+             + _ps_quote(printer) + " } | ForEach-Object { "
+             "($_.PortName + '|' + $_.DriverName) }"],
+            capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
+                line = line.strip()
+                if "|" in line:
+                    port, _, driver = line.partition("|")
+                    return port.strip(), driver.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "", ""
+
+
+_TCP_PORT_RE = re.compile(r"^(\d{1,3}(?:\.\d{1,3}){3})(?:_\d+)?$")
+
+
+def _tcp_host_from_port(port_name: str) -> str:
+    """IP host behind a TCP/IP printer port ('192.168.1.7_1' -> the IP).
+    WSD/USB/LPT ports have no raw host and return ''."""
+    match = _TCP_PORT_RE.match((port_name or "").strip())
+    return match.group(1) if match else ""
+
+
+def _is_text_only_driver(driver_name: str) -> bool:
+    """True for 'Generic / Text Only' style drivers: raw text in, no rendering."""
+    name = (driver_name or "").lower()
+    return "generic" in name and "text" in name
+
+
+def _raw_print_9100(host: str, data: bytes, *, port: int = 9100,
+                    timeout: float = 8.0) -> bool:
+    """Push raw bytes straight to a network printer's port 9100 (JetDirect).
+    Best-effort: returns False on any socket problem so callers can fall back."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.sendall(data)
+            time.sleep(1.0)  # give the device time to drain before close
+        return True
+    except OSError:
+        return False
+
+
 def _ps_quote(value: str) -> str:
     """Single-quote a value for PowerShell ($ and backticks must not interpolate)."""
     return "'" + str(value).replace("'", "''") + "'"
@@ -716,7 +769,12 @@ def print_file(path: str, workspace_root: str | Path, *, copies: int = 1,
     -> the default printer (PRINTER env) -> unique substring match -> first
     enumerated. Formats: PDF goes through the spooler's ShellExecute 'print'
     verb or the PDF reader's silent /t flag; images go through PowerShell
-    System.Drawing (GDI+); text goes through the 'print' command. Confirmation
+    System.Drawing (GDI+); text goes through the 'print' command. Pure-ASCII
+    text behind a TCP/IP printer port goes RAW to the device on port 9100
+    first, and text-only (Generic/Text) drivers refuse PDFs/images with a
+    clear error instead of printing garbage (2026-09-22 owner-printer lesson:
+    GDI garbled into 'Chinese' on the text-only driver and the 'print'
+    command refused with 'Unable to initialize device PRN'). Confirmation
     is enforced SERVER-SIDE by CONFIRM_REQUIRED; guests are hard-blocked.
     """
     if not os.name == "nt":
@@ -746,12 +804,23 @@ def print_file(path: str, workspace_root: str | Path, *, copies: int = 1,
                 "size_bytes": target.stat().st_size}
 
     if suffix == ".pdf":
+        if _is_text_only_driver(_printer_port_and_driver(chosen)[1]):
+            raise FileAgentError(
+                f"printer {chosen!r} is a raw-text-only (Generic/Text) printer: "
+                "it cannot render PDFs and would print pages of garbage. "
+                "Convert the document to .txt first, or pass printer=<a "
+                "graphics printer name>")
         ps1 = ("$p = Start-Process -FilePath " + _ps_quote(str(target)) +
                " -Verb Print -PassThru -WindowStyle Hidden; "
                "Start-Sleep -Seconds 2; if (-not $p.HasExited) { $p.CloseMainWindow() | Out-Null }; "
                "'queued'")
         result = _spool_print(ps1)
     elif suffix in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}:
+        if _is_text_only_driver(_printer_port_and_driver(chosen)[1]):
+            raise FileAgentError(
+                f"printer {chosen!r} is a raw-text-only (Generic/Text) printer: "
+                "it cannot render images and would print pages of garbage. "
+                "Pass printer=<a graphics printer name> instead")
         ps1 = ("Add-Type -AssemblyName System.Drawing; "
                "$img = [System.Drawing.Image]::FromFile(" + _ps_quote(str(target)) + "); "
                "$doc = New-Object System.Drawing.Printing.PrintDocument; "
@@ -765,17 +834,38 @@ def print_file(path: str, workspace_root: str | Path, *, copies: int = 1,
         result = _spool_print(ps1)
     elif suffix in {".txt", ".log", ".csv", ".md", ".json", ".py", ".js",
                     ".ts", ".html", ".css", ".xml", ".yaml", ".yml", ".ini"}:
-        # Arabic / non-ASCII text must not print as mojibake: hand the spooler
-        # an ANSI+OEM double-encoded copy (Windows' 'print' command is ANSI).
+        # 2026-09-22 lesson (owner's 'Generic / Text Only' printer): the GDI
+        # spooler route garbles on raw-text drivers and the 'print' command
+        # can refuse outright ('Unable to initialize device PRN'). Pure-ASCII
+        # text behind a TCP/IP printer port goes STRAIGHT to the device on
+        # port 9100 - clean, driver-less, exactly what text-only hardware
+        # wants. Non-ASCII text still uses the legacy spooler path below.
+        port_name, _driver = _printer_port_and_driver(chosen)
+        host = _tcp_host_from_port(port_name)
         try:
             raw = target.read_text(encoding="utf-8")
-            payload = raw.encode("cp1256", errors="replace").decode("cp1256")
-            src = target
-            if payload != raw:
-                src = root / (target.stem + "._print_tmp." + (target.suffix.lstrip(".") or "txt"))
-                src.write_text(payload, encoding="mbcs", errors="replace")
-        except (UnicodeDecodeError, LookupError, OSError):
-            src = target
+        except (UnicodeDecodeError, OSError):
+            raw = None
+        if host and raw is not None and raw.isascii():
+            normalized = raw.replace("\r\n", "\n").replace("\n", "\r\n") + "\f"
+            if _raw_print_9100(host, normalized.encode("ascii") * copies):
+                return {"ok": True, "tool": "print_file", "file": path,
+                        "printer": chosen, "copies": copies,
+                        "pages": pages or "all",
+                        "size_bytes": target.stat().st_size,
+                        "route": "raw-9100"}
+            # device unreachable -> fall through to the legacy route
+        # Arabic / non-ASCII text must not print as mojibake: hand the spooler
+        # an ANSI+OEM double-encoded copy (Windows' 'print' command is ANSI).
+        src = target
+        if raw is not None:
+            try:
+                payload = raw.encode("cp1256", errors="replace").decode("cp1256")
+                if payload != raw:
+                    src = root / (target.stem + "._print_tmp." + (target.suffix.lstrip(".") or "txt"))
+                    src.write_text(payload, encoding="mbcs", errors="replace")
+            except (UnicodeDecodeError, LookupError, OSError):
+                src = target
         print_cmd = ["print"] + ([f"/d:\\\\{chosen}"] if chosen else []) + [str(src)]
         try:
             proc = subprocess.run(print_cmd, capture_output=True, text=True,

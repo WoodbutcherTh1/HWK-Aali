@@ -1,0 +1,2 @@
+# cmd.exe requires CRLF + ASCII in .bat files (see tests/test_bat_hygiene.py)
+*.bat eol=crlf

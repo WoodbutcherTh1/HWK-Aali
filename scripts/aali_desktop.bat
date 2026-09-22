@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
 rem ============================================================
-rem  آلي — Desktop  (نافذة تطبيق مستقلة بدون تثبيت)
+rem  Aali - Desktop  (standalone app window, no install needed)
 rem  Download this ONE file, double-click it, and Aali opens in
-rem  its own window (Chrome/Edge app mode) — like a native app.
+rem  its own window (Chrome/Edge app mode) - like a native app.
 rem  First run asks for Aali's address; it is remembered.
 rem ============================================================
 setlocal EnableDelayedExpansion
@@ -17,12 +17,12 @@ if "%~1"=="" (
     set "AALI_URL=!LAST_URL!"
   ) else (
     echo.
-    echo   ✦ آلي — Desktop
-    echo   ─────────────────────────────
-    echo   أول تشغيل فقط: الصق رابط خادم آلي
-    echo   (مثال: http://192.168.1.10:5055 أو رابط from the owner)
+    echo   Aali - Desktop
+    echo   -------------------------------
+    echo   First run only: paste Aali server address
+    echo   (example: http://192.168.1.10:5055 or the owner link)
     echo.
-    set /p AALI_URL=  الرابط :
+    set /p AALI_URL=  Address:
   )
 ) else (
   set "AALI_URL=%~1"

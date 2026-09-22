@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  Build the آلي Node exe (Aali Cloud STEP 5 packaging)
+rem  Build the  Node exe (Aali Cloud STEP 5 packaging)
 rem  Output: build-desktop\dist\aali-node.exe
 rem
 rem  Same proven pattern as scripts\build_desktop.bat: a dedicated
@@ -10,7 +10,7 @@ rem
 rem  The exe IS the headless daemon: aali-node.exe --hub ws://... --token JWT
 rem  GUI:  aali-node.exe --shell --hub ws://... --token JWT
 rem  Update activation inside a frozen build is deliberately refused
-rem  (activate.py) — updates swap on source deployments.
+rem  (activate.py)  updates swap on source deployments.
 rem ============================================================
 setlocal
 cd /d "%~dp0.."
@@ -23,9 +23,9 @@ if not exist .venv-desktop (
 )
 
 rem websockets + pystray are runtime deps of the daemon/shell (hub-venv only
-rem by day) — the BUILD venv needs them too or the exe ships without them.
+rem by day)  the BUILD venv needs them too or the exe ships without them.
 rem cryptography is the PRODUCTION update-signature path (Ed25519; HMAC is
-rem the fallback) — without it a packaged Node fails closed on every real
+rem the fallback)  without it a packaged Node fails closed on every real
 rem update manifest, so it ships inside the exe.
 .venv-desktop\Scripts\python.exe -c "import websockets, pystray, cryptography" 2>nul
 if errorlevel 1 (
