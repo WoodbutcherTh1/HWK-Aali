@@ -57,4 +57,14 @@ PRINTING FROM THIS PC (learned 2026-09-22)
   - Good:  .txt files print clean via print_file (raw route)
   - Never: PDFs / images / Arabic -> they come out as garbage;
            print Arabic or PDF versions on a graphics printer.
+
+AUTO-START AT LOGON (added 2026-09-22)
+  Aali now boots himself when you log in to Windows.
+  - How: Startup shortcut "Aali Autostart.lnk" runs
+    scripts\aali_autostart.bat
+  - Safe: it first checks /api/health - if Aali is already
+    alive it exits in ~1 second and does nothing.
+  - Guard log: D:\hwk-data\aali_autostart.log
+  - Remove it: delete the shortcut in
+    shell:startup  (paste that into Explorer's address bar).
 ================================================================
