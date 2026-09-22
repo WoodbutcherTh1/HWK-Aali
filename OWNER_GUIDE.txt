@@ -67,4 +67,14 @@ AUTO-START AT LOGON (added 2026-09-22)
   - Guard log: D:\hwk-data\aali_autostart.log
   - Remove it: delete the shortcut in
     shell:startup  (paste that into Explorer's address bar).
+
+SERVER WATCHDOG (added 2026-09-22)
+  While you work, a detached watchdog polls Aali every 60 s.
+  If the server dies mid-session it fires the same autostart
+  guard and brings him back - typical revive under 2 minutes.
+  - Log    : D:\hwk-data\aali_server_watchdog.log
+  - Ensured at every logon by the autostart guard (step 3)
+  - Single instance: a second copy exits immediately
+  - Stop it: kill the pid inside
+    D:\hwk-data\aali_server_watchdog.pidlock
 ================================================================
