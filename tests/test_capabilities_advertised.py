@@ -27,6 +27,29 @@ def test_system_prompt_names_allowlisted_runtimes() -> None:
         assert tool in al.SYSTEM_PROMPT
 
 
+# ------------------------------------------------- printing (2026-09-22)
+def test_system_prompt_advertises_printing_en() -> None:
+    assert "print_file" in al.SYSTEM_PROMPT
+    assert "PHYSICAL action" in al.SYSTEM_PROMPT
+
+
+def test_system_prompt_advertises_printing_ar() -> None:
+    assert "الطباعة" in al.SYSTEM_PROMPT
+    assert "فعل مادي" in al.SYSTEM_PROMPT
+
+
+def test_print_file_in_protocol_tool_line() -> None:
+    # The small-brain protocol prompt (inside _ollama_agent_loop's source)
+    # must include print_file so the model can learn the new verb. We pin
+    # the file SOURCE because the line lives inside a function body.
+    source = Path(al.__file__).read_text(encoding="utf-8")
+    for chunk in source.split("def "):
+        if "machine_ops (action)" in chunk:
+            assert "print_file (path" in chunk
+            return
+    raise AssertionError("no tool line mentions machine_ops (action)")
+
+
 # ------------------------------------------------------- system prompt (AR)
 def test_arabic_prompt_advertises_commands_and_building() -> None:
     assert "تنفّذ أوامر حقيقية نيابة عن المستخدم عبر run_command" in al.SYSTEM_PROMPT

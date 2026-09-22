@@ -667,6 +667,141 @@ def edit_video(path: str, output: str, workspace_root: str | Path, *, op: str,
     return result
 
 
+def _printer_names() -> list[str]:
+    """Enumerate local + network printers via PowerShell (Get-Printer)."""
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-Printer | ForEach-Object { $_.Name }"],
+            capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if proc.returncode == 0:
+            names = [line.strip() for line in proc.stdout.splitlines()
+                     if line.strip()]
+            if names:
+                return names
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return [os.getenv("PRINTER", "")]
+
+
+def _pick_printer(requested: str, printers: list[str]) -> str:
+    """Exact -> default (PRINTER env) -> unique substring -> first."""
+    if requested and requested in printers:
+        return requested
+    default = os.getenv("PRINTER", "")
+    if default and default in printers:
+        return default
+    if requested:
+        needle = requested.lower()
+        hits = [p for p in printers if needle in p.lower()]
+        if len(hits) == 1:
+            return hits[0]
+    if printers:
+        return printers[0]
+    return requested
+
+
+def _ps_quote(value: str) -> str:
+    """Single-quote a value for PowerShell ($ and backticks must not interpolate)."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def print_file(path: str, workspace_root: str | Path, *, copies: int = 1,
+               pages: str = "", printer: str = "") -> dict[str, Any]:
+    """Print a workspace document to one of the owner's real printers.
+
+    Owner request (2026-09-22): a printer is connected to the PC/network and
+    Aali should be able to hand the owner paper. Resolution order: exact name
+    -> the default printer (PRINTER env) -> unique substring match -> first
+    enumerated. Formats: PDF goes through the spooler's ShellExecute 'print'
+    verb or the PDF reader's silent /t flag; images go through PowerShell
+    System.Drawing (GDI+); text goes through the 'print' command. Confirmation
+    is enforced SERVER-SIDE by CONFIRM_REQUIRED; guests are hard-blocked.
+    """
+    if not os.name == "nt":
+        raise FileAgentError("print_file is Windows-only on this deployment")
+    root, target = _resolve(path, workspace_root, must_exist=True)
+    if not target.is_file():
+        raise FileAgentError(f"not a file: {path}")
+    try:
+        copies = max(1, min(int(copies), 50))
+    except (TypeError, ValueError):
+        copies = 1
+    suffix = target.suffix.lower()
+    chosen = _pick_printer(printer, _printer_names())
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    def _spool_print(ps1: str) -> dict[str, Any]:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps1],
+            capture_output=True, text=True, timeout=120,
+            creationflags=no_window)
+        if proc.returncode != 0:
+            raise FileAgentError(
+                f"print spooler refused (exit {proc.returncode}): "
+                f"{(proc.stderr or proc.stdout).strip()[:400]}")
+        return {"ok": True, "tool": "print_file", "file": path,
+                "printer": chosen, "copies": copies, "pages": pages or "all",
+                "size_bytes": target.stat().st_size}
+
+    if suffix == ".pdf":
+        ps1 = ("$p = Start-Process -FilePath " + _ps_quote(str(target)) +
+               " -Verb Print -PassThru -WindowStyle Hidden; "
+               "Start-Sleep -Seconds 2; if (-not $p.HasExited) { $p.CloseMainWindow() | Out-Null }; "
+               "'queued'")
+        result = _spool_print(ps1)
+    elif suffix in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}:
+        ps1 = ("Add-Type -AssemblyName System.Drawing; "
+               "$img = [System.Drawing.Image]::FromFile(" + _ps_quote(str(target)) + "); "
+               "$doc = New-Object System.Drawing.Printing.PrintDocument; "
+               + (f"$doc.PrinterSettings.PrinterName = {_ps_quote(chosen)}; " if chosen else "")
+               + (f"$doc.PrinterSettings.Copies = {copies}; " if copies > 1 else "")
+               + "$doc.add_PrintPage({ param($s, $e) "
+               "$r = $e.MarginBounds; $ar = [Math]::Min($r.Width / $img.Width, $r.Height / $img.Height); "
+               "$w = [int]($img.Width * $ar); $h = [int]($img.Height * $ar); "
+               "$e.Graphics.DrawImage($img, $r.X, $r.Y, $w, $h); $e.HasMorePages = $false }); "
+               "$doc.Print(); $img.Dispose(); 'queued'")
+        result = _spool_print(ps1)
+    elif suffix in {".txt", ".log", ".csv", ".md", ".json", ".py", ".js",
+                    ".ts", ".html", ".css", ".xml", ".yaml", ".yml", ".ini"}:
+        # Arabic / non-ASCII text must not print as mojibake: hand the spooler
+        # an ANSI+OEM double-encoded copy (Windows' 'print' command is ANSI).
+        try:
+            raw = target.read_text(encoding="utf-8")
+            payload = raw.encode("cp1256", errors="replace").decode("cp1256")
+            src = target
+            if payload != raw:
+                src = root / (target.stem + "._print_tmp." + (target.suffix.lstrip(".") or "txt"))
+                src.write_text(payload, encoding="mbcs", errors="replace")
+        except (UnicodeDecodeError, LookupError, OSError):
+            src = target
+        print_cmd = ["print"] + ([f"/d:\\\\{chosen}"] if chosen else []) + [str(src)]
+        try:
+            proc = subprocess.run(print_cmd, capture_output=True, text=True,
+                                  timeout=120, creationflags=no_window,
+                                  shell=False)
+            if proc.returncode != 0:
+                raise FileAgentError(
+                    f"print command refused (exit {proc.returncode}): "
+                    f"{(proc.stderr or proc.stdout).strip()[:400]}")
+        finally:
+            if src != target:
+                try:
+                    src.unlink()
+                except OSError:
+                    pass
+        result = {"ok": True, "tool": "print_file", "file": path,
+                  "printer": chosen, "copies": copies, "pages": pages or "all",
+                  "size_bytes": target.stat().st_size}
+    else:
+        raise FileAgentError(
+            f"printing {suffix!r} is not supported yet - supported: .pdf, "
+            "images (.png/.jpg/.bmp/.tif/.gif), text files (.txt/.md/.csv/...); "
+            "convert the file first or print it manually")
+    return result
+
+
 def machine_ops(action: str, workspace_root: str | Path, *, target: str = "",
                 engine: str = "auto", force: bool = False, name: str = "",
                 pid: int | None = None, max_results: int = 30) -> dict[str, Any]:
@@ -891,6 +1026,7 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "edit_image": edit_image,
     "edit_video": edit_video,
     "machine_ops": machine_ops,
+    "print_file": print_file,
     "memory": memory,
     "generate_emoji": generate_emoji,
 }
@@ -938,6 +1074,7 @@ TOOL_EXECUTION: dict[str, str] = {
     "run_command": "client",
     "machine_ops": "client",
     "read_image": "client",
+    "print_file": "client",
     # either side (server stores per-user)
     "memory": "both",
 }
@@ -952,6 +1089,9 @@ CONFIRM_REQUIRED: frozenset[str] = frozenset({
     "delete_file",
     "move_file",
     "machine_ops",
+    # 2026-09-22 (owner request): printing is a PHYSICAL action - paper, ink,
+    # and a document leaving the machine. It joins the always-confirm set.
+    "print_file",
 })
 
 
@@ -1053,6 +1193,11 @@ _DEFINITIONS = [
                  "target": {"type": "string", "default": ""}, "engine": {"type": "string", "enum": ["auto", "winget", "npm"], "default": "auto"},
                  "force": {"type": "boolean", "default": False}, "name": {"type": "string", "default": ""},
                  "pid": {"type": "integer"}, "max_results": {"type": "integer", "default": 30}}, ["action"]),
+    _definition("print_file", "Print a document from the workspace on the owner's real printer (local USB or network). Supports PDF files, images (.png/.jpg/.bmp/.tif/.gif) and text files (.txt/.md/.csv and other text formats). PHYSICAL ACTION: paper and ink are consumed - ALWAYS confirm with the user first, and say exactly which file will be printed. Optional: printer name (default: the system default), copies (1-50), pages hint (informational).",
+                {"path": {"type": "string"},
+                 "printer": {"type": "string", "description": "printer name or unique substring; empty = default printer", "default": ""},
+                 "copies": {"type": "integer", "minimum": 1, "maximum": 50, "default": 1},
+                 "pages": {"type": "string", "default": ""}}, ["path"]),
     _definition("memory", "Persistent long-term memory about THIS user that survives restarts and new conversations. save: store a durable user statement (kind: decision/preference/fact/instruction, optional topic) - use it whenever the user says 'from now on', 'always', 'never', 'remember that'. recall: search what the user told you before BEFORE saying you don't know. forget: remove entries (needs explicit user confirmation). summary: counts and latest entries. If a newer instruction contradicts an older one, follow the newest and tell the user what changed.",
                 {"action": {"type": "string", "enum": ["save", "recall", "forget", "summary"]},
                  "text": {"type": "string", "default": ""},

@@ -73,8 +73,41 @@ def iter_parquet_texts(path: Path):
     elif "messages" in columns:
         column = "messages"
     else:
-        raise ValueError(f"no usable text column in {path}: {columns}")
+        # 2026-09-22 lesson: HuggingFace exports sometimes nest the whole row
+        # under a single struct column (mmlu's is literally named "train" with
+        # question/choices/answer/subject fields inside). Sniff the first
+        # column's children instead of hard-failing.
+        probe = parquet_file.schema_arrow.field(0).type
+        try:
+            child_names = {probe.field(i).name for i in range(probe.num_fields)}
+        except (AttributeError, TypeError):
+            child_names = set()
+        if {"question", "choices"}.issubset(child_names):
+            column = "struct_mcq"
+        else:
+            raise ValueError(f"no usable text column in {path}: {columns}")
 
+    if column == "struct_mcq":
+        letters = "ABCDEFGH"
+        name = columns[0]
+        for batch in parquet_file.iter_batches(columns=[name], batch_size=4096):
+            for value in batch.column(name).to_pylist():
+                if not isinstance(value, dict):
+                    continue
+                answer_idx = value.get("answer")
+                lines = [f"Q: {value.get('question') or ''}"]
+                for i, choice in enumerate(value.get("choices") or []):
+                    if i >= len(letters):
+                        break
+                    lines.append(f"{letters[i]}. {choice}")
+                letter = letters[answer_idx] \
+                    if isinstance(answer_idx, int) and 0 <= answer_idx < len(letters) \
+                    else "?"
+                lines.append(f"A: {letter}")
+                text = _clean("\n".join(lines))
+                if len(text) >= MIN_DOC_CHARS:
+                    yield text
+        return
     if column == "text":
         for batch in parquet_file.iter_batches(columns=["text"], batch_size=4096):
             for value in batch.column("text").to_pylist():

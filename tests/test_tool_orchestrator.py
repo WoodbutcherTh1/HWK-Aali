@@ -28,8 +28,11 @@ def test_every_registered_tool_is_classified() -> None:
 
 
 def test_classification_counts_match_mission_spec() -> None:
+    # 2026-09-22: print_file joins the client set (runs on the user's Node,
+    # next to their printer) -> 13 client tools.
     assert len(orch.server_tools()) == 12
-    assert len(orch.client_tools()) == 12
+    assert len(orch.client_tools()) == 13
+    assert "print_file" in orch.client_tools()
     assert len(orch.both_tools()) == 1
     assert orch.both_tools() == {"memory"}
 
@@ -38,6 +41,7 @@ def test_confirmed_dangerous_tools_set() -> None:
     from file_agent.file_tools import CONFIRM_REQUIRED
     assert CONFIRM_REQUIRED == frozenset({
         "run_command", "delete_file", "move_file", "machine_ops",
+        "print_file",
     })
 
 

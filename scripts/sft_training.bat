@@ -17,7 +17,7 @@ if not exist "D:\hwk-models\sft-v1\trainer-state.pt" copy /Y "D:\hwk-models\cont
 rem Detached launch (2026-09-12): the trainer must survive this window
 rem closing (the 12:20 console event killed a whole run). The launcher
 rem appends to D:\hwk-data\sft_training.log itself.
-".venv\Scripts\python.exe" scripts\launch_detached.py --log sft_training -- train_scratch.py ^
+".venv\Scripts\python.exe" scripts\launch_detached.py --log sft_training -- .venv\Scripts\python.exe train_scratch.py ^
   --data data/sft_mix.jsonl ^
   --tokenizer D:/hwk-data/tokenizer/hwk_spm.model ^
   --output-dir D:/hwk-models/sft-v1 ^

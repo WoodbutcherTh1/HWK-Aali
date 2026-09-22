@@ -158,6 +158,14 @@ processes (list_processes/kill_process), and read live system stats
 uninstall, and kill_process change the system permanently, so always tell
 the user exactly what you are about to do and get an explicit yes before
 passing force=true. Aali's own training runtimes (python/node) are
+
+PRINTING: you can print real documents on the owner's printer (local USB or
+network) with print_file(path, printer?, copies?, pages?) — PDFs, images
+(.png/.jpg/.bmp/.tif) and text files (.txt/.md/.csv...). Printing is a
+PHYSICAL action (paper + ink): ALWAYS confirm the exact file and printer
+with the user BEFORE calling it, and report the result honestly. If the
+spooler refuses, say so and suggest checking the printer connection — never
+claim a page came out unless the tool returned ok.
 protected: never try to stop them.
 
 You RUN COMMANDS on the user's behalf with run_command: a workspace-sandboxed,
@@ -274,6 +282,13 @@ what you cannot do.
 
 تستطيع أيضًا تشغيل الجهاز نفسه عبر machine_ops: فتح التطبيقات والملفات (open)، تثبيت أو إزالة البرامج (install/uninstall)، عرض أو إيقاف العمليات (list_processes/kill_process)، وقراءة حالة الجهاز (system_info). الفتح والعرض والقراءة آمنة دائمًا؛ أما install و uninstall و kill_process فهي تغيير دائم في النظام، لذلك اشرح للمستخدم بالضبط ما ستفعله واحصل على موافقة صريحة قبل force=true. عمليات تدريب آلي نفسها (python/node) محمية: لا تحاول إيقافها أبدًا.
 
+الطباعة: تستطيع طباعة مستندات حقيقية على طابعة المالك (المحلية أو الشبكية) عبر
+print_file(path, printer?, copies?, pages?) — ملفات PDF والصور (png/jpg/bmp/tif)
+والملفات النصية (txt/md/csv...). الطباعة فعل مادي (ورق وحبر): أكّد دائمًا مع
+المستخدم اسم الملف والطابعة بالضبط قبل النداء، وأبلغ بالنتيجة بصدق. إن رفض
+خادم الطباعة فقل ذلك واقترح فحص الاتصال — لا تدّعِ أبدًا أن ورقة خرجت لم تعُد
+الأداة بـ ok.
+
 تنفّذ أوامر حقيقية نيابة عن المستخدم عبر run_command: صَدَف مقيدة بمجلد العمل
 وقائمة أوامر مسموحة (python و pip و pytest و node و npm و npx و git والمترجمات
 مثل gcc/cargo/go/dotnet) لبناء المشاريع واختبارها وتشغيلها. استخدمها لتثبيت
@@ -336,11 +351,17 @@ _POLICY_PROMPTS = {
 # owner's PC, delete, or touch the machine at all).
 _GUEST_BLOCKED_TOOLS = frozenset({
     "run_command", "machine_ops", "delete_file", "move_file", "memory",
+    # 2026-09-22: printing costs real paper/ink on the OWNER's printer -
+    # guests never get to spend the owner's physical resources.
+    "print_file",
 })
 
 
 def _is_dangerous_call(tool_name: str, args: dict[str, Any]) -> bool:
     """True for tool calls the 'always_ask' policy must gate."""
+    if tool_name == "print_file":
+        # Physical action: paper + ink. Always gated, like install/kill.
+        return True
     if tool_name == "run_command":
         return True
     if tool_name == "machine_ops":
@@ -894,7 +915,7 @@ def _ollama_agent_loop(
         "move_file (source, destination) | delete_file (path) | run_command (command) | "
         "read_image (path) | read_document (path) | analyze_video (path) | "
         "edit_image (path, output, op) | edit_video (path, output, op) | "
-        "machine_ops (action) | memory (action: save/recall/forget/summary) | make_n8n_workflow (description) | list_skills () | use_skill (name) | "
+        "machine_ops (action) | print_file (path, printer?, copies?) | memory (action: save/recall/forget/summary) | make_n8n_workflow (description) | list_skills () | use_skill (name) | "
         "fetch_url (url) | web_search (query)\n"
         "قواعد: اكتب المحتوى الكامل داخل حقل content دائماً، وأنجز كل خطوات الطلب قبل final، "
         "وأجب داخل final بنفس لغة رسالة المستخدم بالضبط (عربية للعربية، إنجليزية للإنجليزية، "

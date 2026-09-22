@@ -61,7 +61,8 @@ KINDS = ("decision", "preference", "fact", "instruction")
 MAX_ENTRIES = 200          # prune target for the memory store
 MAX_TEXT_CHARS = 2000      # stored per entry
 MAX_LOG_CHARS = 4000       # stored per conversation turn
-MAX_RENDER_ENTRIES = 25
+MAX_RENDER_ENTRIES = 40   # was 25 — owner asked for a bigger memory window (2026-09-22)
+MAX_RENDER_CHARS = 9000   # token-safety cap on the injected memory block
 
 _LOCK = threading.Lock()
 
@@ -629,11 +630,16 @@ def render_block(
         return ""
     newest_first = sorted(entries, key=lambda e: e.get("updated", ""), reverse=True)
     lines = []
+    total_chars = 0
     for entry in newest_first[: max(1, int(max_entries))]:
         when = str(entry.get("updated", ""))[:16].replace("T", " ")
         scope = f" • topic: {entry['topic']}" if entry.get("topic") else ""
         text = str(entry.get("text", ""))[:300]
-        lines.append(f"- [{when}] ({entry.get('kind')}{scope}) \"{text}\"")
+        line = f"- [{when}] ({entry.get('kind')}{scope}) \"{text}\""
+        total_chars += len(line)
+        if total_chars > MAX_RENDER_CHARS:
+            break
+        lines.append(line)
     return (
         "\n### ذاكرة طويلة الأمد عن هذا المستخدم / Long-term memory about this user "
         "(newest first)\n"

@@ -11,7 +11,7 @@ set PYTHONIOENCODING=utf-8
 rem Detached launch (2026-09-12): the trainer must survive this window
 rem closing (the 12:20 console event killed a whole run). The launcher
 rem appends to D:\hwk-data\training.log itself.
-".venv\Scripts\python.exe" scripts\launch_detached.py --log training -- train_scratch.py ^
+".venv\Scripts\python.exe" scripts\launch_detached.py --log training -- .venv\Scripts\python.exe train_scratch.py ^
   --data D:/hwk-data/tokens ^
   --corpora pile,arabic ^
   --tokenizer D:/hwk-data/tokenizer/hwk_spm.model ^

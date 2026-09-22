@@ -25,7 +25,8 @@ def test_aliases_point_at_real_registry_tools() -> None:
 
 
 def test_registry_names_match_file_tools() -> None:
-    assert len(tool_guard.registry_names()) == 25
+    # 2026-09-22: print_file joins the registry (owner's printer request) -> 26.
+    assert len(tool_guard.registry_names()) == 26
 
 
 # ---------------------------------------------------------------------------

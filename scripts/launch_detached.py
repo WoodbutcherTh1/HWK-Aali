@@ -33,6 +33,20 @@ LOG_DIR = Path("D:/hwk-data")
 # re-spawn itself a second time.
 ENV_MARKER = "HWK_DETACHED"
 
+# 2026-09-21 ~23:26 lesson: every .bat launcher (extend_context, sft_training,
+# resume_training) passed a BARE train_scratch.py as the child executable and
+# the owner's manual relaunches after the 20:35 GPU-driver reset ALL died
+# WinError 193 ("%1 is not a valid Win32 application") - you cannot CreateProcess
+# a .py file. The documented rule (AGENTS.md "pass .venv/Scripts/python.exe")
+# is now enforced HERE so every caller is protected, old or new.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_PYEXE = _REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+
+
+def _pyexe() -> str:
+    """The venv python this repo's long jobs must run under."""
+    return str(_PYEXE)
+
 
 def detached_creationflags() -> int:
     """DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP + CREATE_BREAKAWAY_FROM_JOB.
@@ -69,6 +83,13 @@ def build_command(argv: list[str]) -> list[str]:
     if not command:
         raise ValueError("no command after '--'")
     exe = Path(command[0])
+    if exe.suffix.lower() == ".py":
+        # A bare script cannot be an executable (WinError 193). Run it under
+        # this repo's venv python, preserving every following argument.
+        # No venv python (Pi CI / source checkout) -> fall back to the
+        # interpreter running THIS launcher rather than failing outright.
+        command = [(_pyexe() if _PYEXE.exists() else sys.executable), *command]
+        exe = Path(command[0])
     command[0] = str(exe if exe.is_absolute() else exe.resolve())
     return command
 
