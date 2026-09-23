@@ -1092,6 +1092,74 @@ def memory(action: str, workspace_root: str | Path, *,
 
 
 ToolFunction = Callable[..., dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Agent toolbelt extensions (2026-09-23): the high-frequency tools other
+# agents (Claude/GLM/GPT-style) ship and Aali lacked — artifacts, real Excel,
+# plots, diff-before-edit, a persistent plan, query-focused page reading, and
+# screen capture. Implemented in file_agent.agent_tools; re-exposed here so
+# the registry / guest gate / policy gate / orchestrator machinery treats
+# them exactly like built-ins.
+# ---------------------------------------------------------------------------
+
+def create_artifact(title: str, content: str, workspace_root: str | Path, *,
+                    artifact_type: str = "html", filename: str = "") -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.create_artifact(title, content, workspace_root,
+                                       artifact_type=artifact_type, filename=filename)
+
+
+def write_excel(path: str, rows: list[list[Any]], workspace_root: str | Path, *,
+                sheet_name: str = "Sheet1", overwrite: bool = False,
+                header: bool = True) -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.write_excel(path, rows, workspace_root, sheet_name=sheet_name,
+                                   overwrite=overwrite, header=header)
+
+
+def read_excel(path: str, workspace_root: str | Path, *, sheet: str = "",
+               max_rows: int = 200, max_cols: int = 40) -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.read_excel(path, workspace_root, sheet=sheet,
+                                  max_rows=max_rows, max_cols=max_cols)
+
+
+def create_plot(data: dict[str, Any], output: str, workspace_root: str | Path, *,
+                kind: str = "bar", title: str = "", x_label: str = "",
+                y_label: str = "", width: int = 800, height: int = 500) -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.create_plot(data, output, workspace_root, kind=kind, title=title,
+                                   x_label=x_label, y_label=y_label,
+                                   width=width, height=height)
+
+
+def diff_files(path_a: str, path_b: str, workspace_root: str | Path, *,
+               context: int = 3, max_lines: int = 400) -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.diff_files(path_a, path_b, workspace_root,
+                                  context=context, max_lines=max_lines)
+
+
+def todo_plan(action: str, workspace_root: str | Path, *, task: str = "",
+              index: int | None = None, status: str = "") -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.todo_plan(action, workspace_root, task=task,
+                                 index=index, status=status)
+
+
+def recall_search(url: str, query: str, workspace_root: str | Path, *,
+                  max_chars: int = 3000, k: int = 3) -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.recall_search(url, query, workspace_root,
+                                     max_chars=max_chars, k=k)
+
+
+def screenshot(output: str, workspace_root: str | Path) -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.screenshot(output, workspace_root)
+
+
 _FUNCTIONS: dict[str, ToolFunction] = {
     "list_files": list_files,
     "read_file": read_file,
@@ -1119,6 +1187,15 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "print_file": print_file,
     "memory": memory,
     "generate_emoji": generate_emoji,
+    # agent toolbelt extensions (2026-09-23)
+    "create_artifact": create_artifact,
+    "write_excel": write_excel,
+    "read_excel": read_excel,
+    "create_plot": create_plot,
+    "diff_files": diff_files,
+    "todo_plan": todo_plan,
+    "recall_search": recall_search,
+    "screenshot": screenshot,
 }
 
 
@@ -1167,6 +1244,16 @@ TOOL_EXECUTION: dict[str, str] = {
     "print_file": "client",
     # either side (server stores per-user)
     "memory": "both",
+    # agent toolbelt extensions (2026-09-23): workspace-touching tools run on
+    # the user's Node; recall_search rides the server's web stack (fetch_url).
+    "create_artifact": "client",
+    "write_excel": "client",
+    "read_excel": "client",
+    "create_plot": "client",
+    "diff_files": "client",
+    "todo_plan": "client",
+    "recall_search": "server",
+    "screenshot": "client",
 }
 
 # Tools that ALWAYS require explicit user confirmation via a native OS
@@ -1182,6 +1269,9 @@ CONFIRM_REQUIRED: frozenset[str] = frozenset({
     # 2026-09-22 (owner request): printing is a PHYSICAL action - paper, ink,
     # and a document leaving the machine. It joins the always-confirm set.
     "print_file",
+    # 2026-09-23: the screen is the owner's private surface - capturing it is
+    # a physical/privacy action gated like printing (60s silence = auto-deny).
+    "screenshot",
 })
 
 
@@ -1320,6 +1410,40 @@ _DEFINITIONS = [
                 {"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["url"]),
     _definition("web_search", "Search the web (no API key needed) and return titles/URLs/snippets. Use when the user asks to look something up or you need current information; follow up with fetch_url on the best result.",
                 {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}}, ["query"]),
+    # --- agent toolbelt extensions (2026-09-23) ----------------------------
+    _definition("create_artifact", "Create a polished, shareable single-file output in the workspace: a styled HTML page (RTL-aware, opens in any browser — use for reports, CVs, dashboards, interactive demos) or a Markdown document. The RIGHT way: build it AFTER gathering the real content, write it in one call, then tell the user the exact file path.",
+                {"title": {"type": "string"}, "content": {"type": "string"},
+                 "artifact_type": {"type": "string", "enum": ["html", "markdown"], "default": "html"},
+                 "filename": {"type": "string", "default": ""}}, ["title", "content"]),
+    _definition("write_excel", "Create a real .xlsx spreadsheet from rows (list of lists; first row = header) with openpyxl. Numbers stay numbers, not text. The RIGHT way: collect/verify the data first (web_search, read_document, run_command), write the file, then offer to read it back with read_excel to verify.",
+                {"path": {"type": "string"}, "rows": {"type": "array", "items": {"type": "array"}},
+                 "sheet_name": {"type": "string", "default": "Sheet1"},
+                 "overwrite": {"type": "boolean", "default": False},
+                 "header": {"type": "boolean", "default": True}}, ["path", "rows"]),
+    _definition("read_excel", "Read an .xlsx file and return its cell values (evidence before answering questions about a spreadsheet). Returns sheet names, rows and a truncation flag.",
+                {"path": {"type": "string"}, "sheet": {"type": "string", "default": ""},
+                 "max_rows": {"type": "integer", "minimum": 1, "default": 200},
+                 "max_cols": {"type": "integer", "minimum": 1, "default": 40}}, ["path"]),
+    _definition("create_plot", "Draw a bar / line / pie chart PNG from data using pure Pillow (no matplotlib needed, works on CPU instantly). data = {labels: [...], series: [{name, values: [...]}]}. The RIGHT way: only chart numbers you actually computed or fetched in this conversation — never invent points; then give the user the PNG path.",
+                {"data": {"type": "object"}, "output": {"type": "string"},
+                 "kind": {"type": "string", "enum": ["bar", "line", "pie"], "default": "bar"},
+                 "title": {"type": "string", "default": ""}, "x_label": {"type": "string", "default": ""},
+                 "y_label": {"type": "string", "default": ""},
+                 "width": {"type": "integer", "default": 800}, "height": {"type": "integer", "default": 500}}, ["data", "output"]),
+    _definition("diff_files", "Unified diff between two workspace text files — see EXACTLY what differs before editing or reporting. Use it before replace_in_file on a file you are unsure about, and to show the user a change summary.",
+                {"path_a": {"type": "string"}, "path_b": {"type": "string"},
+                 "context": {"type": "integer", "minimum": 0, "maximum": 10, "default": 3},
+                 "max_lines": {"type": "integer", "default": 400}}, ["path_a", "path_b"]),
+    _definition("todo_plan", "Persistent step-by-step plan stored in the workspace (.aali-plan.json). actions: add (task), list, update (index + status: pending/in-progress/done/blocked), complete (index), clear. The RIGHT way: for any multi-step task, add the steps FIRST, keep them updated as you work, and finish with all steps done — the user can see real progress, not claims.",
+                {"action": {"type": "string", "enum": ["add", "list", "update", "complete", "clear"]},
+                 "task": {"type": "string", "default": ""}, "index": {"type": "integer", "minimum": 0},
+                 "status": {"type": "string", "enum": ["pending", "in-progress", "done", "blocked"], "default": ""}}, ["action"]),
+    _definition("recall_search", "Fetch a web page and return ONLY the passages relevant to your query (query-focused reading). The RIGHT way: web_search first, then recall_search on the 1-2 best URLs with a precise query — answer from those passages and cite the URL. Cheaper and more accurate than reading whole pages.",
+                {"url": {"type": "string"}, "query": {"type": "string"},
+                 "max_chars": {"type": "integer", "default": 3000},
+                 "k": {"type": "integer", "minimum": 1, "maximum": 6, "default": 3}}, ["url", "query"]),
+    _definition("screenshot", "Capture the user's screen to a PNG in the workspace (then read it with read_image for OCR). PRIVACY-CRITICAL: only when the user EXPLICITLY asks to see their screen — never proactively, never for guests. Requires user confirmation (native dialog).",
+                {"output": {"type": "string"}}, ["output"]),
 ]
 
 

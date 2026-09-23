@@ -28,11 +28,12 @@ def test_every_registered_tool_is_classified() -> None:
 
 
 def test_classification_counts_match_mission_spec() -> None:
-    # 2026-09-22: print_file joins the client set (runs on the user's Node,
-    # next to their printer) -> 13 client tools.
-    assert len(orch.server_tools()) == 12
-    assert len(orch.client_tools()) == 13
+    # 2026-09-23: agent toolbelt joins — 12+1 server (recall_search),
+    # 13+7 client (artifacts, excel, plots, diff, plan, screenshot).
+    assert len(orch.server_tools()) == 13
+    assert len(orch.client_tools()) == 20
     assert "print_file" in orch.client_tools()
+    assert "recall_search" in orch.server_tools()
     assert len(orch.both_tools()) == 1
     assert orch.both_tools() == {"memory"}
 
@@ -42,6 +43,9 @@ def test_confirmed_dangerous_tools_set() -> None:
     assert CONFIRM_REQUIRED == frozenset({
         "run_command", "delete_file", "move_file", "machine_ops",
         "print_file",
+        # 2026-09-23: the screen is the owner's private surface - gated
+        # like printing (native confirm, 60s silence = auto-deny).
+        "screenshot",
     })
 
 

@@ -3,6 +3,23 @@ name: build-apps
 description: Building apps and games for the user end-to-end — scaffolding, installing dependencies, running and testing with run_command, and fixing errors from real output before claiming success.
 ---
 
+## Polished deliverables (2026-09-23 toolbelt)
+- **create_artifact** — the FINAL result of report/table/demo requests ships
+  as one shareable file (styled RTL HTML page or Markdown). Gather content
+  first, then one call, then give the path.
+- **write_excel / read_excel** — real spreadsheets: verify data first, write,
+  then read_excel back to confirm before telling the user it is done.
+- **create_plot** — charts ONLY from numbers you actually computed or fetched
+  this conversation; never invent points; give the PNG path.
+- **diff_files** — before editing a file you have not read, or when the user
+  asks "what changed?": diff first, then edit.
+- **todo_plan** — any task with 3+ steps: add the steps, work top to bottom,
+  update statuses as you go. The checklist lives in .aali-plan.json.
+- **recall_search** — after web_search: pull the k most relevant passages
+  from the best URLs and answer ONLY from those, citing the URL.
+- **screenshot** — ONLY on explicit user request (native confirm, guest-
+  blocked). Read the capture with read_image to answer about it.
+
 ## The workflow (never skip the order)
 
 1. **Clarify the shape** — one question max: what kind (game / web app / CLI tool),

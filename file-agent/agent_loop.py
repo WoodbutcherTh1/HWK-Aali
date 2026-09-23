@@ -168,6 +168,28 @@ spooler refuses, say so and suggest checking the printer connection — never
 claim a page came out unless the tool returned ok.
 protected: never try to stop them.
 
+You ALSO carry a full agent toolbelt for polished work:
+- create_artifact: after gathering real content, package the result as a
+  shareable single-file HTML page (RTL-aware) or Markdown doc — reports,
+  CVs, pricing tables, small interactive demos. Give the user the path.
+- write_excel / read_excel: real .xlsx spreadsheets (numbers stay numbers)
+  and reading them back to VERIFY before answering questions about them.
+- create_plot: bar/line/pie charts as PNG from data you ACTUALLY computed
+  or fetched — never invent points. Then show the path.
+- diff_files: preview exactly what differs between two files before you
+  edit or claim a change.
+- todo_plan: for any multi-step task, add the steps first (add), keep
+  statuses updated (update), and complete them as you go — visible real
+  progress instead of claims.
+- recall_search: web_search first, then recall_search the best URLs with a
+  precise query — answer from the returned passages and cite the URL.
+- screenshot: ONLY when the user explicitly asks to see their screen;
+  it needs their confirmation, and it never runs for guests. Read the
+  capture with read_image to answer about it.
+The right way, always: evidence first (read/diff/recall BEFORE you write),
+then verify after (read_excel on what you wrote, read_image on what you
+captured), and honest failure when a tool errors.
+
 You RUN COMMANDS on the user's behalf with run_command: a workspace-sandboxed,
 allow-listed shell (python, pip, pytest, node, npm, npx, git, gcc/cargo/go/dotnet
 and more) for building, testing and running the user's projects. Use it to
@@ -354,6 +376,9 @@ _GUEST_BLOCKED_TOOLS = frozenset({
     # 2026-09-22: printing costs real paper/ink on the OWNER's printer -
     # guests never get to spend the owner's physical resources.
     "print_file",
+    # 2026-09-23: the screen shows the owner's private windows - guests never
+    # capture it.
+    "screenshot",
 })
 
 
@@ -361,6 +386,9 @@ def _is_dangerous_call(tool_name: str, args: dict[str, Any]) -> bool:
     """True for tool calls the 'always_ask' policy must gate."""
     if tool_name == "print_file":
         # Physical action: paper + ink. Always gated, like install/kill.
+        return True
+    if tool_name == "screenshot":
+        # Privacy action: the screen is the owner's private surface (2026-09-23).
         return True
     if tool_name == "run_command":
         return True
@@ -477,7 +505,10 @@ def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
                 "• 🖼️ الوسائط: فهم الصور (OCR)، توليد وتحرير الصور، تحليل وتحرير الفيديو\n"
                 "• 🧠 ذاكرة دائمة: أتذكر قراراتك وتفضيلاتك حتى بعد إغلاق البرنامج\n"
                 "• 🧩 سير عمل n8n: أصنع لك ملفات أتمتة جاهزة للاستيراد\n"
-                "• 🎮 بناء تطبيقات وألعاب: أكتب الكود وأثبّت الاعتماديات وأشغّلها وأصلحها أمامك\n\n"
+                "• 🎮 بناء تطبيقات وألعاب: أكتب الكود وأثبّت الاعتماديات وأشغّلها وأصلحها أمامك\n"
+                "• 📦 مخرجات جاهزة: صفحات HTML وملفات Excel ورسوم بيانية PNG وأرشيفات جاهزة للمشاركة\n"
+                "• 📋 خطط مرئية: أعرض خطوات العمل وأحدّثها أولاً بأول لترى التقدم الحقيقي\n"
+                "• 🖥️ لقطة الشاشة: ألتقط شاشتك وأقرأها عندما تطلب ذلك صراحة\n\n"
                 "قل لي ماذا تريد بالعربي أو الإنجليزي — وسأنفّذ خطوة بخطوة مع إبلاغك بكل شيء أفعله."
             )}
         return "final", {"content": (
@@ -490,7 +521,10 @@ def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
             "• Media: image understanding (OCR), image generation & editing, video analysis\n"
             "• Persistent memory: I remember your decisions across restarts\n"
             "• n8n workflows: ready-to-import automation files\n"
-            "• App & game building: I write the code, install dependencies, run and fix it\n\n"
+            "• App & game building: I write the code, install dependencies, run and fix it\n"
+            "• Polished outputs: HTML pages, Excel files, PNG charts — ready to share\n"
+            "• Visible plans: multi-step work shown as a live checklist you can follow\n"
+            "• Screen capture: I read your screen when you explicitly ask\n\n"
             "Tell me what you want in Arabic or English — I'll execute step by step and keep you posted."
         )}
 
