@@ -1160,6 +1160,12 @@ def screenshot(output: str, workspace_root: str | Path) -> dict[str, Any]:
     return agent_tools.screenshot(output, workspace_root)
 
 
+def spawn_agents(tasks: list[str], workspace_root: str | Path, *,
+                 request_id: str | None = None) -> dict[str, Any]:
+    from file_agent import agent_tools
+    return agent_tools.spawn_agents(tasks, workspace_root, request_id=request_id)
+
+
 _FUNCTIONS: dict[str, ToolFunction] = {
     "list_files": list_files,
     "read_file": read_file,
@@ -1188,6 +1194,7 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "memory": memory,
     "generate_emoji": generate_emoji,
     # agent toolbelt extensions (2026-09-23)
+    "spawn_agents": spawn_agents,
     "create_artifact": create_artifact,
     "write_excel": write_excel,
     "read_excel": read_excel,
@@ -1254,6 +1261,9 @@ TOOL_EXECUTION: dict[str, str] = {
     "todo_plan": "client",
     "recall_search": "server",
     "screenshot": "client",
+    # the brain spawns its own sub-agents on the server; sub-agent tool calls
+    # route through the normal server/client machinery from inside agent_loop
+    "spawn_agents": "server",
 }
 
 # Tools that ALWAYS require explicit user confirmation via a native OS
@@ -1444,6 +1454,9 @@ _DEFINITIONS = [
                  "k": {"type": "integer", "minimum": 1, "maximum": 6, "default": 3}}, ["url", "query"]),
     _definition("screenshot", "Capture the user's screen to a PNG in the workspace (then read it with read_image for OCR). PRIVACY-CRITICAL: only when the user EXPLICITLY asks to see their screen — never proactively, never for guests. Requires user confirmation (native dialog).",
                 {"output": {"type": "string"}}, ["output"]),
+    _definition("spawn_agents", "Run up to 4 sub-agents IN PARALLEL, each on one task, each writing to its own agents/agent-N subfolder. The RIGHT way: spawn when the user explicitly asks for parallel work OR when a mission splits into 2-4 INDEPENDENT parts (different files/topics that need no coordination). Never for dependent steps (sub-agents cannot see each other's work — do those yourself in order), never recursively (sub-agents cannot spawn). Collect every result and merge into ONE final answer.",
+                {"tasks": {"type": "array", "items": {"type": "string"},
+                           "minItems": 1, "maxItems": 4}}, ["tasks"]),
 ]
 
 

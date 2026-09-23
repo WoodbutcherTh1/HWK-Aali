@@ -534,6 +534,25 @@ def run_training() -> bool:
                             near_miss_tool_counts(written).items())))
     except ImportError:
         log("near-miss gates skipped (build_aali_sft_v2 not importable)")
+    # Toolbelt floors gate (2026-09-23): the 8 toolbelt tools + spawn_agents
+    # must have WRITTEN rows in the mix or the next graduation grades them
+    # 0/N again (descriptions alone never taught the 1.5B - media lesson).
+    try:
+        from build_aali_sft_v2 import (toolbelt_floor_failures,
+                                       toolbelt_tool_counts)
+        with SFT_V2.open("r", encoding="utf-8") as handle:
+            written = [json.loads(line) for line in handle if line.strip()]
+        tb_failures = toolbelt_floor_failures(toolbelt_tool_counts(written))
+        if tb_failures:
+            log("toolbelt floors gate FAILED: " + "; ".join(tb_failures))
+            log("rebuild with scripts/build_aali_sft_v2.py before training")
+            return False
+        log("toolbelt floors gate passed: "
+            + ", ".join(f"{tool}={count}"
+                        for tool, count in sorted(
+                            toolbelt_tool_counts(written).items())))
+    except ImportError:
+        log("toolbelt floors gate skipped (build_aali_sft_v2 not importable)")
     log(f"starting soup train on {SFT_V2.name}")
     # Stream the trainer's output to a live log (the old capture-to-buffer
     # died with subprocess.run); on exit the tail goes to last_stage.txt.

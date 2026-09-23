@@ -28,6 +28,8 @@ import json
 import math
 import re
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,15 @@ PLAN_FILE = ".aali-plan.json"
 MAX_ARTIFACT_CHARS = 500_000
 MAX_PLAN_STEPS = 100
 PLAN_STATUSES = ("pending", "in-progress", "done", "blocked")
+
+# spawn_agents caps (2026-09-23): the brain serves one model on one 8GB card
+# and every sub-agent is a full agent_loop — unbounded parallelism would
+# queue GPU requests into timeouts and burn RAM on host-side history copies.
+MAX_SUB_AGENTS = 4
+MAX_SUB_AGENT_TURNS = 6        # short leash: sub-agents do ONE job each
+SUB_AGENT_TIMEOUT_S = 300      # wall-clock cap per sub-agent
+MAX_TASK_CHARS = 2000
+_SPAWN_DEPTH = threading.local()  # recursion guard (per worker thread)
 
 
 def _clean_stem(name: str, default: str) -> str:
@@ -475,3 +486,137 @@ def screenshot(output: str, workspace_root: str | Path) -> dict[str, Any]:
     return {"path": _relative(root, target), "width": size[0], "height": size[1],
             "bytes": target.stat().st_size,
             "note": "اقرأها بـ read_image لاستخراج النص — ولا تُظهر أسراراً تظهر فيها"}
+
+
+# ---------------------------------------------------------------------------
+# spawn_agents — parallel sub-agents (2026-09-23, owner request)
+# ---------------------------------------------------------------------------
+# "I want Aali to know how to run more than 1 agent at the same time if the
+# user asks, or for a complex mission." Each sub-agent is a real agent_loop
+# call with its own sandboxed workspace folder, short leash, and result
+# contract. Cross-layer guards (already enforced, defense in depth):
+#   - agent_loop._policy_gate still gates every tool the sub-agent calls
+#   - run_command stays blocked for guests in app.py regardless of parent
+#   - tool_guard validates names; sandbox resolves paths inside the jail
+
+_SUB_AGENT_SYSTEM = (
+    "You are a focused sub-agent. You were spawned by the main Aali agent to "
+    "complete ONE task. Work only on that task, use your tools for real "
+    "actions (files you create go to your own subfolder), never spawn more "
+    "agents, and end with a clear, complete answer to the task. Reply in the "
+    "task's language."
+)
+_SPAWN_ABSTRACT = (
+    "أنا وحدة فرعية — لا أستطيع توليد وحدات أخرى (ممنوع التداخل)."
+)
+
+
+def _run_sub_agent(task: str, index: int, workspace_root: Path,
+                   request_id: str | None, child_policy: str,
+                   spawn_depth: int) -> dict[str, Any]:
+    """One sub-agent = one agent_loop call in THIS thread (Flask already
+    serves requests on threads; nested agent_loop is thread-safe because
+    memory scope travels via a ContextVar).
+
+    child_policy/spawn_depth are captured in the PARENT thread and re-set
+    here: ContextVars and threading.local do NOT cross ThreadPoolExecutor
+    submit boundaries, so the recursion guard and the guest-policy
+    inheritance must be threaded through explicitly."""
+    from agent_loop import _SUB_AGENT_POLICY  # imported lazily: import cycle
+    policy_token = _SUB_AGENT_POLICY.set(child_policy)
+    _SPAWN_DEPTH.value = spawn_depth
+    started = datetime.now(timezone.utc)
+    sub_ws = workspace_root / "agents" / f"agent-{index + 1}"
+    sub_ws.mkdir(parents=True, exist_ok=True)
+    try:
+        from agent_loop import agent_loop
+        reply = agent_loop(
+            task,
+            workspace_root=str(sub_ws),
+            mode="local",
+            max_iterations=MAX_SUB_AGENT_TURNS,
+            print_final=False,
+            policy=child_policy,
+            request_id=request_id,
+        )
+    except Exception as exc:  # a crashed worker must not kill the fan-out
+        return {"agent": index + 1, "workspace": f"agents/agent-{index + 1}",
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "elapsed_s": int((datetime.now(timezone.utc) - started).total_seconds())}
+    finally:
+        _SPAWN_DEPTH.value = 0
+        _SUB_AGENT_POLICY.reset(policy_token)
+    return {"agent": index + 1, "workspace": f"agents/agent-{index + 1}",
+            "ok": True, "reply": str(reply),
+            "elapsed_s": int((datetime.now(timezone.utc) - started).total_seconds())}
+
+
+def spawn_agents(tasks: list[str], workspace_root: str | Path, *,
+                 request_id: str | None = None) -> dict[str, Any]:
+    """Run up to MAX_SUB_AGENTS tasks in parallel, one sub-agent each.
+
+    The RIGHT way (taught in the tool description + SYSTEM_PROMPT): spawn
+    when the user explicitly asks for parallel work, or when the mission
+    splits into 2-4 INDEPENDENT parts (different files, different topics).
+    Steps that depend on each other must run in the MAIN agent instead —
+    sub-agents cannot see each other's work.
+    """
+    if isinstance(tasks, str) or not isinstance(tasks, list):
+        raise FileAgentError("tasks must be a list of task strings")
+    tasks = [str(t).strip() for t in tasks if str(t).strip()]
+    if not tasks:
+        raise FileAgentError("tasks is empty — nothing to spawn")
+    if len(tasks) > MAX_SUB_AGENTS:
+        raise FileAgentError(
+            f"{len(tasks)} tasks exceed the {MAX_SUB_AGENTS}-agent cap — "
+            "split the mission across turns or pick the 4 that matter")
+    if any(len(t) > MAX_TASK_CHARS for t in tasks):
+        raise FileAgentError(f"each task must be at most {MAX_TASK_CHARS} chars")
+    depth = getattr(_SPAWN_DEPTH, "value", 0)
+    if depth > 0:
+        # Sub-agents get the refusal as a RESULT (teaching pattern, same as
+        # the zero-byte-write guard) so the loop can retry with a final.
+        return {"ok": False, "refused": "recursion",
+                "results": [{"agent": i + 1, "ok": False, "error": _SPAWN_ABSTRACT}
+                            for i in range(len(tasks))],
+                "note": "sub-agents cannot spawn sub-agents"}
+    # Guest policy is inherited by every child (resolved in the PARENT
+    # thread before any worker starts): a guest can never reach the owner's
+    # machine through a sub-agent. "auto" resolves like the HTTP layer does.
+    try:
+        from agent_loop import _SUB_AGENT_POLICY
+        inherited = _SUB_AGENT_POLICY.get(None)
+    except Exception:  # agent_loop not importable in this context
+        inherited = None
+    child_policy = inherited or "auto"
+    root = Path(workspace_root)
+    try:
+        workers = min(len(tasks), MAX_SUB_AGENTS)
+        with ThreadPoolExecutor(max_workers=workers,
+                                thread_name_prefix="aali-subagent") as pool:
+            futures = [pool.submit(_run_sub_agent, task, i, root, request_id,
+                                   child_policy, depth + 1)
+                       for i, task in enumerate(tasks)]
+            results: list[dict[str, Any]] = []
+            for fut, task in zip(futures, tasks):
+                try:
+                    results.append(fut.result(timeout=SUB_AGENT_TIMEOUT_S))
+                except TimeoutError:
+                    results.append({"agent": len(results) + 1, "ok": False,
+                                    "error": f"timed out after {SUB_AGENT_TIMEOUT_S}s",
+                                    "task_preview": task[:80]})
+                except Exception as exc:
+                    results.append({"agent": len(results) + 1, "ok": False,
+                                    "error": f"{type(exc).__name__}: {exc}"})
+    finally:
+        _SPAWN_DEPTH.value = 0
+    ok = sum(1 for r in results if r.get("ok"))
+    return {"ok": ok > 0,
+            "spawned": len(tasks), "succeeded": ok,
+            "results": results,
+            "note": ("اجمع نتائج الوحدات في جواب واحد للمستخدم؛ "
+                     "كل وحدة عملت في مجلدها agents/agent-N")}
+
+
+_SUB_AGENT_TIMEOUT_S = SUB_AGENT_TIMEOUT_S  # re-export for tests/telemetry

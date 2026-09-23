@@ -1,5 +1,36 @@
 # Agent toolbelt + Phase E/F + live jobs board (2026-09-23 afternoon)
 
+## 2026-09-23 evening addendum: spawn_agents + teaching mix + exam
+1. spawn_agents (agent_tools.py): up to 4 parallel sub-agents (real
+   agent_loop each), own agents/agent-N subfolder, 6-turn leash, 300s cap,
+   recursion guard (sub-agents can't spawn; teaching refusal), ThreadPool
+   + explicit depth/policy threading (ContextVar/threading.local do NOT
+   cross pool boundaries). Guest parents' policy is INHERITED by children
+   (contextvar set in agent_loop, read pre-spawn) - a guest can never
+   reach the owner's machine through a child. Registered server-side,
+   guest-blocked, always_ask-gated, taught in SYSTEM_PROMPT EN+AR +
+   deterministic multi-agent capability answer + tool description.
+2. Teaching mix REBUILT (sft_v2.jsonl, backup pre_toolbelt_backup): 5,472
+   rows, arabic 0.347; 22 new toolbelt+spawn episodes; TOOLBELT_FLOORS
+   gate added in builder main() (exit 2) + soup_pipeline re-check; ALL
+   episode user-turns verified leak-free vs the real exam file.
+3. REAL BUG FOUND + FIXED: load_exam_prompts read case['turns'] but the
+   exam file stores rendered 'prompt' strings - the leak gate hashed
+   NOTHING (no-op for the whole current exam!). Now parses '\nUser: ...\n
+   Assistant:' from rendered prompts; rebuild dropped 811 rows incl. 107
+   previously-quiet exam-prompt collisions from other sources.
+4. Exam extended 26 -> 39 cases: spawn x3 (call EN/AR + dependent refusal),
+   excel x2, plot call + invented-data refusal, diff, todo, recall,
+   artifact, screenshot explicit + proactive refusal.
+5. Tests: test_spawn_agents.py (10) + 4 builder tests; suite 826 green.
+6. iPhone access (owner question): Pi is a Pi 3 B+ (1GB, torch SIGILL) -
+   it can NEVER host the brain honestly; answer = tunnel the PC. No
+   tunnel creds exist yet (~/.cloudflared empty): one-time
+   scripts\aali_domain.bat (domain route) or aali_tunnel.bat (quick),
+   then iOS talks to https://aali.dpdns.org with the API key. Pi-CI
+   continues as the ARM test target (portable core, green).
+
+
 - owner: buffy (this PC)
 - status: done
 - started: 2026-09-23

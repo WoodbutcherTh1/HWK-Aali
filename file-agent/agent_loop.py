@@ -20,6 +20,14 @@ from file_agent import emoji as aali_emoji
 from file_agent import autocorrect as aali_autocorrect
 import providers
 
+# --- sub-agent policy inheritance (spawn_agents, 2026-09-23) ----------------
+# A sub-agent MUST inherit its parent's policy: without this, a remote guest
+# (policy forced to "guest" server-side) could reach the owner's machine
+# through a child loop spawned with policy="auto". agent_loop sets it per
+# call; agent_tools.spawn_agents resolves the child's policy from it.
+from contextvars import ContextVar
+_SUB_AGENT_POLICY: ContextVar[str | None] = ContextVar("aali_sub_agent_policy", default=None)
+
 # --- long-term memory (survives restarts; see file_agent/memory.py) --------
 MEMORY_REFRESH_SECONDS = 30.0
 _MEMORY_CACHE: dict[str, Any] = {"block": "", "ts": 0.0}
@@ -189,6 +197,19 @@ You ALSO carry a full agent toolbelt for polished work:
 The right way, always: evidence first (read/diff/recall BEFORE you write),
 then verify after (read_excel on what you wrote, read_image on what you
 captured), and honest failure when a tool errors.
+
+You can run MULTIPLE AGENTS AT THE SAME TIME with spawn_agents: give it 2-4
+independent tasks and it runs a real sub-agent on each one in parallel, each
+writing to its own agents/agent-N subfolder. Spawn when the user asks for
+parallel work ("شغّل وحدتين بالتوازي") or when a mission splits into clearly
+independent parts (e.g. one agent writes tests while another researches docs
+while a third builds an HTML report). NEVER for dependent steps — sub-agents
+cannot see each other's work, so anything that builds on something else stays
+in your main loop, in order. After they finish, merge all results into ONE
+final answer for the user. Sub-agents cannot spawn more agents, and guests
+never get this tool. يمكنك أيضاً تشغيل عدة وكلاء بالتوازي عبر spawn_agents:
+قسّم المهمة إلى أجزاء مستقلة (٢-٤)، وشغّلها معاً، ثم اجمع النتائج في جواب واحد —
+والمهام المرتبطة ببعضها تبقى في حلقتك الرئيسية بالترتيب.
 
 You RUN COMMANDS on the user's behalf with run_command: a workspace-sandboxed,
 allow-listed shell (python, pip, pytest, node, npm, npx, git, gcc/cargo/go/dotnet
@@ -379,6 +400,10 @@ _GUEST_BLOCKED_TOOLS = frozenset({
     # 2026-09-23: the screen shows the owner's private windows - guests never
     # capture it.
     "screenshot",
+    # 2026-09-23: spawning sub-agents runs the brain model multiple times in
+    # parallel - a remote guest could use it as a free compute farm. Guests
+    # get one plain loop, like everyone else's main agent.
+    "spawn_agents",
 })
 
 
@@ -391,6 +416,10 @@ def _is_dangerous_call(tool_name: str, args: dict[str, Any]) -> bool:
         # Privacy action: the screen is the owner's private surface (2026-09-23).
         return True
     if tool_name == "run_command":
+        return True
+    if tool_name == "spawn_agents":
+        # Spawning a fleet of loops is heavy (multiple model calls in
+        # parallel) - the always_ask policy confirms it, like run_command.
         return True
     if tool_name == "machine_ops":
         return args.get("action") in {"install", "uninstall", "kill_process"}
@@ -542,6 +571,31 @@ def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
         "اعمل لي لعبة", "اعمل لي تطبيق", "ابن لي لعبة", "ابن لي تطبيق",
         "سوي لي لعبة", "سوي لي تطبيق",
     )
+    # "Can you run multiple agents?" — deterministic yes (spawn_agents).
+    multi_triggers = (
+        "multiple agents", "more than one agent", "parallel agents",
+        "run agents at the same time", "several agents", "spawn agents",
+        "agent team", "multiple tasks in parallel",
+        "عدة وكلاء", "أكثر من وكيل", "اكثر من وكيل", "وكلاء متعددين",
+        "وحدات متعددة", "بالتوازي", "شغل وحدتين", "وكلاء بالتوازي",
+    )
+    if any(t in lower or t in message for t in multi_triggers) and len(message) < 160:
+        arabic_user = any("\u0600" <= ch <= "\u06FF" for ch in message)
+        if arabic_user:
+            return "final", {"content": (
+                "نعم ✦ أستطيع تشغيل عدة وكلاء في نفس اللحظة:\n\n"
+                "• ⚡ حتى ٤ وكلاء بالتوازي، كل وكيل على مهمة مستقلة بمجلد عمل خاص\n"
+                "• 🧩 مناسب للمهام المركّبة: اختبارات + بحث + تقرير في نفس الوقت\n"
+                "• ⚠️ المهام المرتبطة ببعضها (كل خطوة تعتمد على السابقة) أنفذها بنفسي بالترتيب\n\n"
+                "أعطني المهمة وسأقسمها وأشغّل الوكلاء فورًا."
+            )}
+        return "final", {"content": (
+            "Yes ✦ I can run several agents at the same time:\n\n"
+            "• Up to 4 agents in parallel, each on its own independent task in its own subfolder\n"
+            "• Best for compound missions: tests + research + a report, all at once\n"
+            "• Dependent steps (each needs the previous one) I do myself, in order\n\n"
+            "Give me the mission and I'll split it and spawn the agents."
+        )}
     if any(t in lower or t in message for t in build_triggers) and len(message) < 160:
         arabic_user = any("\u0600" <= ch <= "\u06FF" for ch in message)
         if arabic_user:
@@ -1963,6 +2017,7 @@ def agent_loop(
         max_iterations=max_iterations,
     )
     scope_token = aali_memory.set_memory_scope(memory_dir)
+    policy_token = _SUB_AGENT_POLICY.set(policy if policy in {"guest", "always_ask", "aggressive"} else None)
     try:
         record_turn("user", user_message)
         _invalidate_memory_cache()
@@ -1996,6 +2051,7 @@ def agent_loop(
         raise
     finally:
         aali_memory.reset_memory_scope(scope_token)
+        _SUB_AGENT_POLICY.reset(policy_token)
 
     elapsed_ms = int(
         (datetime.now(timezone.utc) - started_at).total_seconds() * 1000

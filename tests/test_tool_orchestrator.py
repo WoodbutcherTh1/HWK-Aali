@@ -30,7 +30,7 @@ def test_every_registered_tool_is_classified() -> None:
 def test_classification_counts_match_mission_spec() -> None:
     # 2026-09-23: agent toolbelt joins — 12+1 server (recall_search),
     # 13+7 client (artifacts, excel, plots, diff, plan, screenshot).
-    assert len(orch.server_tools()) == 13
+    assert len(orch.server_tools()) == 14  # + spawn_agents (2026-09-23)
     assert len(orch.client_tools()) == 20
     assert "print_file" in orch.client_tools()
     assert "recall_search" in orch.server_tools()

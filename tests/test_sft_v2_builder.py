@@ -477,6 +477,61 @@ def test_generated_media_block_meets_every_floor_and_leaks_nothing(
         assert builder._hash_pair(user_text, "") not in hashes, row["source"]
 
 
+# ---------------------------------------------------------------------------
+# toolbelt + spawn_agents (2026-09-23): 9 new tools, floors-gated like media
+# ---------------------------------------------------------------------------
+
+def test_exam_prompt_parser_hashes_rendered_prompts(tmp_path: Path) -> None:
+    """Regression (2026-09-23): load_exam_prompts only read case['turns'],
+    but the real exam file stores rendered single 'prompt' strings - so the
+    leak gate hashed NOTHING and exam prompts could slip into training."""
+    exam = tmp_path / "exam.jsonl"
+    exam.write_text(json.dumps({
+        "id": "img_basic_en",
+        "prompt": "System: X\nUser: Draw me a picture of a mountain lake at dawn\nAssistant:",
+    }) + "\n", encoding="utf-8")
+    hashes = builder.load_exam_prompts(exam)
+    assert hashes, "rendered prompts must be hashed"
+    assert builder._hash_pair("Draw me a picture of a mountain lake at dawn", "") in hashes
+
+
+def test_toolbelt_episodes_meet_floors_and_leak_nothing(tmp_path: Path) -> None:
+    """Descriptions alone never taught the 1.5B (media lesson) - the authored
+    toolbelt+spawn episodes must clear the floors ALONE and reuse no exam
+    user-turn (the real exam file, including the 13 new cases)."""
+    rows = builder.generated_episodes()
+    failures = builder.toolbelt_floor_failures(
+        builder.toolbelt_tool_counts(rows))
+    assert failures == [], failures
+    hashes = builder.load_exam_prompts(
+        Path("D:/hwk-data/soup/exam_prompts.jsonl"))
+    assert hashes
+    for row in rows:
+        for message in row["messages"]:
+            if message["role"] == "user":
+                assert builder._hash_pair(message["content"], "") not in hashes, \
+                    row["source"]
+
+
+def test_spawn_episodes_teach_independence_rule() -> None:
+    """The owner's rule: spawn for INDEPENDENT work, refuse dependent steps."""
+    rows = builder.generated_episodes()
+    spawn_rows = [r for r in rows
+                  if '"spawn_agents"' in r["messages"][-1]["content"]]
+    assert len(spawn_rows) >= 2  # EN + AR explicit parallel requests
+    refusal_rows = [r for r in rows if "spawn-refuses" in r.get("source", "")]
+    assert refusal_rows, "dependent-step refusal must be taught"
+    for row in refusal_rows:
+        assert '"spawn_agents"' not in row["messages"][-1]["content"]
+
+
+def test_toolbelt_main_gate_fails_below_floors(tmp_path: Path) -> None:
+    assert builder.toolbelt_floor_failures(
+        {tool: 0 for tool in builder.TOOLBELT_FLOORS}) != []
+    full = {tool: floor for tool, floor in builder.TOOLBELT_FLOORS.items()}
+    assert builder.toolbelt_floor_failures(full) == []
+
+
 def test_generate_emoji_episodes_teach_the_real_schema_key() -> None:
     rows = builder.generated_episodes()
     emoji_rows = [r for r in rows
