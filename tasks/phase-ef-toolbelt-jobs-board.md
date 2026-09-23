@@ -35,13 +35,26 @@
 - status: done
 - started: 2026-09-23
 
-## Owner requests covered
-1. "Check what Claude/DeepSeek/GLM/GPT have that Aali doesn't — give him
-   those tools and teach him how to use them right."
-2. "Get Phase D done, start Phase E/F, more context, more code/law/vibe-coding
-   data."
-3. "CLI + desktop: live view of which commands/jobs are running, like the
-   Freebuff screen."
+## Always-on access (2026-09-23 evening)
+
+- **Brain watchdog LIVE** (scripts/aali_brain_watchdog.py, 16 tests): revives :20129
+  the moment the GPU card frees — never fights a trainer. Wired into
+  aali_autostart.bat so it returns after every reboot. This closes the real
+  "Aali lives all the time" gap: the brain used to die with training and nothing
+  revived it.
+- **Key mode LIVE** on :5055 (master key at D:/hwk-data/aali_master_key.txt).
+  /api/health exempted from the gate (watchdogs/LBs must see a live server);
+  everything else stays gated. aali_share.bat fixed (no longer strips
+  run_command for the owner).
+- **iPhone path**: LAN via master key (firewall rule needs one UAC click:
+  scripts/aali_share.bat), remote via scripts/aali_domain.bat — the ONLY owner
+  step left is `tunnel login` (browser authorize) since cloudflared was never
+  logged in. iOS app connects to the same /api/ask; pasting the master key
+  grants the owner's admin role.
+- Live spawn_agents E2E armed (scripts/spawn_live_test.py): fires the moment
+  the brain revives after stage 5 frees the card.
+
+."
 
 ## Delivered
 ### Toolbelt (commit 6880701)
