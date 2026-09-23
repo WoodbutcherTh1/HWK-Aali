@@ -50,7 +50,10 @@ set AALI_NO_BROWSER=1
 set PYTHONIOENCODING=utf-8
 set PYTHONPATH=file-agent
 set AGENT_WORKSPACE=D:\hwk-projects
-set HWK_ALLOW_COMMANDS=0
+rem NOTE (2026-09-23): HWK_ALLOW_COMMANDS=0 was removed - it disabled
+rem run_command for EVERYONE including the owner. Remote guests are already
+rem command-blocked by the server-enforced guest policy in app.py; the
+rem owner on loopback keeps full tools.
 start "Aali Server (shared)" /min .venv\Scripts\python.exe file-agent\app.py
 
 ipconfig | findstr /c:"IPv4"

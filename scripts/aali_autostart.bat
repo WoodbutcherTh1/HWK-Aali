@@ -20,6 +20,11 @@ rem     absolute child paths - relative ones die WinError 2 when the CWD
 rem     is not the repo root, e.g. when fired from the Startup folder)
 "%ROOT%\.venv\Scripts\python.exe" "%ROOT%\scripts\launch_detached.py" --log aali_server_watchdog -- "%ROOT%\.venv\Scripts\python.exe" "%ROOT%\scripts\aali_server_watchdog.py" >>"%GUARDLOG%" 2>&1
 
+rem 0b) ensure the BRAIN watchdog is alive on EVERY guard run (2026-09-23):
+rem     revives :20129 when the GPU card frees - never fights a trainer
+rem     (single instance via pidlock: a duplicate exits in <1s, harmless)
+"%ROOT%\.venv\Scripts\python.exe" "%ROOT%\scripts\launch_detached.py" --log aali_brain_watchdog -- "%ROOT%\.venv\Scripts\python.exe" "%ROOT%\scripts\aali_brain_watchdog.py" >>"%GUARDLOG%" 2>&1
+
 rem 1) alive already? (--fail: any HTTP error also counts as down)
 curl -s --fail -m 3 "%HEALTH_URL%" >nul 2>&1
 if not errorlevel 1 (

@@ -118,6 +118,10 @@ def _require_api_key():
     # stay public.
     if request.path.startswith("/v1/"):
         return None
+    if request.path == "/api/health":
+        return None  # liveness probe (2026-09-23): watchdogs/load balancers
+                     # poll it WITHOUT credentials; body carries only
+                     # service/workspace/mode - never user content
     if not API_KEY:
         return None  # local single-user mode: open
     if request.path.startswith("/api/register"):

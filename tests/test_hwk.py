@@ -664,8 +664,15 @@ def test_api_key_gate_blocks_unauthorized(monkeypatch, tmp_path):
 
     monkeypatch.setattr(app_mod, "API_KEY", "secret-key-1")
     client = app_mod.app.test_client()
-    assert client.get("/api/health").status_code == 401
-    assert client.get("/api/health", headers={"X-API-Key": "wrong"}).status_code == 401
+    # /api/health stays UNAUTHENTICATED (2026-09-23): watchdogs/autostart/load
+    # balancers must never see a live server as down. It returns only
+    # service/workspace/mode - no user content.
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/health", headers={"X-API-Key": "wrong"}).status_code == 200
     assert client.get("/api/health", headers={"X-API-Key": "secret-key-1"}).status_code == 200
+    # but everything else with an /api prefix is gated
+    assert client.post("/api/ask", json={"message": "hi", "sid": "t"}).status_code == 401
+    assert client.post("/api/ask", json={"message": "hi", "sid": "t"},
+                       headers={"X-API-Key": "wrong"}).status_code == 401
     # non-API routes (the UI) stay open
     assert client.get("/ui/").status_code in (200, 404)
