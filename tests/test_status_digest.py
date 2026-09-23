@@ -17,6 +17,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -186,6 +188,58 @@ def test_pipeline_idle_when_nothing_is_fresh(tmp_path: Path) -> None:
     icon, msg = _pipeline(soup_log, report)
     assert icon == "💤"
     assert "idle" in msg
+
+
+# ---------------------------------------------------------------------------
+# phase_d(): trainer `done:` line is COMPLETE (2026-09-23 false alarm), and
+# stage logs past 3 are scanned
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def _phase_d(tmp_path: Path):
+    """Point the digest's DATA/MODELS_DIR at tmp for one phase_d() call."""
+    old_data, old_models = sd.DATA, sd.MODELS_DIR
+    sd.DATA = tmp_path
+    sd.MODELS_DIR = tmp_path / "models"
+    (sd.MODELS_DIR).mkdir()
+    yield tmp_path
+    sd.DATA, sd.MODELS_DIR = old_data, old_models
+
+
+def test_phase_d_done_line_is_complete_not_stalled(_phase_d) -> None:
+    # 2026-09-23: stage 3 finished (trainer exit line `done: ...`), log went
+    # idle, and the board screamed STALLED for hours. A done: line is a
+    # COMPLETED stage.
+    log = _phase_d / "phase_d_train_stage3.log"
+    _write(log, "step=3975 eval_loss=1.866\n"
+                "done: D:\\\\hwk-models\\\\phase-d-wide\\\\ step=4000 "
+                "tokens=131,072,000\n", age_s=3 * 3600)
+    rows = sd.phase_d()
+    assert rows, "expected at least one row"
+    icon, msg = rows[0]
+    assert icon == "✅"
+    assert "stage 3 COMPLETE" in msg
+    assert "131,072,000" in msg
+    assert not any("STALLED" in m for _, m in rows)
+
+
+def test_phase_d_scans_stage4_log(_phase_d) -> None:
+    # the watchdog's stage table now reaches stage 4 - the digest must not go
+    # blind on phase_d_train_stage4.log
+    log = _phase_d / "phase_d_train_stage4.log"
+    _write(log, "step=25 eval_loss=2.10\n", age_s=60)
+    rows = sd.phase_d()
+    assert any("stage 4 training" in m for _, m in rows)
+
+
+def test_phase_d_lists_saved_weights(_phase_d) -> None:
+    log = _phase_d / "phase_d_train_stage3.log"
+    _write(log, "done: D:\\\\hwk-models\\\\phase-d-wide\\\\ step=4000\n",
+           age_s=2 * 3600)
+    (sd.MODELS_DIR / "phase-d-wide").mkdir()
+    (sd.MODELS_DIR / "phase-d-wide" / "final.pt").write_bytes(b"x")
+    rows = sd.phase_d()
+    assert any("phase-d-wide/final.pt" in m for _, m in rows)
 
 
 

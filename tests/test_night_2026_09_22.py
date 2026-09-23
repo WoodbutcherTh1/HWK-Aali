@@ -205,10 +205,12 @@ def wd(tmp_path, monkeypatch):
 
 def test_watchdog_stage_table_chains(wd) -> None:
     stages = wd.STAGES
-    assert [s["stage"] for s in stages] == [1, 2, 3]
+    # 2026-09-23: stage 4 added (phase-d-wide -> phase-d-all, all corpora)
+    assert [s["stage"] for s in stages] == [1, 2, 3, 4]
     assert stages[0]["source_dir"] is None            # stage 1 resumes in place
     assert stages[1]["source_dir"] == stages[0]["output_dir"]
     assert stages[2]["source_dir"] == stages[1]["output_dir"]
+    assert stages[3]["source_dir"] == stages[2]["output_dir"]
     assert "code" in stages[1]["corpora"]             # stage 2 ADDS code
 
 

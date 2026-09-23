@@ -19,6 +19,9 @@ Duties (checked every CHECK_SECONDS):
      stage 1 (pile,arabic,instruct,orca_math,reasoning -> 3000 steps)  [done]
      stage 2: bootstrap phase-d -> phase-d-code, ADD code (33.3B tokens)
      stage 3: bootstrap phase-d-code -> phase-d-wide, ADD law/medical/...
+     stage 4 (2026-09-23): bootstrap phase-d-wide -> phase-d-all, train on ALL
+       tokenized corpora (the owner's +2-4B-token continuation; every
+       stage-3 candidate already has a manifest)
    Each stage restarts the cosine schedule (fresh optimizer, step 0) exactly
    like bootstrap_sft_state.py intends.
 4. Never kills anything by image name; never launches onto a busy card; every
@@ -68,6 +71,10 @@ STAGES = [
     {"stage": 3, "output_dir": "D:/hwk-models/phase-d-wide",
      "source_dir": "D:/hwk-models/phase-d-code",
      "corpora": None,  # built at launch time from whatever tokenized by then
+     "max_steps": 4000, "done_marker": None},
+    {"stage": 4, "output_dir": "D:/hwk-models/phase-d-all",
+     "source_dir": "D:/hwk-models/phase-d-wide",
+     "corpora": None,  # built at launch time: every corpus with a manifest
      "max_steps": 4000, "done_marker": None},
 ]
 STAGE3_CANDIDATES = ("law", "medical", "know", "mideast", "mmlu")
@@ -204,10 +211,36 @@ def stage3_corpora_arg() -> str | None:
     return base + "," + ",".join(available)
 
 
+# 2026-09-23 (stage 4): the owner's +2-4B-token continuation trains on every
+# tokenized corpus at once; all eleven have manifests as of this morning.
+ALL_CORPORA = ("pile", "arabic", "instruct", "orca_math", "reasoning",
+               "code", "law", "medical", "know", "mideast", "mmlu")
+
+
+def available_corpora() -> list[str]:
+    """Every corpus with COMPLETE tokenization (manifest present)."""
+    return [name for name in ALL_CORPORA if not corpus_needs_tokens(name)]
+
+
+def stage4_corpora_arg() -> str:
+    return ",".join(available_corpora()) or "pile,arabic"
+
+
+def stage_corpora_label(stage: dict) -> str:
+    """The corpora string this stage will actually launch with (for logs)."""
+    if stage["stage"] == 3:
+        return str(stage3_corpora_arg())
+    if stage["stage"] == 4:
+        return stage4_corpora_arg()
+    return str(stage["corpora"])
+
+
 def build_stage_command(stage: dict) -> list[str]:
     corpora = stage["corpora"]
     if stage["stage"] == 3:
         corpora = stage3_corpora_arg()
+    elif stage["stage"] == 4:
+        corpora = stage4_corpora_arg()
     return [
         str(PYEXE), str(REPO / "train_scratch.py"),
         "--data", "D:/hwk-data/tokens",
@@ -259,7 +292,7 @@ def launch_stage(stage: dict) -> bool:
                           f"phase_d_train_stage{stage['stage']}")
     if pid:
         log(f"stage {stage['stage']} launched (pid {pid}) -> "
-            f"{stage['output_dir']} corpora={stage['corpora'] or stage3_corpora_arg()} "
+            f"{stage['output_dir']} corpora={stage_corpora_label(stage)} "
             f"max_steps={stage['max_steps']}")
         save_state(stage)
         return True
@@ -427,6 +460,38 @@ def check_cycle(heartbeat: bool = True) -> str:
     return f"ok: {reason}"
 
 
+MORNING_REPORT = DATA / "MORNING_REPORT.md"
+
+
+def write_morning_report(reason: str) -> None:
+    """End-of-window report (2026-09-23): the owner's MORNING_REPORT.md went
+    stale for two days because night_caretaker.py is soup-specific and nothing
+    on the Phase D track owned the night. The watchdog writes its own report
+    when its window ends, so morning-me always has SOMETHING fresh to read."""
+    tail_lines: list[str] = []
+    try:
+        tail_lines = WATCH_LOG.read_text(encoding="utf-8",
+                                         errors="replace").splitlines()[-15:]
+    except OSError:
+        pass
+    state = load_state() or {}
+    text = (
+        f"# Morning report — {datetime.now():%Y-%m-%d %H:%M}\n\n"
+        f"phase_d_watchdog.py ended its window ({reason}).\n\n"
+        f"- Active stage: {state.get('stage', '?')} -> "
+        f"{state.get('output_dir', '?')}\n"
+        f"- Restart count this window: {state.get('restarts', 0)}\n\n"
+        "## Watchdog log (last 15 lines)\n\n```\n"
+        + "\n".join(tail_lines) + "\n```\n\n"
+        "Live board: D:/hwk-data/STATUS.md (HWK StatusDigest regenerates it "
+        "every 30 min). Fresh copy anytime: `python scripts/status_digest.py`.\n")
+    try:
+        MORNING_REPORT.write_text(text, encoding="utf-8")
+        log("morning report written")
+    except OSError:
+        pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true",
@@ -457,6 +522,7 @@ def main() -> int:
             return 0
         if time.time() > deadline:
             log("watchdog window over - going to sleep")
+            write_morning_report("watch window over")
             return 0
         time.sleep(CHECK_SECONDS)
 

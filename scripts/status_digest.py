@@ -30,6 +30,11 @@ PI_LOG = Path("D:/hwk-data/pi_ci/ci_status.log")
 PI_RESULT = Path("D:/hwk-data/pi_ci/result.json")
 TARGET_STEPS = 100_000
 STALL_SEC = 15 * 60
+# Phase D stage logs the watchdog writes (2026-09-23: extended past 3 - the
+# watchdog's stage table now reaches stage 4 and the digest must not go blind
+# on it).
+PHASE_D_STAGES = (1, 2, 3, 4, 5)
+MODELS_DIR = Path("D:/hwk-models")
 
 
 def age_seconds(path: Path) -> float | None:
@@ -116,10 +121,11 @@ def phase_d() -> list[tuple[str, str]]:
     """Phase D (110M brain) across the per-stage logs phase_d_watchdog writes.
 
     The youngest stage log is the live one; earlier stages that already carry a
-    COMPLETE line are summarized as done. final.pt on disk proves stage 1.
+    COMPLETE line (watchdog wording) or a trainer `done:` exit line are
+    summarized as done. final.pt on disk proves each finished stage's weights.
     """
     stages: list[tuple[float, int, Path, list[str]]] = []
-    for n in (1, 2, 3):
+    for n in PHASE_D_STAGES:
         path = DATA / f"phase_d_train_stage{n}.log"
         lines = tail(path, 8)
         if lines:
@@ -138,9 +144,20 @@ def phase_d() -> list[tuple[str, str]]:
             eval_loss = e.group(1)
         if step is not None and eval_loss is not None:
             break
-    complete = any("COMPLETE" in line for line in lines)
+    # 2026-09-23: the trainer's normal exit line is `done: <dir> step=...` -
+    # only watching the watchdog's COMPLETE wording left a FINISHED stage 3
+    # falsely STALLED on the board for hours.
+    complete = any("COMPLETE" in line or line.strip().startswith("done:")
+                   for line in lines)
     if complete:
-        rows = [("✅", f"stage {n} COMPLETE ({fmt_age(mtime_age)})")]
+        tokens = ""
+        for line in lines:
+            if line.strip().startswith("done:"):
+                t = re.search(r"tokens=([\d,.]+)", line)
+                if t:
+                    tokens = f", {t.group(1)} tokens"
+                break
+        rows = [("✅", f"stage {n} COMPLETE{tokens} ({fmt_age(mtime_age)})")]
     elif step is None:
         rows = [("⚠️", f"stage {n} log has no step lines - last write "
                        f"{fmt_age(mtime_age)}")]
@@ -150,8 +167,9 @@ def phase_d() -> list[tuple[str, str]]:
     else:
         rows = [("✅", f"stage {n} training: step {step:,}, eval_loss "
                       f"{eval_loss}, last write {fmt_age(mtime_age)}")]
-    if (Path("D:/hwk-models/phase-d") / "final.pt").exists():
-        rows.append(("✅", "stage-1 weights saved (D:/hwk-models/phase-d/final.pt)"))
+    for name in ("phase-d", "phase-d-code", "phase-d-wide"):
+        if (MODELS_DIR / name / "final.pt").exists():
+            rows.append(("✅", f"weights saved (D:/hwk-models/{name}/final.pt)"))
     return rows
 
 
