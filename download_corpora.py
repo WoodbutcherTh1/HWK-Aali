@@ -59,6 +59,19 @@ CORPORA: dict[str, tuple[str, list[str], float]] = {
     "math": ("openai/gsm8k", ["main/train-"], 0.1),
     "orca_math": ("microsoft/orca-math-word-problems-200k", ["data/train-"], 0.5),
     "reasoning": ("garage-bAInd/Open-Platypus", ["data/train-"], 0.5),
+    # --- Phase E (2026-09-23 owner request): MORE coding + MORE law +
+    #     vibe-coding (natural-language -> app) instruction data. Repos whose
+    #     schemas tokenize_corpus.py parses: instruction/response +
+    #     query/answer jsonl, pile-of-law 'text' parquet chunks.
+    # pile-of-law again, NEXT file chunks (schema 'text' - guaranteed):
+    # courtlistener opinions vol 2-4 + EURLEX + contracts tail.
+    "law2": ("pile-of-law/pile-of-law", ["data/train.courtlisteneropinions.2", "data/train.courtlisteneropinions.3", "data/train.courtlisteneropinions.4", "data/train.eurlex."], 4.0),
+    # 2026-09-23 second pick (nickrosh/Evol-Instruct-Code-80k was DELETED from
+    # HF -> 401). Magicoder + CodeFeedback are alive, .jsonl, schemas parse:
+    # instruction/response + query/answer. tokenize_corpus.py gained plain
+    # .jsonl/.json support for exactly these.
+    "code2": ("ise-uiuc/Magicoder-Evol-Instruct-110K", ["data-evol_instruct"], 0.5),
+    "code3": ("m-a-p/CodeFeedback-Filtered-Instruction", ["CodeFeedback-Filtered-Instruction"], 0.5),
 }
 
 # Additional small medical QA corpora merged under the "medical" corpus.
@@ -167,7 +180,7 @@ def fetch_all(corpora: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download HWK Aali pretraining corpora.")
-    parser.add_argument("--corpus", action="append", default=[], help="Corpus (pile, arabic, code, codeinstruct, medical, law, know, mmlu); repeat or omit for all.")
+    parser.add_argument("--corpus", action="append", default=[], help="Corpus (pile, arabic, code, code2, code3, codeinstruct, medical, law, law2, know, mmlu); repeat or omit for all.")
     args = parser.parse_args()
     hwk_paths.ensure_dirs()
     hwk_paths.DOWNLOAD_LOG.parent.mkdir(parents=True, exist_ok=True)

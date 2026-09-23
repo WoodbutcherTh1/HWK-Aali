@@ -53,6 +53,15 @@ def _json_text(record: dict[str, object]) -> str | None:
         value = record.get(key)
         if isinstance(value, str) and value.strip():
             return value
+    # instruction-format records (Magicoder/CodeFeedback/glaive-style jsonl):
+    # render the exchange so the model sees Q/A shape, not field soup.
+    instruction = record.get("instruction") or record.get("question") or record.get("query")
+    answer = record.get("output") or record.get("response") or record.get("answer")
+    if isinstance(instruction, str) and instruction.strip():
+        head = f"Q: {instruction.strip()}"
+        if isinstance(answer, str) and answer.strip():
+            return f"{head}\nA: {answer.strip()}"
+        return head
     return None
 
 
@@ -223,6 +232,10 @@ def iter_documents(raw_dir: Path, corpus: str | None = None):
             yield from ((corpus, path.name, text) for text in iter_json_lines(path, "zst"))
         elif path.suffix == ".xz":
             yield from ((corpus, path.name, text) for text in iter_json_lines(path, "xz"))
+        elif path.suffix in (".jsonl", ".json"):
+            # 2026-09-23: modern instruction datasets (Magicoder, CodeFeedback,
+            # glaive) ship plain jsonl/json — line-parse, skip bad lines.
+            yield from ((corpus, path.name, text) for text in iter_json_lines(path, "plain"))
         elif path.suffix == ".txt":
             text = _clean(path.read_text(encoding="utf-8", errors="replace"))
             if len(text) >= MIN_DOC_CHARS:
@@ -284,6 +297,13 @@ def tokenize_corpus(corpus: str, tokenizer, out_root: Path) -> dict[str, object]
         "train_shards": train_shards,
         "eval_shards": eval_shards,
     }
+    # 2026-09-23 lesson: an EMPTY manifest (0 shards) is a poison pill - the
+    # watchdog reads manifests as "tokenization complete" and would train
+    # stage 5 forever without the corpus. Fail loudly instead of lying.
+    if not train_shards:
+        raise SystemExit(
+            f"[{corpus}] FATAL: tokenization produced 0 shards (raw dir has no "
+            "readable data?) - manifest NOT written. Fix the raw files and rerun.")
     with (out_dir / "manifest.json").open("w", encoding="utf-8") as handle:
         json.dump(manifest, handle, ensure_ascii=False, indent=2)
     print(f"[{corpus}] docs={documents} tokens={total_tokens:,} train_shards={len(train_shards)} eval_tokens={sum(s['tokens'] for s in eval_shards):,}", flush=True)

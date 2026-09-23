@@ -56,10 +56,15 @@ def _watch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_stage4_in_table_chains_wide(_watch: Path) -> None:
-    stage4 = wd.STAGES[-1]
+    stage4 = wd.STAGES[3]
     assert stage4["stage"] == 4
     assert stage4["source_dir"].endswith("phase-d-wide")
     assert stage4["output_dir"].endswith("phase-d-all")
+    # 2026-09-23: stage 5 doubles the context (owner: "remember more")
+    stage5 = wd.STAGES[4]
+    assert stage5["stage"] == 5
+    assert stage5["source_dir"].endswith("phase-d-all")
+    assert stage5["context"] == 8192
 
 
 def test_stage4_corpora_arg_lists_all_tokenized(_watch: Path) -> None:

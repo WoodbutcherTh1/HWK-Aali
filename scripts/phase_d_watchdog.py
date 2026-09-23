@@ -76,9 +76,24 @@ STAGES = [
      "source_dir": "D:/hwk-models/phase-d-wide",
      "corpora": None,  # built at launch time: every corpus with a manifest
      "max_steps": 4000, "done_marker": None},
+    # 2026-09-23 (owner: "give him more context to remember more"): stage 5
+    # doubles the context to 8192. RoPE makes this a training-time choice, not
+    # an architecture change (train_scratch.py exempts context_size from the
+    # resume config check and flash attention keeps activation memory linear).
+    # Phase E's code2/code3/law2 corpora join automatically once tokenized.
+    {"stage": 5, "output_dir": "D:/hwk-models/phase-d-8k",
+     "source_dir": "D:/hwk-models/phase-d-all",
+     "corpora": None,  # built at launch time: every corpus with a manifest
+     "context": 8192,
+     "max_steps": 3000, "done_marker": None},
 ]
 STAGE3_CANDIDATES = ("law", "medical", "know", "mideast", "mmlu")
-TOKENIZE_CORPORA = ("law", "medical", "know", "mideast", "mmlu")
+TOKENIZE_CORPORA = ("law", "medical", "know", "mideast", "mmlu",
+                    "code2", "code3", "law2")
+# Phase E (2026-09-23): more code + more law. Stage 5 waits for these while
+# their download/tokenize pipeline is ALIVE, but launches on whatever exists
+# if the pipeline dies (never deadlock the night on a dead download).
+PHASE_E_CORPORA = ("code2", "code3", "law2")
 
 
 def log(message: str) -> None:
@@ -214,7 +229,9 @@ def stage3_corpora_arg() -> str | None:
 # 2026-09-23 (stage 4): the owner's +2-4B-token continuation trains on every
 # tokenized corpus at once; all eleven have manifests as of this morning.
 ALL_CORPORA = ("pile", "arabic", "instruct", "orca_math", "reasoning",
-               "code", "law", "medical", "know", "mideast", "mmlu")
+               "code", "law", "medical", "know", "mideast", "mmlu",
+               # Phase E corpora join automatically once tokenized
+               "code2", "code3", "law2")
 
 
 def available_corpora() -> list[str]:
@@ -224,6 +241,12 @@ def available_corpora() -> list[str]:
 
 def stage4_corpora_arg() -> str:
     return ",".join(available_corpora()) or "pile,arabic"
+
+
+def stage5_corpora_arg() -> str:
+    """Stage 5 trains on everything tokenized BY LAUNCH TIME, Phase E's
+    code2/code3/law2 included once their manifests land."""
+    return stage4_corpora_arg()
 
 
 def stage_corpora_label(stage: dict) -> str:
@@ -241,6 +264,8 @@ def build_stage_command(stage: dict) -> list[str]:
         corpora = stage3_corpora_arg()
     elif stage["stage"] == 4:
         corpora = stage4_corpora_arg()
+    elif stage["stage"] == 5:
+        corpora = stage5_corpora_arg()
     return [
         str(PYEXE), str(REPO / "train_scratch.py"),
         "--data", "D:/hwk-data/tokens",
@@ -248,7 +273,8 @@ def build_stage_command(stage: dict) -> list[str]:
         "--tokenizer", "D:/hwk-data/tokenizer/hwk_spm.model",
         "--output-dir", stage["output_dir"],
         "--mirror-dir", f"X:/hwk-backups/{stage_dir(stage).name}",
-        "--context", "4096", "--d-model", "768", "--heads", "12", "--layers", "12",
+        "--context", str(stage.get("context", 4096)),
+        "--d-model", "768", "--heads", "12", "--layers", "12",
         "--batch-size", "1", "--gradient-accumulation", "8", "--grad-checkpoint",
         "--max-steps", str(stage["max_steps"]), "--save-steps", "500",
         "--log-steps", "25", "--learning-rate", "1e-4", "--warmup-steps", "200",
@@ -378,6 +404,14 @@ def ensure_tokenization() -> None:
     todo = [name for name in TOKENIZE_CORPORA if corpus_needs_tokens(name)]
     if not todo:
         return
+    # download_url writes straight to the final path, so a corpus still being
+    # downloaded may hold half-written parquet - tokenizing it now would read
+    # corrupt files. Phase E corpora are tokenized only AFTER the downloader
+    # exits (their raw dirs are then complete, resume-safe).
+    if downloader_running():
+        todo = [name for name in todo if name not in PHASE_E_CORPORA]
+        if not todo:
+            return
     # A partial run (shards but no manifest) has unknown shard boundaries;
     # tokenize_corpus.py cannot resume it, so wipe it for a clean redo.
     for name in todo:
@@ -420,6 +454,21 @@ def reset_restart_count(stage: dict) -> None:
             pass
 
 
+def downloader_running() -> bool:
+    """Is a corpus download alive? (same process-scan approach as
+    tokenizer_running - lockfiles hold shim pids that always die)."""
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" "
+             "| Where-Object { $_.CommandLine -match 'download_corpora' } "
+             "| Select-Object -First 1 -ExpandProperty ProcessId"],
+            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool((proc.stdout or "").strip().isdigit())
+
+
 def check_cycle(heartbeat: bool = True) -> str:
     """One watchdog cycle. Returns an action string (logged on action)."""
     stage = active_stage()
@@ -451,6 +500,14 @@ def check_cycle(heartbeat: bool = True) -> str:
             # tokenizer to land law/medical/... shards first.
             return ("stage 3 deferred - no new corpora tokenized yet "
                     "(stage 1 trainer stays COMPLETE; re-check next cycle)")
+        if nxt["stage"] == 5:
+            # Stage 5 doubles the context AND should include Phase E's new
+            # code/law data. Wait while its pipeline is alive; launch on
+            # whatever is tokenized if the pipeline died (no deadlock).
+            missing = [c for c in PHASE_E_CORPORA if corpus_needs_tokens(c)]
+            if missing and (downloader_running() or tokenizer_running()[0]):
+                return (f"stage 5 deferred - Phase E corpora still landing "
+                        f"({', '.join(missing)}); re-check next cycle")
         log(f"stage {stage['stage']} done -> advancing to stage {nxt['stage']}")
         if launch_stage(nxt):
             return f"advanced-to-{nxt['stage']}"
