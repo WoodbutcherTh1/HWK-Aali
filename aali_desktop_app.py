@@ -231,6 +231,19 @@ class Bridge:
         except Exception:  # noqa: BLE001
             return "failed"
 
+    # ---- live jobs board ------------------------------------------------
+    def jobs(self) -> str:
+        """Snapshot of every long-running job (training, downloads, Pi-CI,
+        disks) - same source as D:/hwk-data/STATUS.md. JSON string for JS."""
+        import json as _json
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        try:
+            import aali_jobs  # noqa: PLC0415 - lazy: only when the pill opens
+            return _json.dumps(aali_jobs.snapshot(), ensure_ascii=False)
+        except Exception as exc:  # noqa: BLE001
+            return _json.dumps({"error": str(exc), "rows": [], "alerts": 0,
+                                "generated": ""}, ensure_ascii=False)
+
     # ---- misc ----------------------------------------------------------
     def app_version(self) -> str:
         return APP_VERSION
@@ -316,6 +329,29 @@ EXTRAS_JS = """
       });
     }, 1000);
   }
+  // live jobs board (2026-09-23): what is running right now — training,
+  // downloads, Pi-CI, disks — straight from the machine, like the status board.
+  var jobsBox=null;
+  pill('📊 شغل حي (المرحلة D)','',function(){
+    if(jobsBox){ jobsBox.remove(); jobsBox=null; return; }
+    api.jobs().then(function(raw){
+      var d; try{ d=JSON.parse(raw); }catch(e){ d={error:'bad json',rows:[]}; }
+      if(jobsBox){ jobsBox.remove(); }
+      jobsBox=document.createElement('div'); jobsBox.className='aali-box';
+      var html='<b>شغل حي — '+ (d.generated||'') +' ('+ (d.alerts||0) +' تنبيه)</b>';
+      if(d.error){ html+='<br>تعذّر جمع الحالة: '+d.error; }
+      var sec='';
+      (d.rows||[]).forEach(function(r){
+        if(r.section!==sec){ sec=r.section; html+='<br><b style="color:#c9cbd4">'+sec+'</b>'; }
+        html+='<br>'+r.icon+' '+(r.text||'');
+      });
+      html+='<div class="aali-btns"><button class="aali-hide" id="aalijobs">إخفاء</button></div>';
+      jobsBox.innerHTML=html;
+      wrap.appendChild(jobsBox);
+      document.getElementById('aalijobs').onclick=function(){ jobsBox.remove(); jobsBox=null; };
+    });
+  });
+
   pill('🔗 شارك آلي (رابط عام)','',function(){
     if(box){ box.remove(); box=null; return; }
     api.share_start().then(function(res){

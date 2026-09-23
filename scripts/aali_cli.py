@@ -393,8 +393,34 @@ def save_theme(name: str) -> None:
 
 set_theme(DEFAULT_THEME)
 
-# BRB spinner — the "moving" element (straight ASCII, terminal-safe)
+# BRB spinner — legacy ASCII frames kept for -q/simple paths; the rich
+# animated spinner is Frames below (Braille dots fall back to ASCII when
+# the console can't render them).
 SPINNER = ["|", "/", "-", "\\"]
+
+
+class Frames:
+    """Animated spinner frames: Braille wheel when supported, ASCII wheel
+    otherwise, with an optional elapsed-seconds suffix while Aali works."""
+
+    BRAILLE = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    ASCII = ["|", "/", "-", "\\"]
+
+    def __init__(self, color: bool = True, use_braille: bool | None = None):
+        if use_braille is None:
+            use_braille = os.environ.get("AALI_ASCII_SPINNER", "") != "1"
+        self.color = color
+        self.frames = self.BRAILLE if use_braille else self.ASCII
+        self.n = 0
+
+    def __next__(self) -> str:
+        frame = self.frames[self.n % len(self.frames)]
+        self.n += 1
+        return paint(frame, "gold", enabled=self.color)
+
+    @staticmethod
+    def elapsed(seconds: float) -> str:
+        return f"{seconds:0.0f}s"
 
 
 def _supports_color() -> bool:
@@ -456,19 +482,35 @@ def ensure_server(base: str, timeout: float = 60.0) -> None:
 
 # ----------------------------------------------------------------- banner
 def banner(width: int) -> None:
+    """Animated ASCII-art welcome (Claude-Code-style): the wordmark draws
+    itself line by line, then the tagline and hints settle in."""
     if width < 46:
         return
-    inner = 38
+    art = [
+        "  █████╗  ██╗      █████╗ ██╗",
+        " ██╔══██╗██║     ██╔══██╗██║",
+        " ███████║██║     ███████║██║",
+        " ██╔══██║██║     ██╔══██║██║",
+        " ██║  ██║███████╗██║  ██║██║",
+        " ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝",
+    ]
     g, d, r = C["gold"], C["dim"], C["reset"]
-    l1 = "  AALI · agent on your machine".ljust(inner)
-    l2 = f"  local · private · own model · {theme_name}".ljust(inner)
     print()
-    print(f"{g}╭{'─' * inner}╮{r}")
-    print(f"{g}│{r}{l1}{g}│{r}")
-    print(f"{g}│{r}{d}{l2}{r}{g}│{r}")
-    print(f"{g}╰{'─' * inner}╯{r}")
+    if sys.stdout.isatty():
+        try:
+            for line in art:
+                print(f"{g}{line}{r}")
+                time.sleep(0.045)
+        except Exception:  # noqa: BLE001 - animation must never break startup
+            pass
+    else:
+        for line in art:
+            print(f"{g}{line}{r}")
+    print(f"{d}  ─────────────────────────────────────────{r}")
     print(paint("  آلي — مساعدك المحلي، جاهز.", "gold"))
+    print(paint(f"  local · private · own model · {theme_name}", "dim"))
     print(paint("  /help commands · Ctrl+C cancel · /exit quit", "dim"))
+    print()
 
 
 # ----------------------------------------------------------------- markdown-ish
@@ -478,22 +520,31 @@ _MD = [
     (re.compile(r"^# (.*)$"), "h"),
     (re.compile(r"^\s*[-*•] (.*)$"), "li"),
     (re.compile(r"^\s*(\d+)[.)] (.*)$"), "oli"),
-    (re.compile(r"^```"), "fence"),
-]
+    (re.compile(r"^```"), "fence"),    ]
 
 
 def render_reply(text: str, color: bool) -> None:
-    """Light markdown-ish rendering: headings, bullets, code, inline styles."""
+    """Claude-Code-style markdown: boxed code fences, rule-under headings,
+    colored bullets/numbers, bold + inline-code highlighting."""
     in_fence = False
     for raw in text.splitlines():
         line = raw.rstrip()
         if line.startswith("```"):
             in_fence = not in_fence
-            rule = "─" * 28
-            print(paint(rule if in_fence else rule, "dim", enabled=color))
+            if color:
+                print(paint("╭" + "─" * 56 + "╮", "dim", enabled=color)
+                      if in_fence else
+                      paint("╰" + "─" * 56 + "╯", "dim", enabled=color))
+            else:
+                print("─" * 28)
             continue
         if in_fence:
-            print(paint(line, "cyan", enabled=color))
+            # clamp long code lines so the box never wraps ugly on narrow terms
+            shown = line[:56] if len(line) > 56 else line.ljust(56)
+            body = fx(shown) if BIDI_MODE else shown
+            print(paint("│ ", "dim", enabled=color)
+                  + paint(body, "cyan", enabled=color)
+                  + paint(" │", "dim", enabled=color))
             continue
         for pat, kind in _MD:
             m = pat.match(line)
@@ -504,17 +555,24 @@ def render_reply(text: str, color: bool) -> None:
             # colour disabled (BIDI_MODE is a terminal property, not a colour one).
             body = fx(m.group(1)) if BIDI_MODE else m.group(1)
             if kind == "h":
+                print()
                 print(paint(body, "bold", "gold", enabled=color))
+                if color:
+                    print(paint("  " + "─" * 40, "dim", enabled=color))
             elif kind == "li":
-                print(paint("  • ", "green", enabled=color) + body)
+                print(paint("  ● ", "green", enabled=color) + body)
             elif kind == "oli":
                 tail = fx(m.group(2)) if BIDI_MODE else m.group(2)
-                print(paint(f"  {m.group(1)}. ", "green", enabled=color) + tail)
+                print(paint(f"  {m.group(1)}. ", "green", "bold", enabled=color) + tail)
             break
         else:
             out = line
-            out = re.sub(r"\*\*(.+?)\*\*", lambda mm: mm.group(1), out)
-            out = re.sub(r"`([^`]+)`", lambda mm: f"{mm.group(1)}", out)
+            out = re.sub(r"\*\*(.+?)\*\*",
+                         lambda mm: paint(mm.group(1), "bold", enabled=color)
+                         if color else mm.group(1), out)
+            out = re.sub(r"`([^`]+)`",
+                         lambda mm: paint(mm.group(1), "cyan", enabled=color)
+                         if color else mm.group(1), out)
             print(fx(out, _term_width()) if BIDI_MODE else out)
 
 
@@ -536,8 +594,10 @@ def stream_ask(base: str, message: str, sid: str, confirm: bool = False,
         headers["X-API-Key"] = api_key
     req = urllib.request.Request(base + "/api/ask/stream", data=payload, headers=headers)
     result: dict = {}
-    frames = iter(SPINNER)
+    spinner = Frames()
+    frames = iter(spinner)
     last = 0.0
+    t0 = time.time()
     printed_tool = False
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
@@ -566,21 +626,23 @@ def stream_ask(base: str, message: str, sid: str, confirm: bool = False,
                         args = data.get("arguments") or {}
                         brief = ", ".join(f"{k}={str(v)[:40]}" for k, v in list(args.items())[:2])
                         print("\r" + " " * 60 + "\r"
-                              + paint("● ", "green") + paint(tool, "bold")
+                              + paint("⏺ ", "green") + paint(tool, "bold", "cyan")
                               + paint(f"({brief})", "grey"))
                     elif kind == "tool_result":
                         res = str(data.get("result", ""))
                         bad = res.startswith("{") and ('"ok": false' in res or "'ok': False" in res)
-                        mark = paint("  └─ ✗", "red") if bad else paint("  └─", "dim")
+                        mark = paint("  └─ ✓", "green") if not bad else paint("  └─ ✗", "red")
                         print(mark + paint(f" {res[:120]}", "grey"))
                 elif ev_name == "done":
                     if isinstance(data, dict):
                         result = data
                     break
                 now = time.time()
-                if sys.stdout.isatty() and now - last > 0.12:
-                    print("\r" + paint(next(frames) + " ", "gold")
-                          + paint("Aali is working…", "dim"), end="", flush=True)
+                if sys.stdout.isatty() and now - last > 0.08:
+                    elapsed = Frames.elapsed(now - t0)
+                    print("\r" + next(frames) + " "
+                          + paint("Aali is working…", "dim")
+                          + paint(f" {elapsed}", "grey"), end="", flush=True)
                     last = now
     except KeyboardInterrupt:
         print("\r" + " " * 60 + "\r" + paint("✻ cancelled — Aali keeps working server-side", "cyan"))
@@ -613,7 +675,38 @@ HISTORY_MAX = 500
 
 _KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
 _SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear",
-                   "/theme", "/tools", "/multi", "/sid", "/bidi")
+                   "/theme", "/tools", "/multi", "/sid", "/bidi", "/jobs")
+
+
+def _jobs_panel(base: str, color: bool) -> None:
+    """Live jobs panel — what is running RIGHT NOW (training, downloads,
+    Pi-CI, disks), like the Freebuff screen. Reads the same local D:/hwk-data
+    state the status board uses; works even when the API server is down."""
+    try:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import aali_jobs
+        lines = aali_jobs.render_text()
+    except Exception as exc:  # noqa: BLE001 - a broken board must never kill the REPL
+        say_local(f"✗ jobs board unavailable: {exc}", "warn", color)
+        return
+    print()
+    print(paint("  ⌡ JOBS — live", "bold", "gold", enabled=color))
+    for line in lines[2:]:
+        style = None
+        if line.strip().startswith("⚠"):
+            style = "warn"
+        elif line.strip().startswith("✅"):
+            style = "green"
+        elif line.startswith("["):
+            style = "cyan"
+        print(paint(line, style, enabled=color) if style else line)
+    print(paint("  (re-run /jobs anytime — same data as D:/hwk-data/STATUS.md)",
+                "dim", enabled=color))
+    print()
+
+
+def say_local(text: str, style: str, color: bool) -> None:
+    print(paint(f"{text}", style, enabled=color))
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -980,15 +1073,18 @@ def repl(base: str, api_key: str = "") -> None:
                 result = stream_ask(base, text, sid, confirm=True, api_key=api_key)
                 reply = str(result.get("reply", ""))
         print()
-        print(paint("● ", "gold", enabled=color) + paint("آلي", "bold", "green", enabled=color))
+        print(paint("● ", "gold", enabled=color)
+              + paint("aali", "bold", "gold", enabled=color)
+              + paint(" ·", "dim", enabled=color))
         render_reply(reply, color)
         suggestions = result.get("suggestions") or []
         if suggestions:
             last_suggestions = [str(s) for s in suggestions][:3]
             print()
             for i, s in enumerate(last_suggestions):
-                print(paint(f"  [{i + 1}] ", "gold", enabled=color)
-                      + paint(s, "cyan", enabled=color))
+                print(paint("  ◆ ", "cyan", enabled=color)
+                      + paint(f"[{i + 1}] ", "gold", enabled=color)
+                      + paint(s, "grey", enabled=color))
         print()
 
     def say(tag: str, text: str, style: str) -> None:
@@ -1008,11 +1104,28 @@ def repl(base: str, api_key: str = "") -> None:
                     say("●", "مع السلامة — إلى اللقاء!", "info")
                     break
                 if cmd == "/help":
-                    print(paint("  /new new session · /open N resume session N · /clear clear screen", "dim"))
-                    print(paint("  /theme switch colours (gold · matrix · ocean) — /theme alone previews", "dim"))
-                    print(paint("  /tools what Aali can do · /multi paste a multi-line block", "dim"))
-                    print(paint("  /sid show session id · /bidi Arabic display fix (on/off/auto) · /exit quit", "dim"))
-                    print(paint("  TAB completes commands · ↑/↓ history · trailing \\ continues the line", "dim"))
+                    print()
+                    print(paint("  ⌘ COMMANDS", "bold", "gold", enabled=color))
+                    rows = [
+                        ("/new", "fresh session"),
+                        ("/open N", "resume session N"),
+                        ("/clear", "clear screen + banner"),
+                        ("/theme", "colours: gold · matrix · ocean"),
+                        ("/tools", "Aali's live tool list"),
+                        ("/jobs", "live jobs board (what's running now)"),
+                        ("/multi", "paste a multi-line block"),
+                        ("/sid", "show session id"),
+        		("/bidi", "Arabic display fix (on/off/auto)"),
+                        ("/exit", "quit"),
+                    ]
+                    for name, desc in rows:
+                        print(paint("    ", enabled=color)
+                              + paint(f"{name:<9}", "bold", "cyan", enabled=color)
+                              + paint(desc, "dim", enabled=color))
+                    print(paint("  ⌥ KEYS", "bold", "gold", enabled=color))
+                    print(paint("    TAB completes · ↑/↓ history · trailing \\ continues the line", "dim", enabled=color))
+                    print(paint("    Ctrl+C once: cancel reply · twice: confirm exit", "dim", enabled=color))
+                    print()
                     continue
                 if cmd == "/bidi":
                     arg = arg.strip().lower()
@@ -1040,13 +1153,15 @@ def repl(base: str, api_key: str = "") -> None:
                     else:
                         print(paint("  themes:", "dim", enabled=color))
                         for key in THEMES:
+                            # gradient swatch: five dots fading through the palette
                             sw = "".join(
                                 paint("●", role, enabled=color)
-                                for role in ("gold", "green", "cyan", "red")
+                                for role in ("gold", "green", "cyan", "red", "grey")
+                                for _ in (0,)
                             )
-                            cur = paint("  ● current", "grey", enabled=color) if key == theme_name else ""
-                            print(paint(f"  {sw} ", "bold", enabled=color)
-                                  + f"{key:<8}" + cur)
+                            cur = paint("  ← current", "grey", enabled=color) if key == theme_name else ""
+                            print(paint("  ", enabled=color)
+                                  + f"{key:<8}" + sw + cur)
                         print(paint("  switch with /theme gold | matrix | ocean", "dim", enabled=color))
                     continue
                 if cmd == "/new":
@@ -1056,6 +1171,9 @@ def repl(base: str, api_key: str = "") -> None:
                     continue
                 if cmd == "/sid":
                     say("✻", sid, "info")
+                    continue
+                if cmd == "/jobs":
+                    _jobs_panel(base, color)
                     continue
                 if cmd == "/clear":
                     os.system("cls" if os.name == "nt" else "clear")
