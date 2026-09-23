@@ -1,7 +1,7 @@
 # Phase D stage 4 + Pi-CI revival + night automation (2026-09-23)
 
 - owner: buffy (this PC)
-- status: in-progress
+- status: done
 - started: 2026-09-23
 
 ## Morning findings (09:03-11:40)
@@ -23,11 +23,32 @@
       COMPLETE, weights rows for all three finished dirs (tests added)
 - [x] phase_d_watchdog.py: stage 4 (phase-d-wide -> phase-d-all, ALL tokenized
       corpora, 4000 steps) + MORNING_REPORT.md written on window end (tests)
-- [ ] Launch the watchdog detached 12h -> it bootstraps + launches stage 4
-- [ ] Pi-CI: pre-seed deps over ssh (torch from PyPI), re-enable HWK PiCI,
-      trigger one run, verify result.json
-- [ ] Regenerate STATUS.md (clear the false alarm)
-- [ ] AGENTS.md SS5 + close this claim + commit (no push)
+- [x] Launched the watchdog detached 12h -> it bootstrapped phase-d-wide ->
+      phase-d-all and launched stage 4 on all 11 corpora at 11:53
+- [x] Pi-CI: deps pre-seeded over ssh (torch 2.14.0, numpy, sentencepiece),
+      HWK PiCI re-enabled, runs triggered (collection now clean: 780 tests)
+- [x] STATUS.md regenerated - stage-4 rows correct, no false STALLED
+- [x] AGENTS.md SS5 + commit 76fac03 (amended; stale 09-22 stage-table test
+      updated to the 4-stage contract; full suite 785 green). No push.
+
+## Lessons this session
+- A watchdog-test fixture MUST fake launch_detached: the deferral test
+  spawned a REAL detached train_scratch.py mid-suite (killed by exact PID
+  86816 after cmdline verification; junk stage-4 log + err file deleted;
+  no mirror dir was created). Fixture now fakes launch_detached globally.
+- The stage-3 deferral guard fires when ADVANCING TO stage 3, not past it.
+- Pi deps: pyproject editable install never works on ARM (bitsandbytes etc.);
+  the fallback set is flask requests pytest torch + numpy + sentencepiece.
+- schtasks /Enable breaks under MSYS path mangling - use PowerShell
+  Enable-ScheduledTask / Start-ScheduledTask.
+
+## Night ownership (deliberate)
+- night_caretaker.py is NOT relaunched: it is soup-specific and the v5
+  graduation is done. phase_d_watchdog.py owns the card tonight (12h window,
+  relaunches stage 4 on TDR/OOM death, writes MORNING_REPORT.md at window
+  end). When stage 4 completes it reports 'all stages complete' and leaves
+  the card free for the next human decision (Phase C SFT retry on the wider
+  base).
 
 ## Rules honored
 - 20% disk rule: D: ~95G free (PASS), X: 321G free; mirrors to X: unchanged.

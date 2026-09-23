@@ -206,6 +206,22 @@ def _phase_d(tmp_path: Path):
     sd.DATA, sd.MODELS_DIR = old_data, old_models
 
 
+def test_pi_ci_ok_portable_is_success(tmp_path: Path) -> None:
+    # 2026-09-23: the Pi is a 3 B+ whose runner exercises a portable core and
+    # reports status 'ok-portable' - the board must read it as success
+    result = tmp_path / "pi_ci" / "result.json"
+    result.parent.mkdir(parents=True)
+    result.write_text('{"status": "ok-portable", "passed": 37, "failed": 0, "commit": "14c90c4"}', encoding="utf-8")
+    old = sd.PI_RESULT
+    sd.PI_RESULT = result
+    try:
+        icon, msg = sd.pi_ci()[0]
+    finally:
+        sd.PI_RESULT = old
+    assert icon == "✅"
+    assert "ok-portable" in msg
+
+
 def test_phase_d_done_line_is_complete_not_stalled(_phase_d) -> None:
     # 2026-09-23: stage 3 finished (trainer exit line `done: ...`), log went
     # idle, and the board screamed STALLED for hours. A done: line is a

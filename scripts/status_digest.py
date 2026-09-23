@@ -280,7 +280,7 @@ def pi_ci() -> list[tuple[str, str]]:
         status = result.get("status", "?")
         passed, failed = result.get("passed"), result.get("failed")
         commit = result.get("commit", "?")
-        icon = "✅" if status == "ok" else "⚠️"
+        icon = "✅" if str(status).startswith("ok") else "⚠️"
         line = (f"last Pi run: {status} ({passed} passed / {failed} failed, "
                 f"{commit}), {fmt_age(age_seconds(PI_RESULT))}")
         return [(icon, line)]
