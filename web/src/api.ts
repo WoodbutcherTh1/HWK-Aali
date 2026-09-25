@@ -410,6 +410,45 @@ export async function searchMessages(
   return { total: data.total ?? 0, results: Array.isArray(data.results) ? data.results : [] };
 }
 
+/* ————— voice output (Wave 1 #3, 2026-09-25) —————
+   POST /api/voice/synthesize returns a WAV blob; we play it via the
+   Web Audio API and expose stop + settings. Arabic-first voices. */
+let currentAudio: HTMLAudioElement | null = null;
+
+export function stopSpeaking(): void {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+}
+
+export async function speak(
+  text: string,
+  opts: { voice?: string; speed?: number } = {},
+): Promise<boolean> {
+  stopSpeaking();
+  const res = await fetch(`${apiBase}/api/voice/synthesize`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ text, voice: opts.voice, speed: opts.speed }),
+  });
+  if (!res.ok) return false;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  currentAudio = audio;
+  audio.onended = () => {
+    if (currentAudio === audio) currentAudio = null;
+    URL.revokeObjectURL(url);
+  };
+  try {
+    await audio.play();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface CompactResult {
   ok: boolean;
   compacted?: boolean;

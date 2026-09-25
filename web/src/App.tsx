@@ -19,6 +19,8 @@ import {
   listSessions,
   searchMessages,
   setApiBase,
+  speak,
+  stopSpeaking,
   setToken,
   type ActivityEvent,
   type Attachment,
@@ -1249,6 +1251,13 @@ export default function App() {
                       {m.thinking && <div style={{ marginTop: 10 }}>{ActivityPanel}</div>}
                       {!m.thinking && m.role === "assistant" && (
                         <div className="msg-actions">
+                          <button
+                            type="button"
+                            title="استماع للرد (Piper — محلي)"
+                            onClick={() => { stopSpeaking(); void speak(m.text); }}
+                          >
+                            🔊
+                          </button>
                           <button
                             type="button"
                             title="نسخ الرد"

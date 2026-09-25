@@ -29,6 +29,7 @@ from agent_log import new_request_id
 from flask import Flask, Response, make_response, request, send_file, send_from_directory
 from agent_loop import AgentLoopError, agent_loop, compact_history
 from file_agent import search_index
+from file_agent import tts as aali_tts
 from file_agent import roles as aali_roles
 
 app = Flask(__name__)
@@ -1007,6 +1008,43 @@ def api_search():
         r["snippet"] = re.sub(r"</?mark>", "", r.get("snippet", ""))
     return {"ok": True, "total": data.get("total", 0),
             "results": data.get("results", [])}
+
+
+@app.route("/api/voice/synthesize", methods=["POST"])
+def api_voice_synthesize():
+    """Text -> WAV audio (Piper, local, offline). Wave 1 #3, 2026-09-25.
+
+    Body: {text, voice?, speed?}. Speed 0.5-2.0 (1 = normal). Arabic-first:
+    the default voice is the first Arabic voice installed. Gated by the
+    `tts` permission (guests 404; Track B 11.2 contract). Piper runs in an
+    ISOLATED venv via subprocess — no new deps in the server venv."""
+    denied = _require_role("tts")
+    if denied is not None:
+        return denied
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text") or "")
+    if not text.strip():
+        return make_response({"ok": False, "error": "empty text"}, 400)
+    result = aali_tts.synthesize(
+        text,
+        voice_id=payload.get("voice") or None,
+        speed=payload.get("speed", 1.0),
+    )
+    if not result.get("ok"):
+        return make_response({"ok": False,
+                              "error": result.get("error", "tts failed")}, 503)
+    response = send_file(result["wav"], mimetype="audio/wav")
+    response.headers["X-Aali-Voice"] = result.get("voice", "")
+    response.headers["X-Aali-Cached"] = "1" if result.get("cached") else "0"
+    return response
+
+
+@app.route("/api/voice/voices", methods=["GET"])
+def api_voice_voices():
+    """Installed TTS voices (Arabic first) + whether TTS is available."""
+    return {"ok": True, "available": aali_tts.available(),
+            "voices": aali_tts.list_voices(),
+            "default": aali_tts.default_voice()}
 
 
 @app.route("/api/health", methods=["GET"])
