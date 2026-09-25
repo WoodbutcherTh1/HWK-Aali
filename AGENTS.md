@@ -136,6 +136,27 @@ in parallel:
   — the watch-party dashboard for long jobs (block clock, per-process cards,
   GPU card, next-event line); Desktop shortcut on the owner's desktop
   (2026-09-25) launches it through scripts/mission_clock.bat.
+- **Wave 3: shares + prompt library (2026-09-25, Buffy)**: #8 shared
+  conversations — file_agent/shares.py: read-only tokened links to a
+  frozen copy of one conversation; token IS the credential (urlsafe,
+  stored sha-hashed, shown once), public /share/<token> Arabic-first
+  HTML-escaped page, expiry (7d default/30d max) + instant revoke →
+  same polite 404 as unknown tokens, store D:/hwk-data/shares.jsonl
+  (hashes only, lazy-pruned 500), ns-scoped list/revoke, key gate
+  exempts exactly /share/, audited content-free, guests uniform-404.
+  #9 prompt library — file_agent/prompts.py: 12 builtins (7 AR + 5 EN)
+  + per-ns custom prompts (cap 100) in prompt_library.jsonl; roles
+  gained "prompts" (user+); INSERT-only (composer fills, never
+  auto-sends). Endpoints /api/shares* + /api/prompts*; web 🔗 share
+  dialog + ✦ prompts dialog + slash cmds; CLI /share + /prompts.
+  LESSON: str.format() on an HTML template with CSS braces eats them
+  (KeyError: '--bg') — use replace("@TOK@") for templated pages.
+  LESSON: test helpers must not call request-scoped app helpers
+  (_user_ns) outside a context — replicate the key format instead.
+  Verified LIVE: share→page 200→unknown 404→content-free list→revoke→
+  404; prompts list/add/delete. Tests: tests/test_shares_prompts.py
+  (15). Suite 1028/9. Docs: docs/features/shared_conversations.md +
+  prompt_library.md. Wave 3 #7 (TTS) was already Wave 1 Feature [3].
 - **Wave 2: Projects + RAG (2026-09-25, Buffy)**: file_agent/projects.py —
   SQLite at D:/hwk-data/projects/aali_projects.db (projects/docs/doc_chunks
   + FTS5 unicode61 remove_diacritics 2); ns-scoped like search_index
