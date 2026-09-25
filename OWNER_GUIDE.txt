@@ -106,9 +106,30 @@ PUBLIC DOMAIN (added 2026-09-24)
   - After a REBOOT relaunch it with:
       scripts\launch_detached.py --log aali_tunnel --
         "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel run aali
-    (or make it a scheduled task - not yet done).
+    (no longer needed - see TUNNEL AUTOSTART below).
   - Cloudflare login cert: %USERPROFILE%\.cloudflared\cert.pem
     (already authorized as hmam.kadna@gmail.com).
+
+TUNNEL AUTOSTART (added 2026-09-25)
+  Scheduled task "HWK TunnelAutoStart" (at logon) runs
+  scripts\tunnel_autostart.bat: if no cloudflared.exe process is
+  running it boots `tunnel run aali` detached via
+  scripts\launch_detached.py (breakaway from the task's job object,
+  output -> D:\hwk-data\tunnel.log + tunnel.log.err; the launcher's
+  own pid line goes to tunnel_autostart.log). One-time setup
+  (login/DNS) stays manual by design: scripts\aali_domain.bat.
+  Test anytime:  schtasks /Run /TN "HWK TunnelAutoStart"
+  Remove:        schtasks /Delete /TN "HWK TunnelAutoStart" /F
+  NOTE 2026-09-25: the router's DNS resolver (fe80::1) intermittently
+  fails to resolve aali.dpdns.org; if the domain 'does not resolve'
+  while other sites work, it is the local resolver - service is up.
+  Consider setting this PC's DNS to 8.8.8.8 / 1.1.1.1.
+  ALSO 2026-09-25: server found WEDGED (health timeouts; request log
+  stopped 24h prior) after a watchdog revive into local-only mode.
+  Revived in key mode (master key, 0.0.0.0). If /api/health times out
+  locally again: netstat -ano | findstr :5055 -> kill that exact PID
+  -> run scripts\aali_share.bat (needs one UAC yes for its firewall
+  step) or relaunch with AALI_API_KEY set (see aali_share.bat env).
 
 DESKTOP SHORTCUTS (added 2026-09-22)
   Aali Desktop - his own app window (chat UI)
