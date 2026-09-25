@@ -34,6 +34,8 @@ from file_agent import tts as aali_tts
 from file_agent import roles as aali_roles
 from file_agent import preview as aali_preview
 from file_agent import redaction as aali_redaction
+from file_agent import shares as aali_shares
+from file_agent import prompts as aali_prompts
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
@@ -136,6 +138,8 @@ def _require_api_key():
         return None  # account auth (signup/verify/login/reset) is public
     if request.path == "/api/admin/handoff-redeem":
         return None  # single-use handoff trade: the ?ht= token IS the credential
+    if request.path.startswith("/share/"):
+        return None  # Wave 3: shared conversations — the token IS the credential
     if not request.path.startswith("/api/"):
         return None
     # Account sessions (X-Session-Token) authenticate too: resolve to the
@@ -1286,6 +1290,162 @@ def api_projects_activate():
     rec["project_id"] = str(pid)
     _save_session(rec)
     return {"ok": True, "project": _project_payload(p)}
+
+
+# ————— Wave 3 #8: shared conversations (read-only tokened links) —————
+
+def _share_session_record(sid: str) -> dict | None:
+    rec = _sessions.get(_user_ns(sid))
+    if rec is None:
+        return None
+    turns = rec.get("turns")
+    return rec if isinstance(turns, list) and turns else None
+
+
+@app.route("/api/shares", methods=["GET"])
+def api_shares_list():
+    """The caller's shares — content-free (hashes/titles/counters only)."""
+    denied = _require_role("own_sessions")
+    if denied is not None:
+        return denied
+    return {"ok": True, "shares": aali_shares.list_shares(_projects_ns())}
+
+
+@app.route("/api/shares", methods=["POST"])
+def api_shares_create():
+    """Share one of MY conversations: {sid, title?, ttl_hours?}.
+    The full link is returned ONCE; the store keeps only the hash."""
+    denied = _require_role("own_sessions")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    sid = str(body.get("sid") or "")
+    rec = _share_session_record(sid)
+    if rec is None:
+        return make_response({"ok": False, "error": "not found"}, 404)
+    turns = rec.get("turns") or []
+    out = aali_shares.create_share(
+        sid, turns, ns=_projects_ns(),
+        title=str(body.get("title") or ""),
+        ttl_hours=body.get("ttl_hours"),
+        owner=_audit_actor()[0])
+    audit.record("share_create", target=sid, actor=_audit_actor()[0],
+                 actor_kind=_audit_actor()[1], ip=_audit_ip())
+    return {"ok": True, "token": out["token"],
+            "expires": out["expires"], "turns": out["turns"],
+            "url": request.host_url.rstrip("/") + "/share/" + out["token"]}
+
+
+@app.route("/api/shares/<token_hash>", methods=["DELETE"])
+def api_shares_revoke(token_hash):
+    """Revoke one of MY shares by its content-free hash id."""
+    denied = _require_role("own_sessions")
+    if denied is not None:
+        return denied
+    if aali_shares.revoke(token_hash, ns=_projects_ns()):
+        audit.record("share_revoke", target=token_hash[:16],
+                     actor=_audit_actor()[0], actor_kind=_audit_actor()[1],
+                     ip=_audit_ip())
+        return {"ok": True}
+    return make_response({"ok": False, "error": "not found"}, 404)
+
+
+_SHARE_PAGE = """<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>آلي — محادثة مشتركة</title>
+<style>
+  :root{--bg:#252523;--panel:#2d2d2a;--line:#3a3a36;--fg:#f0ead8;--mut:#9a958a;--gold:#d4a94e}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,'Tajawal',sans-serif;background:var(--bg);color:var(--fg);line-height:1.7}
+  header{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  header h1{font-size:16px;margin:0}
+  header .m{color:var(--mut);font-size:12px;margin-inline-start:auto}
+  main{max-width:820px;margin:0 auto;padding:18px 22px 60px}
+  .turn{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:10px 0}
+  .who{font-size:12px;font-weight:700;margin-bottom:6px}
+  .who.user{color:var(--mut)} .who.assistant{color:var(--gold)}
+  .ts{color:var(--mut);font-size:11px;font-weight:400;margin-inline-start:8px}
+  .content{white-space:pre-wrap;word-wrap:break-word;font-size:14.5px}
+  .empty{color:var(--mut);text-align:center;padding:40px 0}
+</style>
+</head>
+<body>
+<header><h1>✦ آلي — محادثة مشتركة</h1><span class="m">قراءة فقط · @EXPIRES@</span></header>
+<main>
+@TURNS@
+</main>
+</body>
+</html>
+"""
+
+
+@app.route("/share/<token>")
+def share_view(token):
+    """PUBLIC read-only page for one shared conversation. The token IS the
+    credential; expired/revoked/unknown all render the same polite 404
+    page (never a hint about which)."""
+    rec = aali_shares.resolve_share(token)
+    if rec is None:
+        return make_response(_SHARE_PAGE
+                             .replace("@EXPIRES@", "—")
+                             .replace("@TURNS@",
+                                      '<p class="empty">هذه المحادثة غير متاحة — انتهت صلاحيتها أو أُلغي الرابط.</p>'), 404)
+    import html as _html
+    parts = []
+    for t in rec.get("turns", []):
+        who = "أنت" if t.get("role") == "user" else "آلي"
+        cls = "user" if t.get("role") == "user" else "assistant"
+        ts = time.strftime("%m-%d %H:%M", time.localtime(t.get("ts", 0) or 0)) \
+            if t.get("ts") else ""
+        parts.append(
+            '<div class="turn"><div class="who {cls}">{who}'
+            '<span class="ts">{ts}</span></div>'
+            '<div class="content">{content}</div></div>'.format(
+                cls=cls, who=_html.escape(who), ts=ts,
+                content=_html.escape(str(t.get("content", "")))))
+    expires_txt = "ينتهي " + time.strftime(
+        "%Y-%m-%d", time.localtime(rec.get("expires", 0)))
+    return (_SHARE_PAGE
+            .replace("@EXPIRES@", expires_txt)
+            .replace("@TURNS@",
+                     "\n".join(parts) or '<p class="empty">محادثة فارغة.</p>'))
+
+
+# ————— Wave 3 #9: prompt library —————
+
+@app.route("/api/prompts", methods=["GET"])
+def api_prompts_list():
+    denied = _require_role("prompts")
+    if denied is not None:
+        return denied
+    return {"ok": True, **aali_prompts.list_prompts(_projects_ns())}
+
+
+@app.route("/api/prompts", methods=["POST"])
+def api_prompts_add():
+    denied = _require_role("prompts")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    out = aali_prompts.add_prompt(
+        str(body.get("title") or ""), str(body.get("body") or ""),
+        _projects_ns(), icon=str(body.get("icon") or "✦"))
+    if not out.get("ok"):
+        return make_response(out, 400)
+    return out, 201
+
+
+@app.route("/api/prompts/<pid>", methods=["DELETE"])
+def api_prompts_delete(pid):
+    denied = _require_role("prompts")
+    if denied is not None:
+        return denied
+    out = aali_prompts.delete_prompt(pid, _projects_ns())
+    if not out.get("ok"):
+        return make_response(out, 404)
+    return out
 
 
 _TTS_RATE: dict[str, list[float]] = {}

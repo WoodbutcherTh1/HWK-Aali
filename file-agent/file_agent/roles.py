@@ -45,6 +45,7 @@ _PERMISSIONS: dict[str, tuple[str, ...]] = {
         "about",
         "tts",
         "projects",
+        "prompts",
     ),
     "admin": (
         "chat",
@@ -83,6 +84,7 @@ _PERMISSIONS: dict[str, tuple[str, ...]] = {
         "admin_panel",
         "tts",
         "projects",
+        "prompts",
         "models",
         "logs",
         "health_full",
@@ -110,6 +112,7 @@ _PERMISSIONS: dict[str, tuple[str, ...]] = {
         "admin_panel",
         "tts",
         "projects",
+        "prompts",
         "models",
         "logs",
         "health_full",
