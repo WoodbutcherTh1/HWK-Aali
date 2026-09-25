@@ -87,10 +87,28 @@ Persisted in `~/.aali_cli_voice`.
 
 ## Tests
 
-`tests/test_tts.py` (27): voice discovery + quality parsing +
+`tests/test_tts.py` (29): voice discovery + quality parsing +
 Arabic-first order, default pick, availability, empty/overlong/unknown
 rejections, cache hit + per-speed variants, speed clamping, invalid WAV
 rejection, mp3 success (faked ffmpeg) + honest WAV fallback, endpoint
 contract (200 audio, 400/413/429/404/503, remote user 200, remote
-anonymous 404, listing + alias). Suite: 938 passed / 9 skipped.
+anonymous 404, listing + alias), zero-chunk honest rejection +
+`_CHILD_SCRIPT` tripwire. Suite: 951 passed / 9 skipped.
 Live: 8/8 consecutive synths HTTP 200 after the true restart.
+
+## Zero-chunk incident (2026-09-25, fixed in commit 529b39e)
+
+Some texts made the child die with `wave.Error: '# channels not
+specified'` (rc=1): when espeak-ng phonemizes a text to NOTHING, piper
+yields ZERO chunks, its `set_wav_format` never runs, and the `with`
+block's `close()` blows up. The real trigger was client-side mojibake —
+shell-encoded curl bodies mangled the Arabic (`chars=27` in the log for
+an 18-char text), and un-phonemizable garbage produces no phonemes —
+direct clean runs always passed. Fix: the child pre-sets the WAV format
+itself (mono / 16-bit / voice sample_rate) and calls
+`synthesize_wav(..., set_wav_format=False)` inside a `finally`-close, so
+a no-chunk run closes cleanly as a 0-frame WAV and the PARENT rejects it
+honestly (size/frame validation → 503 "synthesis failed", never cached,
+never served). Verified live: the previously-failing text returns
+HTTP 200 + real audio, and punctuation-only/un-phonemizable input gets a
+clean honest 503.
