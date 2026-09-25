@@ -269,4 +269,87 @@ def test_openai_compat_loop_boilerplate_never_reaches_user(
     # 2 retries consumed, 3rd strike degrades to the honest apology.
     assert calls["n"] == 3
     assert "I stumbled putting together a proper answer" in out
+
+
+# ------------------------------------------------- identity truth (2026-09-25)
+# Owner transcript: "who are you ? whats your name ? and who bulid u ?" →
+# the soup /v1 brain answered "My identity was trained by Alibaba Cloud".
+# The base model's baked-in identity leaked through the one loop that had
+# no deterministic identity fast-path. These pin the three-layer fix.
+
+def test_identity_fast_name_en() -> None:
+    assert "Aali" in (al._identity_fast("what's your name?") or "")
+
+
+def test_identity_fast_name_ar() -> None:
+    assert "آلي" in (al._identity_fast("ما اسمك؟") or "")
+
+
+def test_identity_fast_builder_en() -> None:
+    out = al._identity_fast("who are you ? whats your name ? and who bulid u ?")
+    assert out is not None and "HWK" in out and "Alibaba" not in out
+
+
+def test_identity_fast_builder_ar() -> None:
+    out = al._identity_fast("من بنى البرنامج الذي تتحدث من خلاله؟")
+    assert out is not None and "فريق HWK" in out
+
+
+def test_identity_fast_ignores_normal_questions() -> None:
+    assert al._identity_fast("what did you build today?") is None
+    assert al._identity_fast("who created the light bulb?") is None
+
+
+def test_scrub_replaces_owner_leak_when_identity_asked() -> None:
+    leak = ("I am Aali (آلي), a local assistant running on your device. "
+            "My identity was trained by Alibaba Cloud and my creators include "
+            "several leading tech companies.")
+    out = al._scrub_identity_leak(leak, "who are you ? and who bulid u ?")
+    assert "Alibaba" not in out and "HWK" in out
+
+
+def test_scrub_kills_first_person_maker_claim_without_identity_ask() -> None:
+    leak = "I was trained by OpenAI on a large corpus."
+    assert "OpenAI" not in al._scrub_identity_leak(leak, "tell me something")
+
+
+def test_scrub_preserves_legit_third_party_talk() -> None:
+    ok = "OpenAI was created by Sam Altman. Anyway, your file is ready."
+    assert al._scrub_identity_leak(ok, "hello") == ok
+
+
+def test_scrub_arabic_maker_claim() -> None:
+    leak = "تم تدريبي بواسطة علي بابا سحابة."
+    out = al._scrub_identity_leak(leak, "مرحبا")
+    assert "علي بابا" not in out and "HWK" in out
+
+
+def test_scrub_noop_without_brands() -> None:
+    ok = "I am Aali, your local assistant."
+    assert al._scrub_identity_leak(ok, "hi") == ok
+
+
+def test_openai_compat_loop_identity_fast_path(monkeypatch, tmp_path) -> None:
+    """The soup /v1 brain path must return the deterministic identity card
+    WITHOUT contacting the server (the 2026-09-25 leak came through here)."""
+    def boom(*a, **k):  # any HTTP attempt = the leak path again
+        raise AssertionError("identity fast-path bypassed the brain")
+
+    monkeypatch.setattr(al, "requests", boom)
+    monkeypatch.setattr(al, "get_tool_definitions", boom)
+    out = al._openai_compat_loop(
+        user_message="who built you?",
+        root=tmp_path,
+        request_id="t",
+        base_url="http://x/v1/chat/completions",
+        api_key="k",
+        model="m",
+        max_iterations=8,
+        history=[],
+        policy="auto",
+        confirmed=False,
+        gate_state=None,
+        provider_label="test",
+    )
+    assert "HWK" in out and "Alibaba" not in out
     assert "As an AI language model" not in out

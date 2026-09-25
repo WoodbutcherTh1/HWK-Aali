@@ -615,7 +615,7 @@ export default function App() {
                   thinking: false,
                   text: reply,
                   pending: data.needs_confirm ? data.pending_action : undefined,
-                  suggestions: data.suggestions?.slice(0, 3).map(maskProviders),
+                  // owner decision 2026-09-25: no follow-up chips in the web UI
                 }
               : x
           )
@@ -886,9 +886,6 @@ export default function App() {
     if (!el) return;
     setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
   };
-
-  // suggestion chips belong only under the latest assistant reply
-  const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
 
   const SlashMenu = slashOpen && slashMatches.length > 0 && (
     <div className="slash-menu">
@@ -1396,15 +1393,6 @@ export default function App() {
                             إلغاء
                           </button>
                         </div>
-                      </div>
-                    )}
-                    {!m.thinking && m.role === "assistant" && m.id === lastAssistantId && m.suggestions && m.suggestions.length > 0 && (
-                      <div className="suggestions">
-                        {m.suggestions.map((s) => (
-                          <button key={s} type="button" className="chip" title={s} onClick={() => void send(s)}>
-                            {s}
-                          </button>
-                        ))}
                       </div>
                     )}
                   </div>

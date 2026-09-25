@@ -473,6 +473,8 @@ def api_ask():
     _append_turn(record, "assistant", reply)
     _meter_chars(0, len(reply))
     body = {"ok": ok, "reply": reply, "sid": sid}
+    # Owner decision 2026-09-25: no follow-up chips in the web UI (they
+    # cluttered every reply). The API still ships them; clients opt in.
     from file_agent import suggestions
     body["suggestions"] = suggestions.suggest(reply, message)
     if gate_state.get("blocked"):
@@ -618,6 +620,7 @@ def api_ask_stream():
         if result.get("ok"):
             from file_agent import suggestions
             result["suggestions"] = suggestions.suggest(reply, message)
+        # stream done-event keeps result["suggestions"] passthrough below
         if gate_state.get("blocked"):
             result["needs_confirm"] = True
             result["pending_action"] = {
