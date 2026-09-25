@@ -136,6 +136,31 @@ in parallel:
   — the watch-party dashboard for long jobs (block clock, per-process cards,
   GPU card, next-event line); Desktop shortcut on the owner's desktop
   (2026-09-25) launches it through scripts/mission_clock.bat.
+- **Wave 2: Projects + RAG (2026-09-25, Buffy)**: file_agent/projects.py —
+  SQLite at D:/hwk-data/projects/aali_projects.db (projects/docs/doc_chunks
+  + FTS5 unicode61 remove_diacritics 2); ns-scoped like search_index
+  (u<key_id> / local ""); retrieval BM25 precision-first: AND-all-tokens,
+  OR-ranked fallback (query words absent from docs kill AND — normal for
+  questions), bm25()<=0 relevance gate, snippet() marks, malformed-MATCH
+  phrase fallback; chunking 700/80 overlap ONLY when a doc needs it (a
+  short doc stays ONE chunk); honest empty context ("", []) — no fake
+  citations; ask paths (/api/ask + stream) inject the reference block +
+  [تعليمات المشروع: …] and return rag_sources (UI: 📚 من قاعدة المعرفة
+  chips) or an honest rag_note when docs exist but nothing matched;
+  deleted-project sessions detach silently; roles gained "projects"
+  (user+, guests uniform-404). Endpoints: CRUD + docs + retrieve +
+  /api/projects/active bind/unbind (sid must exist — created by a first
+  ask). Web: 🗂️ المشاريع nav (ProjectsDialog manager), gold project chip
+  in chat header, citation chips; CLI /projects list|new|use|off|docs|add
+  (paste-terminated +++). KB chunks never touch the conversation-search
+  index (test-pinned). Tests: tests/test_projects.py (25). Docs:
+  docs/features/projects_rag.md. Suite 1013/9. LESSONS: multi-statement
+  schema needs executescript() not execute(); planted sessions for ask
+  tests need FRESH timestamps (_get_session prunes stale records, which
+  silently dropped the bound project_id — endpoints passed while ask
+  tests failed, a confusing split). LIVE: project created → doc added →
+  retrieve preview → bind → ask answered from the KB with the citation
+  ("يوم الخميس الساعة السادسة مساءً بعد موافقة المالك") → cleanup.
 - **Track B 11.6-11.7 + Aali Monitor (2026-09-25, Buffy)**: (1) role-gated
   system routes — /api/system/training (owner; aali_jobs snapshot board),
   /api/system/models (owner+dev; served brain + D:/hwk-models metadata),

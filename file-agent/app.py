@@ -452,6 +452,35 @@ def api_ask():
     record = _get_session(sid)
     if sid not in _sessions:
         _save_session(record)
+    # Active project (Wave 2): RAG context + project instruction are
+    # injected as REFERENCE text — retrieval is content-free to the model's
+    # tools (it cannot fetch docs itself), never executed, and an empty
+    # knowledge base simply changes nothing (no fake context, ever).
+    rag_sources: list[dict] = []
+    rag_note: str | None = None
+    project = None
+    pid = str(record.get("project_id") or "")
+    if pid and hasattr(aali_projects, "get_project"):
+        project = aali_projects.get_project(pid, _projects_ns())
+        if project is None:
+            # Project gone (deleted/archived by another client): detach
+            # silently so the session keeps working.
+            record.pop("project_id", None)
+            _save_session(record)
+    if project:
+        block, rag_sources = aali_projects.build_rag_context(
+            message, project, _projects_ns())
+        instruction = str(project.get("instruction") or "").strip()
+        if block:
+            message = f"{message}\n\n{block}"
+        elif rag_sources == [] and aali_projects.project_stats(
+                _projects_ns()).get("projects"):
+            pass  # kb exists but nothing matched — silence is honest here
+        if instruction:
+            message = f"[تعليمات المشروع: {instruction}]\n{message}"
+        if rag_sources == [] and aali_projects.list_documents(
+                pid, _projects_ns()).get("docs"):
+            rag_note = "قاعدة معرفة المشروع لا تحتوي شيئاً ذا صلة بهذا السؤال"
     _append_turn(record, "user", message)
     _meter_chars(len(message), 0)
     gate_state: dict[str, object] = {}
@@ -477,6 +506,13 @@ def api_ask():
     _append_turn(record, "assistant", reply)
     _meter_chars(0, len(reply))
     body = {"ok": ok, "reply": reply, "sid": sid}
+    if rag_sources:
+        body["rag_sources"] = [
+            {"doc_id": s["doc_id"], "doc_name": s["doc_name"],
+             "chunk": s["chunk"], "snippet": s["snippet"]}
+            for s in rag_sources]
+    if rag_note:
+        body["rag_note"] = rag_note
     # Owner decision 2026-09-25: no follow-up chips in the web UI (they
     # cluttered every reply). The API still ships them; clients opt in.
     from file_agent import suggestions
@@ -595,6 +631,26 @@ def api_ask_stream():
     record = _get_session(sid)
     if sid not in _sessions:
         _save_session(record)
+    # Active project RAG (Wave 2) — same injection contract as /api/ask.
+    rag_sources: list[dict] = []
+    rag_note: str | None = None
+    pid = str(record.get("project_id") or "")
+    if pid:
+        project = aali_projects.get_project(pid, _projects_ns())
+        if project is None:
+            record.pop("project_id", None)
+            _save_session(record)
+        else:
+            block, rag_sources = aali_projects.build_rag_context(
+                message, project, _projects_ns())
+            instruction = str(project.get("instruction") or "").strip()
+            if block:
+                message = f"{message}\n\n{block}"
+            if instruction:
+                message = f"[تعليمات المشروع: {instruction}]\n{message}"
+            if rag_sources == [] and aali_projects.list_documents(
+                    pid, _projects_ns()).get("docs"):
+                rag_note = "قاعدة معرفة المشروع لا تحتوي شيئاً ذا صلة بهذا السؤال"
     _append_turn(record, "user", message)
 
     request_id = new_request_id()
@@ -621,6 +677,13 @@ def api_ask_stream():
         # The turn is recorded HERE, inside the worker thread, so the session
         # keeps the answer even if the client disconnects mid-stream.
         _append_turn(record, "assistant", reply)
+        if rag_sources:
+            result["rag_sources"] = [
+                {"doc_id": s["doc_id"], "doc_name": s["doc_name"],
+                 "chunk": s["chunk"], "snippet": s["snippet"]}
+                for s in rag_sources]
+        if rag_note:
+            result["rag_note"] = rag_note
         if result.get("ok"):
             from file_agent import suggestions
             result["suggestions"] = suggestions.suggest(reply, message)
@@ -1015,6 +1078,214 @@ def api_search():
         r["snippet"] = re.sub(r"</?mark>", "", r.get("snippet", ""))
     return {"ok": True, "total": data.get("total", 0),
             "results": data.get("results", [])}
+
+
+# ————— Wave 2: Projects + RAG knowledge base —————
+
+from file_agent import projects as aali_projects  # noqa: E402
+
+
+def _projects_ns() -> str:
+    """The caller's project namespace — mirrors the search ns contract:
+    key-mode callers get u<key_id>, local mode gets ''. Owner via master
+    key shares the LOCAL namespace (it is their machine)."""
+    sess = _account_session()
+    if sess and sess.get("key_id"):
+        return f"u{sess['key_id']}"
+    auth = _auth_state()
+    if auth and not auth["is_admin"] and auth.get("key_id"):
+        return f"u{auth['key_id']}"
+    return ""
+
+
+def _project_payload(p: dict | None) -> dict:
+    if not p:
+        return {}
+    return {"id": p["id"], "name": p["name"],
+            "instruction": p.get("instruction", ""),
+            "doc_count": p.get("doc_count", 0),
+            "doc_chars": p.get("doc_chars", 0),
+            "created_at": p.get("created_at"),
+            "updated_at": p.get("updated_at")}
+
+
+@app.route("/api/projects", methods=["GET"])
+def api_projects_list():
+    """List the caller's projects (newest first, doc counts included)."""
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    return {"ok": True,
+            "projects": [_project_payload(p) for p in
+                         aali_projects.list_projects(_projects_ns())]}
+
+
+@app.route("/api/projects", methods=["POST"])
+def api_projects_create():
+    """Create a project: {name, instruction?}. 400 on empty name."""
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    out = aali_projects.create_project(
+        str(body.get("name") or ""), _projects_ns(),
+        instruction=str(body.get("instruction") or ""))
+    if not out.get("ok"):
+        return make_response(out, 400)
+    return {"ok": True, "project": _project_payload(out["project"])}, 201
+
+
+@app.route("/api/projects/<pid>", methods=["GET"])
+def api_project_get(pid):
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    p = aali_projects.get_project(pid, _projects_ns())
+    if p is None:
+        return make_response({"ok": False, "error": "not found"}, 404)
+    return {"ok": True, "project": _project_payload(p)}
+
+
+@app.route("/api/projects/<pid>", methods=["PATCH"])
+def api_project_update(pid):
+    """Partial update: {name?, instruction?, archived?}."""
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    out = aali_projects.update_project(
+        pid, _projects_ns(),
+        name=body.get("name"), instruction=body.get("instruction"),
+        archived=body.get("archived"))
+    if not out.get("ok"):
+        status = 404 if out.get("error") == "المشروع غير موجود" else 400
+        return make_response(out, status)
+    return {"ok": True, "project": _project_payload(out["project"])}
+
+
+@app.route("/api/projects/<pid>", methods=["DELETE"])
+def api_project_delete(pid):
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    out = aali_projects.delete_project(pid, _projects_ns())
+    if not out.get("ok"):
+        return make_response(out, 404)
+    return out
+
+
+@app.route("/api/projects/<pid>/docs", methods=["GET"])
+def api_project_docs(pid):
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    out = aali_projects.list_documents(pid, _projects_ns())
+    if not out.get("ok"):
+        return make_response(out, 404)
+    return out
+
+
+@app.route("/api/projects/<pid>/docs", methods=["POST"])
+def api_project_docs_add(pid):
+    """Add a knowledge-base doc: {name, content} (text; attachments flow
+    stays the analyze-first path). 400 empty/oversized/cap; 404 unknown."""
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    out = aali_projects.add_document(
+        pid, str(body.get("name") or ""), str(body.get("content") or ""),
+        _projects_ns(), source=str(body.get("source") or "upload"))
+    if not out.get("ok"):
+        status = 404 if out.get("error") == "المشروع غير موجود" else 400
+        return make_response(out, status)
+    return out, 201
+
+
+@app.route("/api/projects/<pid>/docs/<doc_id>", methods=["GET"])
+def api_project_doc_content(pid, doc_id):
+    """Full content of one knowledge-base doc (owner reads their own)."""
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    out = aali_projects.get_document_content(pid, doc_id, _projects_ns())
+    if not out.get("ok"):
+        return make_response(out, 404)
+    return out
+
+
+@app.route("/api/projects/<pid>/docs/<doc_id>", methods=["DELETE"])
+def api_project_doc_delete(pid, doc_id):
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    out = aali_projects.remove_document(pid, doc_id, _projects_ns())
+    if not out.get("ok"):
+        return make_response(out, 404)
+    return out
+
+
+@app.route("/api/projects/<pid>/retrieve", methods=["POST"])
+def api_project_retrieve(pid):
+    """Preview retrieval: {query, top_k?} -> ranked chunks + scores.
+    Used by the UI's knowledge-base tester and the CLI."""
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    query = str(body.get("query") or "")
+    if not query.strip():
+        return make_response({"ok": False, "error": "empty query"}, 400)
+    hits = aali_projects.retrieve(
+        pid, query, _projects_ns(),
+        top_k=int(body.get("top_k") or aali_projects.TOP_K_DEFAULT))
+    return {"ok": True, "hits": hits}
+
+
+@app.route("/api/projects/active", methods=["GET"])
+def api_projects_active():
+    """The ACTIVE project for the caller's current session (chat chip)."""
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    sid = request.args.get("sid") or ""
+    key = _user_ns(sid) if sid else ""
+    rec = _sessions.get(key) if key else None
+    pid = str((rec or {}).get("project_id") or "")
+    if not pid:
+        return {"ok": True, "project": None}
+    p = aali_projects.get_project(pid, _projects_ns())
+    return {"ok": True,
+            "project": _project_payload(p) if p else None}
+
+
+@app.route("/api/projects/active", methods=["POST"])
+def api_projects_activate():
+    """Bind/unbind the ACTIVE project to the caller's session:
+    {sid, project_id|null}. Binding stores the id in the session record
+    (kept out of the indexed chat turns); unbind detaches. 404 unknown
+    project; guests never get here (uniform 404 above)."""
+    denied = _require_role("projects")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    sid = str(body.get("sid") or "")
+    if not sid:
+        return make_response({"ok": False, "error": "sid required"}, 400)
+    rec = _sessions.get(_user_ns(sid))
+    if rec is None:
+        return make_response({"ok": False, "error": "session not found"}, 404)
+    pid = body.get("project_id")
+    if pid in (None, "", False):
+        rec.pop("project_id", None)
+        _save_session(rec)
+        return {"ok": True, "project": None}
+    p = aali_projects.get_project(str(pid), _projects_ns())
+    if p is None:
+        return make_response({"ok": False, "error": "not found"}, 404)
+    rec["project_id"] = str(pid)
+    _save_session(rec)
+    return {"ok": True, "project": _project_payload(p)}
 
 
 _TTS_RATE: dict[str, list[float]] = {}
