@@ -24,6 +24,18 @@ class FileAgentError(Exception):
 DEFAULT_MAX_CHARS = 100_000
 DEFAULT_MAX_ENTRIES = 1_000
 
+# Part 5.5 (pentest): Windows reserved device names + path-y payloads that
+# must NEVER become filenames. NUL swallows writes silently, CON opens the
+# console, and %-encoded traversal strings are decoy landmines. Refused
+# structurally in _resolve, exactly like the aali_node sandbox.
+_DEVICE_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
+    "LPT8", "LPT9",
+}
+_PATHY_PAYLOAD_RE = re.compile(r"%2e|%2f|%5c|\\x2e|\\x5c", re.IGNORECASE)
+
 # Directories never searched or listed recursively (build junk / VCS / deps).
 SKIP_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
@@ -58,10 +70,22 @@ def _root(workspace_root: str | Path) -> Path:
 def _resolve(path: str, workspace_root: str | Path, *, must_exist: bool = False) -> tuple[Path, Path]:
     if not isinstance(path, str) or not path.strip():
         raise FileAgentError("path must be a non-empty relative string")
+    # Part 5.5: device names and encoded-traversal payloads are refused by
+    # NAME, before any resolution (NUL would otherwise swallow writes).
+    probe = path.replace("\\", "/")
+    for segment in probe.split("/"):
+        stem = segment.split(".")[0].split(":")[0].strip().upper()
+        if stem in _DEVICE_NAMES:
+            raise FileAgentError(
+                f"Refused: '{segment}' is a reserved Windows device name")
+    if _PATHY_PAYLOAD_RE.search(path):
+        raise FileAgentError("Refused: encoded path payload in the name")
     root = _root(workspace_root)
     candidate = Path(path)
     if candidate.is_absolute():
         raise FileAgentError("Absolute paths are not allowed")
+    if re.match(r"^[A-Za-z]:", path):
+        raise FileAgentError("Drive paths are not allowed")
     resolved = (root / candidate).resolve(strict=False)
     try:
         resolved.relative_to(root)
@@ -352,6 +376,27 @@ def run_command(command: str, workspace_root: str | Path, *,
         "push", "reset", "clean", "rebase", "cherry-pick", "merge",
     }:
         raise FileAgentError("Destructive or remote git commands are not allowed.")
+    # Part 5.5 (pentest): flag-driven cwd escapes. `git -C ../..`, `npm
+    # --prefix ..`, `pip --target D:/x` etc. let an allow-listed command
+    # operate OUTSIDE the workspace without ever naming a path the sandbox
+    # sees. The cwd is the sandbox for command side-effects - any argument
+    # that changes it must point back inside the workspace.
+    for flag, value_at in (("-c", 1), ("--git-dir", 1), ("--work-tree", 1),
+                           ("--prefix", 1), ("--target", 1), ("--out", 1),
+                           ("--outdir", 1), ("--output", 1), ("-o", 1),
+                           ("--directory", 1)):
+        for i, part in enumerate(parts):
+            if part.lower() == flag and i + value_at < len(parts):
+                candidate = parts[i + value_at]
+                if candidate.startswith("-"):
+                    continue
+                try:
+                    resolved = (Path(workspace_root) / candidate).resolve()
+                    resolved.relative_to(_root(workspace_root))
+                except (ValueError, OSError, RuntimeError):
+                    raise FileAgentError(
+                        f"Argument '{flag} {candidate}' would leave the "
+                        "workspace sandbox.") from None
     if _looks_like_secret_exfiltration(command):
         # Lesson (nx/npm 2025, Samsung 2023): commands that dump environment
         # variables or config files are how API keys leave a machine. Aali

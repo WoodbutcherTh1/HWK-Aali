@@ -103,6 +103,42 @@ def _hash_password(password: str, salt: str) -> str:
     ).hex()
 
 
+# ————— brute-force guards (Part 5.4) —————
+# Password guessing and 6-digit code guessing were previously UNBOUNDED.
+# In-memory (resets on restart) is deliberate: the per-account lockout is
+# the second line behind the session/key gates, and it must never be the
+# thing that permanently locks the owner out of their own machine.
+_MAX_FAILED_LOGINS = 5
+_LOGIN_LOCKOUT_S = 300.0          # 5 minutes
+_MAX_CODE_ATTEMPTS = 5            # wrong 6-digit codes per pending record
+_FAILED_LOGINS: dict[str, dict[str, float]] = {}
+
+
+def _login_locked(email: str) -> float:
+    """Seconds remaining in lockout (0 = not locked)."""
+    st = _FAILED_LOGINS.get(email)
+    if not st:
+        return 0.0
+    remaining = st.get("until", 0.0) - _now()
+    return max(0.0, remaining)
+
+
+def _record_login_failure(email: str) -> None:
+    st = _FAILED_LOGINS.setdefault(email, {"count": 0.0, "until": 0.0})
+    st["count"] = float(st.get("count", 0)) + 1
+    if st["count"] >= _MAX_FAILED_LOGINS:
+        st["until"] = _now() + _LOGIN_LOCKOUT_S
+        st["count"] = 0.0
+
+
+def _bump_code_attempts(pend: dict) -> bool:
+    """Count a wrong code on a pending verify/reset record. Returns True
+    when the record is exhausted (caller must drop it and tell the user
+    to request a fresh code)."""
+    pend["attempts"] = int(pend.get("attempts", 0)) + 1
+    return pend["attempts"] >= _MAX_CODE_ATTEMPTS
+
+
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -168,6 +204,10 @@ def verify(email: str, code: str) -> dict:
             del _pending[email]
             return {"ok": False, "error": "انتهت صلاحية الرمز — سجّل من جديد"}
         if not secrets.compare_digest(pend["code_hash"], _token_hash((code or "").strip())):
+            if _bump_code_attempts(pend):
+                del _pending[email]
+                return {"ok": False,
+                        "error": "عدد محاولات كثير — سجّل من جديد لتحصل على رمز آخر"}
             return {"ok": False, "error": "رمز خاطئ"}
         del _pending[email]
         role = "admin" if _is_admin_email(email) else "user"
@@ -188,16 +228,29 @@ def verify(email: str, code: str) -> dict:
 
 def login(email: str, password: str) -> dict:
     """Password sign-in. Admin emails get role=admin even if stored as user
-    (the list is the source of truth). Returns a session token."""
+    (the list is the source of truth). Returns a session token.
+
+    Part 5.4: 5 failed attempts lock the account for 5 minutes (the lock
+    also rejects the CORRECT password — that is what a lockout is)."""
     email = _normalize(email)
     with _lock:
         if not _accounts:
             _load()
+        remaining = _login_locked(email)
+        if remaining > 0:
+            return {"ok": False,
+                    "error": "تم إيقاف تسجيل الدخول مؤقتاً لهذا البريد بسبب محاولات فاشلة متكررة. حاول بعد قليل."}
         rec = _accounts.get(email)
         if not rec or not rec.get("verified"):
+            # Same message for unknown email and wrong password (no user
+            # enumeration); unknown emails still count toward nothing but
+            # rate naturally by being worthless to the attacker.
+            _record_login_failure(email)
             return {"ok": False, "error": "بريد أو كلمة سر غير صحيحة"}
         if not secrets.compare_digest(rec["pw_hash"], _hash_password(password, rec["salt"])):
+            _record_login_failure(email)
             return {"ok": False, "error": "بريد أو كلمة سر غير صحيحة"}
+        _FAILED_LOGINS.pop(email, None)
         rec["last_login"] = _now()
         if _is_admin_email(email):
             rec["role"] = "admin"
@@ -276,6 +329,10 @@ def reset_confirm(email: str, code: str, new_password: str) -> dict:
             del _pending[email]
             return {"ok": False, "error": "انتهت صلاحية الرمز — اطلب رمزاً جديداً"}
         if not secrets.compare_digest(pend["code_hash"], _token_hash((code or "").strip())):
+            if _bump_code_attempts(pend):
+                del _pending[email]
+                return {"ok": False,
+                        "error": "عدد محاولات كثير — اطلب رمزاً جديداً"}
             return {"ok": False, "error": "رمز خاطئ"}
         del _pending[email]
         rec = _accounts.get(email)

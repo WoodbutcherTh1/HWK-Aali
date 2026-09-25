@@ -136,6 +136,27 @@ in parallel:
   — the watch-party dashboard for long jobs (block clock, per-process cards,
   GPU card, next-event line); Desktop shortcut on the owner's desktop
   (2026-09-25) launches it through scripts/mission_clock.bat.
+- **Part 5 security track 5.4-5.5 (2026-09-25, Buffy)**: (5.4 rate-limit
+  review) found login/verify/reset code-guessing UNBOUNDED — fixed:
+  login 5 fails → 5-min in-memory lockout (rejects the CORRECT password
+  while locked; success clears the counter; deliberate reset-on-restart
+  so the owner can never be permanently locked out of his own machine);
+  verify/reset_confirm 5 wrong 6-digit codes burn the pending record
+  (code guessing now bounded). Existing limiters audited OK: register
+  per-IP daily, search/TTS 30/min, key/session daily caps. (5.5 sandbox
+  pentest) tests/test_sandbox_pentest.py adversarial suite — FOUR real
+  findings fixed: (1) run_command flag-driven cwd escapes (git -C ../..,
+  npm --prefix, pip --target) executed OUTSIDE the workspace — the
+  cwd-arg guard now resolves those args and refuses escapes (FIRST
+  VERSION HAD A CASE BUG: flag "-C".lower() vs part "-C" — the pentest
+  test caught the guard not firing; lowercase both sides); (2) Windows
+  device names (NUL swallows writes, CON opens console) — refused by
+  name in _resolve before resolution; (3) %-encoded path payloads
+  (%2e%2e%2f) — refused by pattern; (4) drive-letter relatives refused
+  explicitly. Confirmed solid: traversal, UNC, ADS streams, symlink-out
+  (skipped where host lacks symlink privilege), type confusion.
+  Tests: tests/test_sandbox_pentest.py (31). Suite 1073/10.
+  Docs: docs/features/rate_limits_sandbox.md.
 - **Part 5 security track 5.1-5.3 (2026-09-25, Buffy)**: (5.1)
   scripts/prompt_leak_probe.py — 15 AR/EN injection payloads vs the LIVE
   brain via /api/ask (needs AALI_API_KEY env — without it the uniform-404

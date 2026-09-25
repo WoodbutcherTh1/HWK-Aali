@@ -35,5 +35,12 @@
 - 2026-09-25 17:55: DONE. 5.1 baseline 15 cases → 1 leak (E08 protocol
   coercion; L1 spills seen once in an earlier stochastic run); 5.2 filter
   + 5.3 canaries shipped and live; re-run 15/15 clean. Suite 1043/9.
-  Docs: docs/features/prompt_leak_defense.md. 5.4/5.5 remain queued.
-- status: done
+  Docs: docs/features/prompt_leak_defense.md.
+- 2026-09-25 18:15: 5.4-5.5 DONE. 5.4: login/verify/reset unbounded
+  guessing FIXED (5-fail lockout + code burns); existing limiters
+  audited — table in docs/features/rate_limits_sandbox.md. 5.5: pentest
+  suite (31 tests) — 4 real findings fixed (flag-cwd escape with a case
+  bug in my own first guard, caught by the test; device names; encoded
+  payloads; drive relatives); traversal/UNC/ADS/symlink confirmed solid.
+  Suite 1073/10.
+- status: done (5.1-5.5)
