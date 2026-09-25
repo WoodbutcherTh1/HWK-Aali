@@ -31,6 +31,25 @@ def subscribe(request_id: str) -> "queue.Queue[dict[str, Any]]":
 
 def unsubscribe(request_id: str) -> None:
     _subscribers.pop(request_id, None)
+    _scratchpads.pop(request_id, None)
+
+
+# ————— per-request scratchpad (2026-09-24) —————
+# A running work log the user can watch: every tool step appends one line and
+# the WHOLE pad is re-emitted as a `scratchpad` event, so a client joining
+# mid-request still sees the full story. Capped (30 lines / 200 requests) so
+# a long session or a client that never unsubscribes cannot grow it unbounded.
+_scratchpads: dict[str, "deque[str]"] = {}
+_MAX_SCRATCHPAD_REQUESTS = 200
+
+
+def scratchpad_event(request_id: str, line: str) -> None:
+    """Append one line to the request's scratchpad and emit the full pad."""
+    if len(_scratchpads) >= _MAX_SCRATCHPAD_REQUESTS and request_id not in _scratchpads:
+        _scratchpads.pop(next(iter(_scratchpads)), None)
+    pad = _scratchpads.setdefault(request_id, deque(maxlen=30))
+    pad.append(str(line)[:300])
+    log_event(request_id, "scratchpad", content="\n".join(pad), lines=len(pad))
 
 
 def log_file_path() -> Path:

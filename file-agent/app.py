@@ -541,6 +541,10 @@ def api_ask_stream():
     policy = str(payload.get("policy", "auto"))
     confirmed = bool(payload.get("confirm", False))
     provider = str(payload.get("provider", "auto"))
+    # 2026-09-24: verbose mode — when true the stream also carries `cot`
+    # (the model's visible reasoning per turn) events. Clients that keep
+    # quiet simply never ask for them.
+    verbose = bool(payload.get("verbose", False))
 
     # SaaS scope (STEP 4): same per-user contract as /api/ask.
     saas = _apply_saas_scope(payload)
@@ -612,6 +616,9 @@ def api_ask_stream():
     worker.start()
 
     ACTIVITY_EVENTS = ("provider_selected", "tool_requested", "tool_result")
+    # 2026-09-24: the “show your work” events — cot only when asked for,
+    # scratchpad always (it is the compact running log of what is happening).
+    VERBOSE_EVENTS = ("cot",)
 
     def _generate():
         last_beat = time.time()
@@ -646,6 +653,26 @@ def api_ask_stream():
                     yield (
                         "event: activity\ndata: "
                         + json.dumps(data, ensure_ascii=False) + "\n\n"
+                    )
+                elif event.get("event") == "scratchpad":
+                    pad = {
+                        "event": "scratchpad",
+                        "content": str(event.get("content", "")),
+                        "lines": event.get("lines"),
+                    }
+                    yield (
+                        "event: scratchpad\ndata: "
+                        + json.dumps(pad, ensure_ascii=False) + "\n\n"
+                    )
+                elif verbose and event.get("event") in VERBOSE_EVENTS:
+                    cot = {
+                        "event": "cot",
+                        "iteration": event.get("iteration"),
+                        "text": str(event.get("text", "")),
+                    }
+                    yield (
+                        "event: cot\ndata: "
+                        + json.dumps(cot, ensure_ascii=False) + "\n\n"
                     )
                 if result.get("done") and events.empty():
                     break

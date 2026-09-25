@@ -112,3 +112,161 @@ def test_echo_reply_retries_then_answers(monkeypatch) -> None:
     out = al._ollama_agent_loop(
         user, Path("."), "test", max_iterations=4, history=[])
     assert out == "I'm great, thanks for asking!"
+
+
+# ------------------------------- boilerplate disclaimer guard (2026-09-24)
+# Owner transcript: "tell me more about what you built today" → "As an AI
+# language model, I don't have the ability to build things…" — a shame for a
+# machine that builds things all day. The guard retries with feedback; a
+# second strike passes through (never loops forever).
+
+def test_boilerplate_detector_catches_the_shame() -> None:
+    assert al._is_boilerplate_disclaimer(
+        "As an AI language model, I don't have the ability to build things "
+        "in the traditional sense, but I can provide information.")
+    assert al._is_boilerplate_disclaimer(
+        "I'm sorry, my current capabilities are limited to assisting with "
+        "tasks within the confines of the workspace.")
+    assert al._is_boilerplate_disclaimer(
+        "أنا مجرد نموذج ذكاء اصطناعي ولا أستطيع تنفيذ الأوامر على جهازك.")
+
+
+def test_boilerplate_detector_spares_real_answers() -> None:
+    # Real statements about the world — no self-reference — must NOT trip it.
+    assert not al._is_boilerplate_disclaimer(
+        "You cannot divide by zero — it is undefined in mathematics.")
+    assert not al._is_boilerplate_disclaimer(
+        "Dogs have been domesticated for thousands of years and developed "
+        "into a wide variety of breeds.")
+    # A genuine, useful refusal states what it WILL do instead.
+    assert not al._is_boilerplate_disclaimer(
+        "I can't delete files outside the workspace, but I can move them "
+        "into the workspace folder for you.")
+
+
+def test_ollama_loop_retries_boilerplate_then_answers(monkeypatch) -> None:
+    bad = "As an AI language model, I don't have the ability to build things."
+
+    def fake_chat(messages, **kwargs):
+        if len(messages) == 2:  # first turn: the shame
+            return {"content": bad}
+        assert len(messages) == 4
+        feedback = messages[-1]["content"]
+        assert "آلي" in feedback and "أي تنصّل" in feedback
+        return {"content": json.dumps(
+            {"tool": "final", "content":
+             "Today I wired the remote-access tunnel and the key-mode server."},
+            ensure_ascii=False)}
+
+    monkeypatch.setattr(al, "_ollama_chat", fake_chat)
+    monkeypatch.setattr(al, "_local_tool_call", lambda m: None)
+    out = al._ollama_agent_loop(
+        "tell me more about what you built today", Path("."), "test",
+        max_iterations=4, history=[])
+    assert "tunnel" in out
+
+
+def test_ollama_loop_boilerplate_never_reaches_user(monkeypatch) -> None:
+    bad = "My current capabilities are limited to basic file management."
+    monkeypatch.setattr(al, "_ollama_chat", lambda m, **k: {"content": bad})
+    monkeypatch.setattr(al, "_local_tool_call", lambda m: None)
+    out = al._ollama_agent_loop(
+        "what did you build", Path("."), "test", max_iterations=8, history=[])
+    # Two feedback retries, then an honest apology — the shame never passes.
+    assert "I stumbled putting together a proper answer" in out
+    assert "limited to basic file management" not in out
+
+
+def test_ollama_loop_boilerplate_arabic_gets_arabic_apology(monkeypatch) -> None:
+    bad = "أنا مجرد نموذج ذكاء اصطناعي ولا أستطيع بناء التطبيقات."
+    monkeypatch.setattr(al, "_ollama_chat", lambda m, **k: {"content": bad})
+    monkeypatch.setattr(al, "_local_tool_call", lambda m: None)
+    out = al._ollama_agent_loop(
+        "ماذا بنيت اليوم؟", Path("."), "test", max_iterations=8, history=[])
+    assert "تعثّرت" in out
+    assert "مجرد نموذج" not in out
+
+
+def test_openai_compat_loop_retries_boilerplate_then_answers(
+        monkeypatch, tmp_path) -> None:
+    bad = ("I'm sorry, my current capabilities are limited to assisting "
+           "with basic file management tasks.")
+    good = "Today I shipped the remote-access tunnel and the key-mode server."
+    calls = {"n": 0}
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            calls["n"] += 1
+            content = bad if calls["n"] == 1 else good
+            return {"choices": [{"message":
+                    {"role": "assistant", "content": content}}]}
+
+        def raise_for_status(self):
+            pass
+
+    class FakeClient:
+        @staticmethod
+        def post(*a, **k):
+            return FakeResp()
+
+    monkeypatch.setattr(al, "get_tool_definitions", lambda: [])
+    out = al._openai_compat_loop(
+        user_message="tell me more about what you built today",
+        root=tmp_path,
+        request_id="t",
+        base_url="http://x/v1/chat/completions",
+        api_key="k",
+        model="m",
+        max_iterations=4,
+        history=[],
+        policy="auto",
+        confirmed=False,
+        gate_state=None,
+        provider_label="test",
+        client=FakeClient)
+    assert calls["n"] == 2
+    assert out == good
+
+
+def test_openai_compat_loop_boilerplate_never_reaches_user(
+        monkeypatch, tmp_path) -> None:
+    bad = "As an AI language model, I don't have the ability to do that."
+    calls = {"n": 0}
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            calls["n"] += 1
+            return {"choices": [{"message":
+                    {"role": "assistant", "content": bad}}]}
+
+        def raise_for_status(self):
+            pass
+
+    class FakeClient:
+        @staticmethod
+        def post(*a, **k):
+            return FakeResp()
+
+    monkeypatch.setattr(al, "get_tool_definitions", lambda: [])
+    out = al._openai_compat_loop(
+        user_message="what did you build today",
+        root=tmp_path,
+        request_id="t",
+        base_url="http://x/v1/chat/completions",
+        api_key="k",
+        model="m",
+        max_iterations=8,
+        history=[],
+        policy="auto",
+        confirmed=False,
+        gate_state=None,
+        provider_label="test",
+        client=FakeClient)
+    # 2 retries consumed, 3rd strike degrades to the honest apology.
+    assert calls["n"] == 3
+    assert "I stumbled putting together a proper answer" in out
+    assert "As an AI language model" not in out

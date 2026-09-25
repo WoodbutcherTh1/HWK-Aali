@@ -173,7 +173,6 @@ export interface ActivityEvent {
   provider?: string;
   model?: string;
 }
-
 export interface AskResult {
   ok: boolean;
   reply?: string;
@@ -221,6 +220,10 @@ export async function askStream(
     confirm?: boolean;
     attachments?: string[];
     onActivity?: (ev: ActivityEvent) => void;
+    /* 2026-09-24: verbose mode — live chain-of-thought + scratchpad. */
+    verbose?: boolean;
+    onCoT?: (text: string, iteration: number) => void;
+    onScratchpad?: (content: string, lines: number) => void;
     signal?: AbortSignal;
   }
 ): Promise<AskResult> {
@@ -235,6 +238,7 @@ export async function askStream(
         policy: opts?.policy ?? "auto",
         confirm: opts?.confirm ?? false,
         attachments: opts?.attachments,
+        verbose: opts?.verbose ?? false,
       }),
       signal: opts?.signal,
     });
@@ -269,6 +273,12 @@ export async function askStream(
         }
         if (eventName === "activity" && opts?.onActivity) {
           opts.onActivity(payload as ActivityEvent);
+        } else if (eventName === "cot" && opts?.onCoT) {
+          const p = payload as { text?: string; iteration?: number };
+          opts.onCoT(String(p.text ?? ""), Number(p.iteration ?? 0));
+        } else if (eventName === "scratchpad" && opts?.onScratchpad) {
+          const p = payload as { content?: string; lines?: number };
+          opts.onScratchpad(String(p.content ?? ""), Number(p.lines ?? 0));
         } else if (eventName === "done") {
           done = payload as AskResult;
         }

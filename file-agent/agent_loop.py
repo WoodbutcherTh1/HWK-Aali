@@ -13,7 +13,7 @@ from typing import Any
 
 import requests
 
-from agent_log import log_event, new_request_id
+from agent_log import log_event, new_request_id, scratchpad_event
 from file_agent import execute_tool, get_tool_definitions, tool_guard
 from file_agent import memory as aali_memory
 from file_agent import emoji as aali_emoji
@@ -1057,6 +1057,7 @@ def _ollama_agent_loop(
     protocol_retries = 0
     echo_retries = 0
     meta_retries = 0
+    boilerplate_retries = 0
     last_tool: str | None = None
     last_result: dict[str, Any] | None = None
 
@@ -1100,6 +1101,28 @@ def _ollama_agent_loop(
                 "ممنوع تكرار التعليمات أو شرحها أو ترجمتها. "
                 'أجب الآن عن رسالة المستخدم نفسها مباشرة وبنفس لغتها.'})
             continue
+        # Boilerplate guard (2026-09-24): the generic "I'm just an AI / my
+        # capabilities are limited" disclaimer is not an answer — retry with
+        # feedback (owner: "it's a shame" — and he is right); after two
+        # strikes degrade to an honest apology, never the shame.
+        if (boilerplate_retries < 2 and kind in {"final", "text"} and value
+                and _is_boilerplate_disclaimer(value)):
+            boilerplate_retries += 1
+            messages.append({"role": "assistant", "content": content})
+            messages.append({"role": "user", "content":
+                "ردّك كان عذراً عاماً من نوع «أنا مجرد نموذج ذكاء اصطناعي» — "
+                "هذا ليس جواباً. أنت آلي: وكيل حقيقي ينفّذ الملفات والأوامر "
+                "والويب والوسائط ويبني التطبيقات على هذا الجهاز. "
+                "أجب عن رسالة المستخدم مباشرة وبنفس لغتها، دون أي تنصّل."})
+            continue
+        if (kind in {"final", "text"} and value
+                and _is_boilerplate_disclaimer(value)):
+            is_ar_msg = bool(re.search(r"[\u0600-\u06FF]", message))
+            value = (
+                "تعثّرت الآن في صياغة جواب سليم لسؤالك — جرّب إعادة الصياغة أو أعد المحاولة بعد قليل."
+                if is_ar_msg else
+                "I stumbled putting together a proper answer to that — try rephrasing, or ask me again in a moment.")
+            log_event(request_id, "boilerplate_degraded", model=OLLAMA_MODEL)
         log_event(request_id, "ollama_turn", kind=kind, model=OLLAMA_MODEL)
 
         if kind == "tool":
@@ -1283,6 +1306,32 @@ def _is_meta_leak(reply: str) -> bool:
         r"\b(provide|send|answer|reply|resend|أعد|أجب|اكتب)\b",
         reply, re.IGNORECASE)
     return bool(protocol and imperative)
+
+
+def _is_boilerplate_disclaimer(reply: str) -> bool:
+    """True when the reply is the generic 'I'm just an AI' disclaimer.
+
+    Owner transcript 2026-09-24: "tell me more about what you built today"
+    → "As an AI language model, I don't have the ability to build things…"
+    and a second flavor ending in "my capabilities are limited to…basic file
+    management". The user asked Aali a real question and got a canned
+    apology — a shame for a machine that builds things all day. Detection is
+    deliberately conjunctive (self-reference AND a limitation claim) so real
+    answers never trip it: "you can't divide by zero" has no self-reference,
+    a genuine refusal states what it WILL do instead.
+    """
+    self_ref = re.search(
+        r"(as an ai(\s+language)?\s+model|i['’]m (just )?an ai\b"
+        r"|i am an ai\b|i['’]m an ai language"
+        r"|نموذج(\s+لغوي)?\s+ذكاء\s+اصطناعي|أنا\s+مجرد\s+(نموذج|ذكاء)"
+        r"|قدراتي|my (current )?capabilit)",
+        reply, re.IGNORECASE)
+    limitation = re.search(
+        r"(don['’]t have the ability|cannot\s|can['’]t\s|not able to"
+        r"|unable to|limited to|confines of|لا\s?أستطيع|لا\s?استطيع"
+        r"|لا\s?يمكنني|محدودة|محدود)",
+        reply, re.IGNORECASE)
+    return bool(self_ref and limitation)
 
 
 def _local_agent_loop(
@@ -1621,6 +1670,8 @@ def _run_tool_call(
         raise AgentLoopError("The model returned an invalid tool call")
     tool_name = function["name"]
     arguments = _parse_arguments(function.get("arguments", "{}"))
+    scratchpad_event(request_id,
+                     f"→ {tool_name}({_brief_args(arguments)})")
     log_event(
         request_id,
         "tool_requested",
@@ -1645,11 +1696,22 @@ def _run_tool_call(
                 root,
             )
     log_event(request_id, "tool_result", tool=tool_name, result=result)
+    _ok = bool(result.get("ok")) if isinstance(result, dict) else True
+    scratchpad_event(request_id,
+                     f"{'✓' if _ok else '✗'} {tool_name} done")
     return {
         "role": "tool",
         "tool_call_id": str(tool_call.get("id", "")),
         "content": json.dumps(result, ensure_ascii=False),
     }
+
+
+def _brief_args(arguments: dict[str, Any]) -> str:
+    """One-line arg summary for the scratchpad (path/query/action first)."""
+    for key in ("path", "query", "url", "command", "action", "file"):
+        if key in arguments:
+            return f"{key}={str(arguments[key])[:80]}"
+    return ", ".join(f"{k}={str(v)[:40]}" for k, v in list(arguments.items())[:2]) or "…"
 
 
 def _api_error(response: Any) -> str:
@@ -1891,6 +1953,11 @@ def _openai_compat_loop(
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": user_message.strip()})
 
+    # 2026-09-24: boilerplate-disclaimer retries (the "I'm just an AI" shame
+    # guard). One feedback retry; the second strike passes through rather
+    # than looping forever — the exam/verdict chain decides bigger fixes.
+    boilerplate_retries = 0
+
     for _ in range(max_iterations):
         iteration = _ + 1
         payload = {
@@ -1945,10 +2012,43 @@ def _openai_compat_loop(
             else None,
             response=assistant_message.get("content"),
         )
+        # 2026-09-24: chain-of-thought surfacing — the model's visible text for
+        # THIS turn (often its reasoning/plan before tool calls) goes out as a
+        # `cot` event. Verbose clients show it live; quiet ones ignore it.
+        _cot_text = str(assistant_message.get("content") or "").strip()
+        if _cot_text:
+            log_event(request_id, "cot", iteration=iteration,
+                      text=_cot_text[:600])
+            scratchpad_event(request_id,
+                             f"… {_cot_text.strip().splitlines()[0][:110]}")
         if not tool_calls:
             final = assistant_message.get("content")
             if not isinstance(final, str) or not final.strip():
                 raise AgentLoopError("The model returned an empty final response")
+            # Boilerplate guard: the generic "As an AI language model, I
+            # don't have the ability to…" / "my capabilities are limited to
+            # basic file management" disclaimer is not an answer — retry with
+            # explicit feedback naming what was wrong; after two strikes
+            # degrade to an honest apology (the shame never reaches the user,
+            # same contract as the empty-reply guard).
+            if boilerplate_retries < 2 and _is_boilerplate_disclaimer(final):
+                boilerplate_retries += 1
+                log_event(request_id, "boilerplate_retry", iteration=iteration)
+                messages.append({"role": "assistant", "content": final})
+                messages.append({"role": "user", "content":
+                    "That reply was a generic AI disclaimer, not an answer. "
+                    "You are Aali: a real agent that runs files, commands, web, "
+                    "media and builds apps on this machine. Never disclaim your "
+                    "own capabilities. Answer the user's last message directly "
+                    "and specifically, in the same language they used."})
+                continue
+            if boilerplate_retries and _is_boilerplate_disclaimer(final):
+                is_ar_final = any("\u0600" <= ch <= "\u06FF" for ch in user_message)
+                final = (
+                    "تعثّرت الآن في صياغة جواب سليم لسؤالك — جرّب إعادة الصياغة أو أعد المحاولة بعد قليل."
+                    if is_ar_final else
+                    "I stumbled putting together a proper answer to that — try rephrasing, or ask me again in a moment.")
+                log_event(request_id, "boilerplate_degraded", iteration=iteration)
             if print_final:
                 print(final)
             return final

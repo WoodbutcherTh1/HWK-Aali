@@ -578,7 +578,7 @@ def render_reply(text: str, color: bool) -> None:
 
 # ----------------------------------------------------------------- streaming
 def stream_ask(base: str, message: str, sid: str, confirm: bool = False,
-               api_key: str = "") -> dict:
+               api_key: str = "", verbose: bool = False) -> dict:
     """POST /api/ask/stream and consume the SSE events with a live spinner.
 
     Activity events render as live tool traces; the `done`
@@ -587,7 +587,7 @@ def stream_ask(base: str, message: str, sid: str, confirm: bool = False,
     if not sys.stdout.isatty():
         print(message)
     payload = json.dumps(
-        {"message": message, "sid": sid, "confirm": confirm}
+        {"message": message, "sid": sid, "confirm": confirm, "verbose": verbose}
     ).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
     if api_key:
@@ -599,6 +599,7 @@ def stream_ask(base: str, message: str, sid: str, confirm: bool = False,
     last = 0.0
     t0 = time.time()
     printed_tool = False
+    _pad_shown = 0  # scratchpad lines already rendered (2026-09-24)
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
             ev_name = ""
@@ -633,6 +634,25 @@ def stream_ask(base: str, message: str, sid: str, confirm: bool = False,
                         bad = res.startswith("{") and ('"ok": false' in res or "'ok': False" in res)
                         mark = paint("  └─ ✓", "green") if not bad else paint("  └─ ✗", "red")
                         print(mark + paint(f" {res[:120]}", "grey"))
+                elif ev_name == "scratchpad":
+                    # 2026-09-24: live work log — print only the NEW lines of
+                    # the growing pad (content is the full pad every time).
+                    pad = str(data.get("content", ""))
+                    pad_lines = pad.splitlines() if pad else []
+                    for pad_line in pad_lines[_pad_shown:]:
+                        print("\r" + " " * 60 + "\r"
+                              + paint("  · ", "grey", enabled=_supports_color())
+                              + pad_line)
+                    _pad_shown = len(pad_lines)
+                elif ev_name == "cot":
+                    # 2026-09-24: verbose mode — the model's visible reasoning
+                    # for this turn, first line only to keep the REPL readable.
+                    cot = str(data.get("text", "")).strip()
+                    if cot:
+                        print("\r" + " " * 60 + "\r"
+                              + paint("  💭 ", "grey", enabled=_supports_color())
+                              + paint(cot.splitlines()[0][:110], "grey",
+                                      enabled=_supports_color()))
                 elif ev_name == "done":
                     if isinstance(data, dict):
                         result = data
@@ -1055,11 +1075,13 @@ def repl(base: str, api_key: str = "") -> None:
     last_suggestions: list[str] = []
     cols = {"user": "gold", "aali": "green", "info": "cyan", "warn": "red"}
     editor = LineEditor(HISTORY_FILE, _make_completer(base))
+    # 2026-09-24: verbose mode — /verbose toggles live CoT + scratchpad.
+    verbose = False
 
     def send(text: str) -> None:
         """One full chat turn: stream, confirm dangerous actions, render."""
         nonlocal last_suggestions
-        result = stream_ask(base, text, sid, api_key=api_key)
+        result = stream_ask(base, text, sid, api_key=api_key, verbose=verbose)
         if not result:
             return
         reply = str(result.get("reply", ""))
@@ -1070,7 +1092,8 @@ def repl(base: str, api_key: str = "") -> None:
                 "bold", enabled=color))
             ans = input(paint("   allow? [y/N] ", "gold", enabled=color)).strip().lower()
             if ans == "y":
-                result = stream_ask(base, text, sid, confirm=True, api_key=api_key)
+                result = stream_ask(base, text, sid, confirm=True, api_key=api_key,
+                                    verbose=verbose)
                 reply = str(result.get("reply", ""))
         print()
         print(paint("● ", "gold", enabled=color)
@@ -1112,6 +1135,7 @@ def repl(base: str, api_key: str = "") -> None:
                         ("/clear", "clear screen + banner"),
                         ("/theme", "colours: gold · matrix · ocean"),
                         ("/tools", "Aali's live tool list"),
+                        ("/verbose", "show Aali's live reasoning + scratchpad"),
                         ("/jobs", "live jobs board (what's running now)"),
                         ("/multi", "paste a multi-line block"),
                         ("/sid", "show session id"),
@@ -1171,6 +1195,14 @@ def repl(base: str, api_key: str = "") -> None:
                     continue
                 if cmd == "/sid":
                     say("✻", sid, "info")
+                    continue
+                if cmd == "/verbose":
+                    # 2026-09-24: toggle live CoT (💭) + scratchpad (·) traces.
+                    verbose = not verbose
+                    state = "ON — you will see Aali think (💭) and his work log (·)"
+                    if not verbose:
+                        state = "OFF — quiet mode"
+                    say("✻", f"verbose mode {state}", "info" if verbose else "warn")
                     continue
                 if cmd == "/jobs":
                     _jobs_panel(base, color)

@@ -564,6 +564,29 @@ button { font-family: inherit; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 
+/* ————— verbose mode (2026-09-24): CoT + scratchpad ————— */
+.verbose-block { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.cot-row {
+  color: var(--muted); font-size: 0.74rem; line-height: 1.5;
+  border-right: 2px solid rgba(232, 179, 75, 0.35);
+  padding-right: 8px; direction: rtl;
+}
+.scratchpad-block {
+  margin: 6px 0; padding: 8px 10px;
+  border: 1px solid rgba(232, 179, 75, 0.2); border-radius: 8px;
+  background: rgba(232, 179, 75, 0.05);
+  color: var(--muted); font-size: 0.72rem; line-height: 1.6;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  direction: ltr; text-align: left; white-space: pre-wrap;
+  max-height: 180px; overflow-y: auto;
+}
+.verbose-toggle { position: relative; }
+.verbose-toggle.verbose-on {
+  background: rgba(232, 179, 75, 0.18);
+  border-color: rgba(232, 179, 75, 0.6);
+  box-shadow: 0 0 12px rgba(232, 179, 75, 0.25);
+}
+
 /* — thinking: orbiting star — */
 .thinking { display: flex; align-items: center; gap: 12px; color: var(--muted); }
 .orbit { position: relative; width: 34px; height: 34px; display: inline-block; }

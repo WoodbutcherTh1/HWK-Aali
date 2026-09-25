@@ -266,6 +266,20 @@ export default function App() {
   );
   const [policyOpen, setPolicyOpen] = useState(false);
 
+  /* ————— verbose mode (2026-09-24): watch Aali think —————
+     ON: live chain-of-thought (💭 his stated reasoning per turn) + the
+     scratchpad (· his running work log) stream under the activity rows.
+     Persisted per browser like the policy choice. */
+  const [verbose, setVerbose] = useState(() => localStorage.getItem("aali_verbose") === "1");
+  const [liveCoT, setLiveCoT] = useState<string[]>([]);
+  const [scratchpad, setScratchpad] = useState("");
+  const toggleVerbose = () => {
+    setVerbose((v) => {
+      localStorage.setItem("aali_verbose", v ? "0" : "1");
+      return !v;
+    });
+  };
+
   const [ghOpen, setGhOpen] = useState(false);
   const [ghTokenInput, setGhTokenInput] = useState("");
   const [ghUser, setGhUser] = useState<GithubUser | null>(null);
@@ -391,6 +405,8 @@ export default function App() {
       setSlashOpen(false);
       setWaiting(true);
       setActivities([]);
+      setLiveCoT([]);          // verbose stream state resets every turn
+      setScratchpad("");
       const uid = nextMsgId();
       const thinkId = nextMsgId();
       const thinkMsg: Msg = { id: thinkId, role: "assistant", text: "", thinking: true, ts: Date.now() / 1000 };
@@ -408,6 +424,9 @@ export default function App() {
           confirm: opts?.confirm,
           attachments: outgoing?.map((f) => f.stored),
           signal: controller.signal,
+          verbose,
+          onCoT: (text) => setLiveCoT((c) => [...c.slice(-9), text]),
+          onScratchpad: (content) => setScratchpad(content),
           onActivity: (ev) => {
             sawActivity = true;
             const row = activityRow(ev);
@@ -729,6 +748,17 @@ export default function App() {
           {a.detail && <span className="activity-detail">{a.detail}</span>}
         </div>
       ))}
+      {/* verbose mode: Aali's live reasoning + running work log (2026-09-24) */}
+      {verbose && liveCoT.length > 0 && (
+        <div className="verbose-block">
+          {liveCoT.map((c, i) => (
+            <div key={`cot-${i}`} className="cot-row">💭 {c}</div>
+          ))}
+        </div>
+      )}
+      {verbose && scratchpad && (
+        <pre className="scratchpad-block">{scratchpad}</pre>
+      )}
       <div className="activity-row">
         <span className="spin">🧠</span>
         <span>آلي يفكر… {elapsed > 0 ? `${elapsed} ثانية` : ""}</span>
@@ -995,6 +1025,15 @@ export default function App() {
                         </div>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      className={`send-round verbose-toggle ${verbose ? "verbose-on" : ""}`}
+                      title={verbose ? "الوضع المفصّل يعمل — عقل آلي مكشوف" : "شاهد آلي يفكر (سلسلة التفكير + دفتر العمل)"}
+                      aria-pressed={verbose}
+                      onClick={toggleVerbose}
+                    >
+                      💭
+                    </button>
                     <button type="submit" className="send-round" disabled={waiting || !draft.trim()} aria-label="إرسال">
                       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
                     </button>

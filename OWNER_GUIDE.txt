@@ -77,4 +77,46 @@ SERVER WATCHDOG (added 2026-09-22)
   - Single instance: a second copy exits immediately
   - Stop it: kill the pid inside
     D:\hwk-data\aali_server_watchdog.pidlock
+
+IPHONE / REMOTE ACCESS VIA TAILSCALE (added 2026-09-24)
+  Aali is reachable from your devices anywhere via your
+  private Tailscale network (no ports opened, no domain):
+  - PC Tailscale IP : 100.94.100.57
+  - Web UI          : http://100.94.100.57:5055/ui/
+  - On the iPhone   : install Tailscale, sign in with the same
+    account (hmam.kaadna@), toggle it ON, then open the URL
+    above in Safari. Log in when asked.
+  - Master key      : D:\hwk-data\aali_master_key.txt
+    (issue per-user keys at /admin instead of sharing it)
+  - Server runs in KEY MODE since 2026-09-24 (AALI_API_KEY set,
+    bound 0.0.0.0, /api/health stays open for the watchdogs).
+    Plain start_all.bat / start_app.bat boots would bind
+    127.0.0.1 unauthenticated - aali_share.bat is the canonical
+    way to relaunch in shared mode.
+  - Guest policy is server-enforced: remote users cannot run
+    commands, delete files or touch the machine.
+
+PUBLIC DOMAIN (added 2026-09-24)
+  https://aali.dpdns.org  - Cloudflare named tunnel 'aali'
+  (id 81d534db-ad01-4861-901f-baa443014dcc), config at
+  %USERPROFILE%\.cloudflared\config.yml, protocol http2
+  (QUIC was throttled by the router).
+  - Works from ANY device, no Tailscale needed.
+  - Runs detached; log D:\hwk-data\aali_tunnel.log(.err).
+  - After a REBOOT relaunch it with:
+      scripts\launch_detached.py --log aali_tunnel --
+        "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel run aali
+    (or make it a scheduled task - not yet done).
+  - Cloudflare login cert: %USERPROFILE%\.cloudflared\cert.pem
+    (already authorized as hmam.kadna@gmail.com).
+
+DESKTOP SHORTCUTS (added 2026-09-22)
+  Aali Desktop - his own app window (chat UI)
+  Aali CLI    - terminal chat with live tool traces
+  Aali Status - quick console: GPU, disks, training
+  All use Aali's own icon. Lost them (OneDrive sync,
+  fresh clone)? Rebuild with:
+    powershell -NoProfile -ExecutionPolicy Bypass
+      -File scripts\make_desktop_shortcuts.ps1
+  (the logon guard lives in shell:startup - leave it be)
 ================================================================

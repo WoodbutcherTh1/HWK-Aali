@@ -23,6 +23,7 @@ its own logged subprocess; the report records every decision with a reason.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -41,6 +42,12 @@ import wait_gpu_free as gate  # noqa: E402
 # stale forever now - watching it would make the caretaker fire instantly.
 TRAINING_LOG = Path("D:/hwk-data/context_training.log")
 CARETAKER_LOG = Path("D:/hwk-data/caretaker.log")
+# 2026-09-24: nightly 21:00 scheduler task (HWK NightCaretaker) makes
+# duplicate launches normal - the script needs the same single-instance
+# contract as the server/brain watchdogs (the v5 session hand-killed two
+# stacked duplicates on 09-21; never again).
+PIDLOCK = Path("D:/hwk-data/night_caretaker.pidlock")
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 MORNING_REPORT = Path("D:/hwk-data/MORNING_REPORT.md")
 PIPELINE_LOG = Path("D:/hwk-data/soup_pipeline.log")
 REPORTS = Path("D:/hwk-data/soup")
@@ -68,6 +75,40 @@ def log(message: str) -> None:
 def decide(decision: str) -> None:
     DECISIONS.append(f"{datetime.now(timezone.utc).strftime('%H:%M')} - {decision}")
     log(f"DECISION: {decision}")
+
+
+def pid_running(pid: int) -> bool:
+    """Is that pid a live process? (tasklist on Windows, kill-0 elsewhere).
+
+    Cannot-verify counts as NOT running: a duplicate caretaker is annoying,
+    a missing caretaker is not - stale locks must be taken over."""
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    try:
+        proc = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True, text=True, timeout=15,
+            creationflags=CREATE_NO_WINDOW)
+        return proc.returncode == 0 and str(pid) in proc.stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def acquire_single_instance() -> bool:
+    """False when another LIVE caretaker already owns the pidlock."""
+    try:
+        old = int(PIDLOCK.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        old = None
+    if old is not None and old != os.getpid() and pid_running(old):
+        return False
+    PIDLOCK.parent.mkdir(parents=True, exist_ok=True)
+    PIDLOCK.write_text(str(os.getpid()), encoding="ascii")
+    return True
 
 
 def training_state() -> dict:
@@ -176,8 +217,15 @@ def write_morning_report() -> None:
 
 
 def main() -> int:
+    if not acquire_single_instance():
+        try:
+            owner = PIDLOCK.read_text(encoding="ascii").strip()
+        except OSError:
+            owner = "?"
+        log(f"caretaker already on duty (pid {owner}) - exiting")
+        return 0
     started = time.time()
-    log("=== night caretaker on duty ===")
+    log(f"=== night caretaker on duty (pid {os.getpid()}) ===")
     # Owner request (2026-09-08): snapshot the Obsidian brain vault to X:
     # before the night's GPU work, so every training run starts from a
     # recorded state of the project.
