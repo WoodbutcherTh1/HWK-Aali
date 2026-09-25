@@ -53,8 +53,23 @@ model, out_path, text = sys.argv[1], sys.argv[2], req["text"]
 length_scale = float(sys.argv[3]) if len(sys.argv) > 3 else 1.0
 voice = PiperVoice.load(model)
 syn_config = SynthesisConfig(length_scale=length_scale)
-with wave.open(out_path, "wb") as wf:
-    voice.synthesize_wav(text, wf, syn_config=syn_config)
+rate = getattr(voice.config, "sample_rate", 22050) or 22050
+
+# Pre-set the WAV format OURSELVES and disable piper's per-chunk format
+# setting: when espeak-ng phonemizes a text to NOTHING, piper yields zero
+# chunks, set_wav_format never runs, and the with-block close() blows up
+# with "# channels not specified" (2026-09-25 13:04 incident). With the
+# format pre-set, a no-chunk run closes cleanly as 0 frames and the PARENT
+# reports it honestly instead of a cryptic wave.Error.
+wf = wave.open(out_path, "wb")
+wf.setnchannels(1)
+wf.setsampwidth(2)
+wf.setframerate(int(rate))
+try:
+    voice.synthesize_wav(text, wf, syn_config=syn_config,
+                         set_wav_format=False)
+finally:
+    wf.close()
 print("OK")
 '''
 

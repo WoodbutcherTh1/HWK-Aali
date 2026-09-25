@@ -175,6 +175,48 @@ def test_synthesize_invalid_wav_rejected(fake_voices, tmp_path, monkeypatch):
     assert "failed" in out["error"]
 
 
+def test_synthesize_zero_chunk_wav_rejected_honestly(
+        fake_voices, tmp_path, monkeypatch):
+    """2026-09-25 zero-chunk incident: some texts (e.g. Arabic the espeak-ng
+    lexicon mishandles) phonemize to NOTHING — piper yields zero chunks. The
+    patched child then exits rc=0 with a VALID but 0-frame WAV header. The
+    parent must reject that honestly (never cache, never serve silence,
+    never crash with wave.Error '# channels not specified')."""
+    import struct
+    import subprocess
+    import wave
+
+    def run(cmd, **kwargs):
+        out = Path(cmd[3])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(out), "wb") as wf:  # valid header, ZERO frames
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(22050)
+            wf.writeframes(struct.pack("<" + "h" * 0))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")  # rc=0!
+
+    monkeypatch.setattr(tts.subprocess, "run", run)
+    out = tts.synthesize("تجربة الصوت الجديد")
+    # Honest rejection (44-byte header is caught by the size gate, larger
+    # garbage by the wave-frame check) — never cached, never served.
+    assert out["ok"] is False
+    assert out["error"]
+    assert not list((fake_voices / "cache").glob("*.wav"))
+    assert not list((fake_voices / "cache").glob("*.mp3"))
+
+
+def test_child_script_pins_zero_chunk_fix():
+    """Source tripwire: the child pre-sets the WAV format itself and disables
+    piper's per-chunk set_wav_format, so a no-chunk run closes cleanly as
+    0 frames instead of blowing up in the with-block close()."""
+    assert "set_wav_format=False" in tts._CHILD_SCRIPT
+    assert "setnchannels(1)" in tts._CHILD_SCRIPT
+    assert "setsampwidth(2)" in tts._CHILD_SCRIPT
+    assert "setframerate" in tts._CHILD_SCRIPT
+    assert "finally" in tts._CHILD_SCRIPT
+
+
 def test_synthesize_arabic_and_mixed(fake_voices, tmp_path, monkeypatch):
     _fake_wav(tmp_path, monkeypatch)
     assert tts.synthesize("السلام عليكم")["ok"] is True
