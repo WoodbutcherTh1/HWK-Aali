@@ -8,6 +8,7 @@ import {
   authMe,
   compactSession,
   deleteSession,
+  exportSession,
   defaultApiBase,
   getApiBase,
   getSession,
@@ -855,6 +856,8 @@ export default function App() {
                   <span className="chat-row-title">{s.title || "محادثة"}</span>
                   <span className="chat-row-meta">{s.turns} رسالة · {new Date(s.updated_at * 1000).toLocaleDateString("ar")}</span>
                 </button>
+                <button type="button" className="chat-row-del" title="تصدير الجلسة (Markdown)" onClick={() => void exportSession(s.sid, "md")}>⬇</button>
+                <button type="button" className="chat-row-del" title="تصدير الجلسة (JSON)" onClick={() => void exportSession(s.sid, "json")}>{"{ }"}</button>
                 <button type="button" className="chat-row-del" title="حذف الجلسة" onClick={() => void removeSession(s.sid)}>🗑</button>
               </div>
             ))}

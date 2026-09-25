@@ -332,6 +332,30 @@ export async function deleteSession(id: string): Promise<void> {
   });
 }
 
+/* — export conversation (Wave 1 #1, 2026-09-25) —
+   Fetches as a blob so the API key never lands in a URL or history,
+   then triggers a browser download. md = readable Markdown (default),
+   json = faithful record dump for developers/backups. */
+export async function exportSession(
+  id: string,
+  format: "md" | "json" = "md",
+): Promise<void> {
+  const res = await fetch(
+    `${apiBase}/api/session/${encodeURIComponent(id)}/export?format=${format}`,
+    { headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error(`export failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `aali-session-${
+    id.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "chat"
+  }.${format}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export interface CompactResult {
   ok: boolean;
   compacted?: boolean;

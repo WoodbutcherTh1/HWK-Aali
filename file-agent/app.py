@@ -759,6 +759,81 @@ def api_session_delete(sid: str):
     return {"ok": True}
 
 
+def _export_markdown(record: dict[str, object]) -> str:
+    """Faithful Markdown rendering of one conversation (Arabic-first).
+
+    Content is emitted as-is (it may itself contain Markdown — that is a
+    feature, not a bug: exported chats stay copy-pasteable)."""
+    turns = record.get("turns") if isinstance(record.get("turns"), list) else []
+    lines = ["# آلي — تصدير محادثة", ""]
+    created = record.get("created_at")
+    if created:
+        try:
+            lines.append("_بدأت: "
+                         + time.strftime("%Y-%m-%d %H:%M:%S",
+                                         time.localtime(float(created)))
+                         + "_")
+            lines.append("")
+        except (TypeError, ValueError, OSError):
+            pass
+    for turn in turns:
+        role = str(turn.get("role", ""))
+        if role not in ("user", "assistant"):
+            continue
+        who = "أنا" if role == "user" else "آلي"
+        ts = turn.get("ts")
+        stamp = ""
+        if ts:
+            try:
+                stamp = time.strftime(" %H:%M:%S", time.localtime(float(ts)))
+            except (TypeError, ValueError, OSError):
+                stamp = ""
+        lines.append(f"## {who}{stamp}")
+        lines.append("")
+        lines.append(str(turn.get("content", "")))
+        lines.append("")
+    return "\n".join(lines)
+
+
+@app.route("/api/session/<sid>/export", methods=["GET"])
+def api_session_export(sid: str):
+    """Download the conversation (Wave 1 #1, 2026-09-25).
+
+    format=md (default, no deps) | format=json (faithful record dump).
+    format=pdf answers 400 honestly until it exists. Read-only and
+    session-scoped: the global key gate applies, and _user_ns() keeps
+    every user inside their own conversations."""
+    _ensure_sessions_loaded()
+    rec = _sessions.get(_user_ns(sid))
+    if not rec:
+        return make_response({"ok": False, "error": "session not found"}, 404)
+    fmt = (request.args.get("format") or "md").lower()
+    if fmt == "json":
+        body = json.dumps(
+            {
+                "sid": sid,
+                "created_at": rec.get("created_at"),
+                "updated_at": rec.get("updated_at"),
+                "turns": rec.get("turns", []),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        mime, ext = "application/json", "json"
+    elif fmt == "pdf":
+        return make_response(
+            {"ok": False, "error": "pdf export not implemented yet — use md or json"},
+            400)
+    else:
+        body, mime, ext = _export_markdown(rec), "text/markdown", "md"
+    safe = re.sub(r"[^A-Za-z0-9_-]", "", sid)[:24] or "chat"
+    resp = make_response(body)
+    resp.headers["Content-Type"] = f"{mime}; charset=utf-8"
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="aali-session-{safe}.{ext}"')
+    return resp
+
+
 @app.route("/api/health", methods=["GET"])
 def api_health():
     """Liveness probe for all clients: returns workspace and status."""
