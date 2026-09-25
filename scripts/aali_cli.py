@@ -699,6 +699,161 @@ def cli_say(base: str, raw: str, api_key: str, color: bool, say_fn) -> None:
     say_fn("✻", "تم ✓", "info")
 
 
+# ---------------------------------------------------------------- projects
+def cli_projects(base: str, raw: str, api_key: str, color: bool,
+                 say_fn) -> None:
+    """`/projects` — Projects + RAG knowledge base (Wave 2).
+
+    /projects              list projects (numbered)
+    /projects new <name>   create a project
+    /projects use <n>      bind project N to THIS session (RAG on)
+    /projects off          unbind (RAG off)
+    /projects docs <n>     list project N's knowledge base
+    /projects add <n> <name>  add a doc; paste text, end with a line '+++'
+    """
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+
+    def _req(path: str, method: str = "GET", body: dict | None = None
+             ) -> tuple[int, dict]:
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(base + path, headers=headers,
+                                     data=data, method=method)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, {}
+        except Exception:  # noqa: BLE001
+            return 0, {}
+
+    parts = raw.split()
+    sub = parts[0] if parts else "list"
+
+    if sub in ("list", ""):
+        code, data = _req("/api/projects")
+        if code != 200:
+            say_fn("✗", "تعذّر جلب المشاريع" + (f" (HTTP {code})" if code else ""),
+                   "warn")
+            return
+        rows = data.get("projects", [])
+        if not rows:
+            say_fn("✗", 'لا مشاريع — أنشئ واحداً: /projects new <اسم>', "warn")
+            return
+        say_fn("✻", f"{len(rows)} مشروع", "info")
+        for i, p in enumerate(rows):
+            line = (paint(f"[{i}] ", "gold", enabled=color)
+                    + fx(p.get("name", ""), _term_width())
+                    + paint(f"  {p.get('doc_count', 0)} مستند", "grey",
+                            enabled=color))
+            print(line)
+        return
+
+    if sub == "new":
+        name = " ".join(parts[1:]).strip()
+        if not name:
+            say_fn("✗", '/projects new <اسم المشروع>', "warn")
+            return
+        code, _ = _req("/api/projects", "POST", {"name": name})
+        say_fn("✻" if code == 201 else "✗",
+               "تم إنشاء المشروع ✓" if code == 201 else f"فشل (HTTP {code})",
+               "info" if code == 201 else "warn")
+        return
+
+    if sub == "use":
+        try:
+            idx = int(parts[1])
+        except (IndexError, ValueError):
+            say_fn("✗", "/projects use <رقم من /projects>", "warn")
+            return
+        code, data = _req("/api/projects")
+        rows = data.get("projects", []) if code == 200 else []
+        if idx < 0 or idx >= len(rows):
+            say_fn("✗", "رقم غير موجود", "warn")
+            return
+        pid = rows[idx]["id"]
+        sid = get_sid() if "get_sid" in globals() else ""
+        if not sid:
+            say_fn("✗", "ابدأ محادثة أولاً", "warn")
+            return
+        code, _ = _req("/api/projects/active", "POST",
+                       {"sid": sid, "project_id": pid})
+        say_fn("✻" if code == 200 else "✗",
+               f"سيجيب آلي بمعرفة مشروع «{rows[idx]['name']}» ✓"
+               if code == 200 else f"فشل الربط (HTTP {code})",
+               "info" if code == 200 else "warn")
+        return
+
+    if sub == "off":
+        sid = get_sid() if "get_sid" in globals() else ""
+        if not sid:
+            say_fn("✗", "لا جلسة نشطة", "warn")
+            return
+        code, _ = _req("/api/projects/active", "POST",
+                       {"sid": sid, "project_id": None})
+        say_fn("✻" if code == 200 else "✗",
+               "فُصل المشروع ✓" if code == 200 else f"فشل (HTTP {code})",
+               "info" if code == 200 else "warn")
+        return
+
+    if sub in ("docs", "add"):
+        try:
+            idx = int(parts[1])
+        except (IndexError, ValueError):
+            say_fn("✗", f"/projects {sub} <رقم>"
+                         + (" <اسم>" if sub == "add" else ""), "warn")
+            return
+        code, data = _req("/api/projects")
+        rows = data.get("projects", []) if code == 200 else []
+        if idx < 0 or idx >= len(rows):
+            say_fn("✗", "رقم غير موجود", "warn")
+            return
+        pid = rows[idx]["id"]
+        pname = rows[idx]["name"]
+        if sub == "docs":
+            code, data = _req(f"/api/projects/{pid}/docs")
+            docs = data.get("docs", []) if code == 200 else []
+            say_fn("✻", f"«{pname}» — {len(docs)} مستند", "info")
+            for d in docs:
+                print(paint(f"  📄 {d.get('name', '')}", "gold", enabled=color)
+                      + paint(f"  {d.get('size', 0)} حرف · {d.get('chunks', 0)} مقطع",
+                              "grey", enabled=color))
+            return
+        # add: name from argv, content from a heredoc-style paste
+        name = " ".join(parts[2:]).strip()
+        if not name:
+            say_fn("✗", '/projects add <رقم> <اسم المستند> — ثم الصق النص واختم بسطر +++',
+                   "warn")
+            return
+        say_fn("✻", "الصق النص ثم اكتب +++ في سطر مستقل للإنهاء:", "info")
+        lines: list[str] = []
+        try:
+            while True:
+                ln = input()
+                if ln.strip() == "+++":
+                    break
+                lines.append(ln)
+        except EOFError:
+            pass
+        content = "\n".join(lines).strip()
+        if not content:
+            say_fn("✗", "نص فارغ — أُلغيت", "warn")
+            return
+        code, data = _req(f"/api/projects/{pid}/docs", "POST",
+                          {"name": name, "content": content})
+        if code == 201:
+            doc = (data or {}).get("doc", {})
+            say_fn("✻", f"أُضيف «{name}» ({doc.get('chunks', '?')} مقطع) ✓", "info")
+        else:
+            say_fn("✗", f"فشل (HTTP {code})", "warn")
+        return
+
+    say_fn("✗", '/projects list|new|use|off|docs|add', "warn")
+
+
 # ----------------------------------------------------------------- search
 def cli_search(base: str, raw: str, api_key: str, color: bool,
                say_fn) -> None:
@@ -895,9 +1050,9 @@ VOICE_FILE = Path.home() / ".aali_cli_voice"
 HISTORY_MAX = 500
 
 _KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
-_SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear",
+_SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear", "/projects",
                    "/theme", "/tools", "/multi", "/sid", "/bidi", "/jobs",
-                   "/search", "/voice", "/say")
+                   "/projects", "/search", "/voice", "/say")
 
 
 def _jobs_panel(base: str, color: bool) -> None:
@@ -1339,6 +1494,7 @@ def repl(base: str, api_key: str = "") -> None:
                         ("/tools", "Aali's live tool list"),
                         ("/verbose", "show Aali's live reasoning + scratchpad"),
                         ("/jobs", "live jobs board (what's running now)"),
+                        ("/projects", "المشاريع وقاعدة المعرفة: list|new|use|off|docs|add"),
                         ("/search", "FTS across conversations (--all / --session <sid>)"),
                         ("/voice", "TTS settings: on|off|list|set <id>|speed <n>"),
                         ("/say", "speak text aloud via Piper (/say <text>)"),
@@ -1414,6 +1570,9 @@ def repl(base: str, api_key: str = "") -> None:
                     continue
                 if cmd == "/search":
                     cli_search(base, arg, api_key, color, say)
+                    continue
+                if cmd == "/projects":
+                    cli_projects(base, arg, api_key, color, say)
                     continue
                 if cmd == "/voice":
                     cli_voice(base, arg, api_key, color, say)
