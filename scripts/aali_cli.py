@@ -854,6 +854,155 @@ def cli_projects(base: str, raw: str, api_key: str, color: bool,
     say_fn("✗", '/projects list|new|use|off|docs|add', "warn")
 
 
+# ------------------------------------------------------------ share + prompts
+def cli_share(base: str, arg: str, api_key: str, color: bool, say_fn) -> None:
+    """`/share [title]` — create a read-only share link for the CURRENT
+    session; `/share list` shows your links with hashes for revoking;
+    `/share revoke <hash-prefix>` kills one."""
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+
+    def _req(path, method="GET", body=None):
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(base + path, headers=headers,
+                                     data=data, method=method)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, {}
+        except Exception:  # noqa: BLE001
+            return 0, {}
+
+    parts = arg.split()
+    sub = parts[0] if parts else "create"
+    if sub == "list":
+        code, data = _req("/api/shares")
+        rows = data.get("shares", []) if code == 200 else []
+        if not rows:
+            say_fn("✗", "لا روابط مشاركة", "warn")
+            return
+        for r in rows:
+            state = "منتهٍ" if r.get("expired") else \
+                "ينتهي " + time.strftime("%m-%d", time.localtime(r["expires"]))
+            print(paint(f"  {r['token_hash'][:18]}…", "gold", enabled=color)
+                  + paint(f"  {r.get('title') or r.get('sid', '')[:10]}"
+                          f"  {r.get('turn_count', 0)} رسالة"
+                          f"  {r.get('views', 0)} مشاهدة  {state}",
+                          "grey", enabled=color))
+        return
+    if sub == "revoke":
+        prefix = (parts[1] if len(parts) > 1 else "").strip()
+        code, data = _req("/api/shares")
+        rows = data.get("shares", []) if code == 200 else []
+        hit = next((r for r in rows
+                    if r["token_hash"].startswith(prefix)), None) \
+            if prefix else None
+        if hit is None:
+            say_fn("✗", "/share revoke <بادئة الهاش من /share list>", "warn")
+            return
+        code, _ = _req(f"/api/shares/{hit['token_hash']}", "DELETE")
+        say_fn("✻" if code == 200 else "✗",
+               "أُلغي الرابط ✓" if code == 200 else f"فشل (HTTP {code})",
+               "info" if code == 200 else "warn")
+        return
+    # create for the CURRENT session
+    sid = get_sid() if "get_sid" in globals() else ""
+    if not sid:
+        say_fn("✗", "ابدأ محادثة أولاً", "warn")
+        return
+    title = " ".join(parts).strip() if parts and parts[0] != "create" else ""
+    code, data = _req("/api/shares", "POST",
+                      {"sid": sid, "title": title})
+    if code == 200 and data.get("url"):
+        say_fn("✻", "رابط قراءة فقط (انسخه الآن — يُعرض مرة واحدة):", "info")
+        print(paint(data["url"], "gold", enabled=color))
+    else:
+        say_fn("✗", f"فشل إنشاء الرابط (HTTP {code})", "warn")
+
+
+def cli_prompts(base: str, arg: str, api_key: str, color: bool, say_fn) -> None:
+    """`/prompts` — browse the library; `/prompts use <n>` inserts into the
+    composer; `/prompts add <title>` then paste, end with '+++'; `/prompts
+    del <custom-id>` removes one of yours."""
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+
+    def _req(path, method="GET", body=None):
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(base + path, headers=headers,
+                                     data=data, method=method)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, {}
+        except Exception:  # noqa: BLE001
+            return 0, {}
+
+    code, data = _req("/api/prompts")
+    if code != 200:
+        say_fn("✗", f"تعذّر جلب المكتبة (HTTP {code})", "warn")
+        return
+    rows = [("b", p) for p in data.get("builtin", [])] + \
+           [("c", p) for p in data.get("custom", [])]
+    parts = arg.split()
+    sub = parts[0] if parts else "list"
+    if sub == "use":
+        try:
+            idx = int(parts[1])
+            kind, p = rows[idx]
+        except (IndexError, ValueError):
+            say_fn("✗", "/prompts use <رقم من القائمة>", "warn")
+            return
+        say_fn("✻", f"أُدرج «{p.get('title')}» — أكمله ثم اضغط Enter", "info")
+        return p.get("body", "")
+    if sub == "add":
+        title = " ".join(parts[1:]).strip()
+        if not title:
+            say_fn("✗", '/prompts add <عنوان> — ثم الصق النص واختم بسطر +++', "warn")
+            return
+        say_fn("✻", "الصق نص الموجّه ثم اكتب +++ في سطر مستقل:", "info")
+        lines = []
+        try:
+            while True:
+                ln = input()
+                if ln.strip() == "+++":
+                    break
+                lines.append(ln)
+        except EOFError:
+            pass
+        body = "\n".join(lines).strip()
+        code, _ = _req("/api/prompts", "POST",
+                       {"title": title, "body": body})
+        say_fn("✻" if code == 201 else "✗",
+               "حُفظ الموجه ✓" if code == 201 else f"فشل (HTTP {code})",
+               "info" if code == 201 else "warn")
+        return
+    if sub == "del":
+        pid = parts[1].strip() if len(parts) > 1 else ""
+        code, _ = _req(f"/api/prompts/{pid}", "DELETE")
+        say_fn("✻" if code == 200 else "✗",
+               "حُذف ✓" if code == 200 else f"غير موجود (HTTP {code})",
+               "info" if code == 200 else "warn")
+        return
+    # list
+    say_fn("✻", f"{len(rows)} موجّه — استخدمه: /prompts use <رقم>", "info")
+    for i, (kind, p) in enumerate(rows):
+        tag = "✦" if kind == "c" else "·"
+        line = (paint(f"[{i}] ", "gold", enabled=color)
+                + paint(tag + " ", "grey", enabled=color)
+                + fx(f"{p.get('icon', '')} {p.get('title', '')}",
+                     _term_width()))
+        print(line)
+
+
 # ----------------------------------------------------------------- search
 def cli_search(base: str, raw: str, api_key: str, color: bool,
                say_fn) -> None:
@@ -1052,7 +1201,7 @@ HISTORY_MAX = 500
 _KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
 _SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear", "/projects",
                    "/theme", "/tools", "/multi", "/sid", "/bidi", "/jobs",
-                   "/projects", "/search", "/voice", "/say")
+                   "/share", "/prompts", "/search", "/voice", "/say")
 
 
 def _jobs_panel(base: str, color: bool) -> None:
@@ -1573,6 +1722,17 @@ def repl(base: str, api_key: str = "") -> None:
                     continue
                 if cmd == "/projects":
                     cli_projects(base, arg, api_key, color, say)
+                    continue
+                if cmd == "/share":
+                    cli_share(base, arg, api_key, color, say)
+                    continue
+                if cmd == "/prompts":
+                    _out = cli_prompts(base, arg, api_key, color, say)
+                    if isinstance(_out, str) and _out:
+                        # insert into the composer: echoes the body and lets
+                        # the user complete it on the next read
+                        say("✻", "الصق الموجّه في المحادثة وأكمله:", "info")
+                        print(fx(_out, _term_width()))
                     continue
                 if cmd == "/voice":
                     cli_voice(base, arg, api_key, color, say)

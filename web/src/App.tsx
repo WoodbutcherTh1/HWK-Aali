@@ -18,6 +18,12 @@ import {
   getToken,
   health,
   listSessions,
+  listShares,
+  createShare,
+  revokeShare,
+  listPrompts,
+  addPrompt,
+  deletePrompt,
   listProjects,
   listProjectDocs,
   createProject,
@@ -44,6 +50,9 @@ import {
   type ProjectDoc,
   type ProjectRow,
   type RagSource,
+  type ShareRow,
+  type BuiltinPrompt,
+  type CustomPrompt,
   type SearchHit,
   type SessionRow,
 } from "./api";
@@ -246,6 +255,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { cmd: "design", icon: "🎨", label: "تصميم", hint: "صمّم واجهة أو شعاراً", kind: "insert", value: "صمّم لي: " },
   { cmd: "extract", icon: "📄", label: "استخراج", hint: "استخرج نصاً من صورة أو مستند", kind: "insert", value: "استخرج النص/المحتوى من الملف التالي: " },
   { cmd: "web", icon: "🌐", label: "بحث في الويب", hint: "ابحث ثم اقرأ أفضل نتيجة", kind: "insert", value: "ابحث في الويب عن: " },
+  { cmd: "prompts", icon: "✦", label: "مكتبة الموجّهات", hint: "جاهزة + موجّهاتك المحفوظة", kind: "action", value: "prompts" },
+  { cmd: "share", icon: "🔗", label: "مشاركة المحادثة", hint: "رابط قراءة فقط قابل للإلغاء", kind: "action", value: "share" },
   { cmd: "github", icon: "🐙", label: "GitHub", hint: "افتح لوحة GitHub", kind: "action", value: "github" },
   { cmd: "policy", icon: "🛡️", label: "سياسة التنفيذ", hint: "تلقائي / قوي / اسأل دائماً", kind: "action", value: "policy" },
   { cmd: "compact", icon: "🗜️", label: "اختصار المحادثة", hint: "لخّص الأقدم لتوفير السياق", kind: "action", value: "compact" },
@@ -473,6 +484,130 @@ function ProjectsDialog({
   );
 }
 
+/* ————— Wave 3 #8: share dialog ————— */
+function ShareDialog({ onClose, showToast }: { onClose: () => void; showToast: (s: string) => void }) {
+  const [shares, setShares] = useState<ShareRow[]>([]);
+  const [title, setTitle] = useState("");
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(async () => setShares(await listShares()), []);
+  useEffect(() => { void reload(); }, [reload]);
+
+  const create = async () => {
+    const sid = getSid();
+    if (!sid) { showToast("ابدأ محادثة أولاً"); return; }
+    setBusy(true);
+    const out = await createShare(sid, title.trim());
+    setBusy(false);
+    if (out) { setLink(out.url); await reload(); showToast("أُنشئ رابط المشاركة — انسخه الآن"); }
+    else showToast("تعذّر إنشاء الرابط");
+  };
+  const revoke = async (h: string) => {
+    if (await revokeShare(h)) { await reload(); showToast("أُلغي الرابط"); }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal share-modal" onClick={(e) => e.stopPropagation()} dir="rtl">
+        <div className="modal-head">
+          <h3>🔗 مشاركة المحادثة الحالية</h3>
+          <button type="button" className="ghost-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="share-body">
+          <p className="quiet">رابط قراءة فقط لنسخة مجمّدة من المحادثة — يمكن إلغاؤه في أي وقت.</p>
+          <div className="share-create">
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="عنوان اختياري للمشاركة" maxLength={120} />
+            <button type="button" className="upgrade-pill" disabled={busy} onClick={() => void create()}>🔗 أنشئ رابطاً</button>
+          </div>
+          {link && (
+            <div className="share-link">
+              <code>{link}</code>
+              <button type="button" className="ghost-btn" onClick={() => { void navigator.clipboard.writeText(link); showToast("نُسخ الرابط ✓"); }}>📋 نسخ</button>
+            </div>
+          )}
+          <b className="share-sub">روابطك ({shares.length})</b>
+          {shares.map((s) => (
+            <div key={s.token_hash} className="share-row">
+              <div>
+                <b>{s.title || s.sid.slice(0, 10)}</b>
+                <small>{s.turn_count} رسالة · {s.views} مشاهدة · {s.expired ? "منتهٍ" : "ينتهي " + new Date(s.expires * 1000).toLocaleDateString("ar")}</small>
+              </div>
+              {!s.expired && <button type="button" className="ghost-btn" onClick={() => void revoke(s.token_hash)}>🚫 إلغاء</button>}
+            </div>
+          ))}
+          {shares.length === 0 && <p className="quiet">لا روابط مشاركة بعد.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ————— Wave 3 #9: prompt library dialog ————— */
+function PromptsDialog({ onClose, onInsert, showToast }: { onClose: () => void; onInsert: (body: string) => void; showToast: (s: string) => void }) {
+  const [lib, setLib] = useState<{ builtin: BuiltinPrompt[]; custom: CustomPrompt[] }>({ builtin: [], custom: [] });
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const reload = useCallback(async () => setLib(await listPrompts()), []);
+  useEffect(() => { void reload(); }, [reload]);
+
+  const add = async () => {
+    if (!title.trim() || !body.trim()) return;
+    if (await addPrompt(title.trim(), body)) { setTitle(""); setBody(""); await reload(); showToast("أُضيف الموجه ✦"); }
+    else showToast("تعذّر إضافة الموجه");
+  };
+  const del = async (pid: string) => {
+    if (await deletePrompt(pid)) await reload();
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal prompts-modal" onClick={(e) => e.stopPropagation()} dir="rtl">
+        <div className="modal-head">
+          <h3>✦ مكتبة الموجّهات</h3>
+          <button type="button" className="ghost-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="prompts-body">
+          {lib.custom.length > 0 && (
+            <>
+              <b className="prompts-sub">موجّهاتي</b>
+              {lib.custom.map((p) => (
+                <div key={p.id} className="prompt-row">
+                  <button type="button" className="prompt-use" title={p.body} onClick={() => { onInsert(p.body); onClose(); }}>
+                    <span>{p.icon} {p.title}</span>
+                    <small>{p.body.slice(0, 60)}…</small>
+                  </button>
+                  <button type="button" className="ghost-btn" onClick={() => void del(p.id)}>✕</button>
+                </div>
+              ))}
+            </>
+          )}
+          <b className="prompts-sub">جاهزة (عربي)</b>
+          {lib.builtin.filter((p) => p.lang === "ar").map((p) => (
+            <button key={p.id} type="button" className="prompt-row prompt-use" title={p.body} onClick={() => { onInsert(p.body); onClose(); }}>
+              <span>{p.icon} {p.title}</span>
+              <small>{p.body.slice(0, 60)}…</small>
+            </button>
+          ))}
+          <b className="prompts-sub">Ready (English)</b>
+          {lib.builtin.filter((p) => p.lang === "en").map((p) => (
+            <button key={p.id} type="button" className="prompt-row prompt-use" title={p.body} onClick={() => { onInsert(p.body); onClose(); }}>
+              <span>{p.icon} {p.title}</span>
+              <small>{p.body.slice(0, 60)}…</small>
+            </button>
+          ))}
+          <b className="prompts-sub">أضف موجهاً</b>
+          <div className="prompt-add">
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="العنوان" maxLength={80} />
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="نص الموجه…" rows={3} maxLength={4000} />
+            <button type="button" className="upgrade-pill" disabled={!title.trim() || !body.trim()} onClick={() => void add()}>＋ حفظ</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { role, isOwner, isAdmin, isDev, previewing, can: canPerm, refresh: refreshRole } = useRole();
   /* Track B 11.6/11.7: owner/dev surfaces — the badge + preview toggle stay
@@ -511,6 +646,9 @@ export default function App() {
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [activeProject, setActiveProjectState] = useState<ProjectRow | null>(null);
   const activeProjectId = activeProject?.id ?? null;
+  /* ————— Wave 3: shares + prompt library ————— */
+  const [shareOpen, setShareOpen] = useState(false);
+  const [promptsOpen, setPromptsOpen] = useState(false);
   const updateVoiceCfg = useCallback((patch: Partial<ReturnType<typeof getVoiceSettings>>) => {
     setVoiceCfg((cur) => {
       const next = { ...cur, ...patch };
@@ -919,6 +1057,14 @@ export default function App() {
       return;
     }
     switch (c.value) {
+      case "prompts":
+        setPromptsOpen(true);
+        setDraft("");
+        break;
+      case "share":
+        setShareOpen(true);
+        setDraft("");
+        break;
       case "github":
         void openGithubPanel();
         setDraft("");
@@ -1195,6 +1341,7 @@ export default function App() {
           <div className="side-section">
             <span>المحادثات</span>
             <button type="button" className="side-more" title="بحث في المحادثات (Ctrl K)" onClick={() => setSearchOpen(true)}>🔍</button>
+            <button type="button" className="side-more" title="مشاركة المحادثة الحالية (Wave 3)" onClick={() => setShareOpen(true)}>🔗</button>
             <button type="button" className="side-more" title="تحديث" onClick={() => void refreshSessions()}>⟳</button>
           </div>
           <div className="chat-list">
@@ -1398,6 +1545,14 @@ export default function App() {
                       onClick={toggleVerbose}
                     >
                       💭
+                    </button>
+                    <button
+                      type="button"
+                      className="send-round"
+                      title="مكتبة الموجّهات (Wave 3)"
+                      onClick={() => setPromptsOpen(true)}
+                    >
+                      ✦
                     </button>
                     <button type="submit" className="send-round" disabled={waiting || !draft.trim()} aria-label="إرسال">
                       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
@@ -1727,6 +1882,18 @@ export default function App() {
         <ProjectsDialog
           onClose={() => setProjectsOpen(false)}
           onActivated={(p) => setActiveProjectState(p)}
+          showToast={showToast}
+        />
+      )}
+
+      {/* Wave 3: share + prompt library */}
+      {shareOpen && (
+        <ShareDialog onClose={() => setShareOpen(false)} showToast={showToast} />
+      )}
+      {promptsOpen && (
+        <PromptsDialog
+          onClose={() => setPromptsOpen(false)}
+          onInsert={(body) => setDraft((d) => (d ? d + " " : "") + body)}
           showToast={showToast}
         />
       )}

@@ -648,3 +648,64 @@ export async function health(): Promise<boolean> {
     return false;
   }
 }
+
+/* ————— Wave 3 #8: shared conversations ————— */
+export interface ShareRow {
+  token_hash: string;
+  sid: string;
+  title: string;
+  created: number;
+  expires: number;
+  expired: boolean;
+  views: number;
+  turn_count: number;
+}
+
+export async function listShares(): Promise<ShareRow[]> {
+  const res = await fetch(`${apiBase}/api/shares`, { headers: authHeaders() });
+  if (!res.ok) return [];
+  return (await res.json()).shares ?? [];
+}
+
+export async function createShare(sid: string, title: string, ttlHours?: number): Promise<{ url: string; token: string; expires: number } | null> {
+  const res = await fetch(`${apiBase}/api/shares`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ sid, title, ttl_hours: ttlHours }),
+  });
+  if (!res.ok) return null;
+  return (await res.json()) ?? null;
+}
+
+export async function revokeShare(tokenHash: string): Promise<boolean> {
+  const res = await fetch(`${apiBase}/api/shares/${tokenHash}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  return res.ok;
+}
+
+/* ————— Wave 3 #9: prompt library ————— */
+export interface BuiltinPrompt { id: string; lang: string; icon: string; title: string; body: string; }
+export interface CustomPrompt { id: string; title: string; body: string; icon: string; created: number; }
+
+export async function listPrompts(): Promise<{ builtin: BuiltinPrompt[]; custom: CustomPrompt[] }> {
+  const res = await fetch(`${apiBase}/api/prompts`, { headers: authHeaders() });
+  if (!res.ok) return { builtin: [], custom: [] };
+  return (await res.json()) ?? { builtin: [], custom: [] };
+}
+
+export async function addPrompt(title: string, body: string): Promise<boolean> {
+  const res = await fetch(`${apiBase}/api/prompts`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ title, body }),
+  });
+  return res.ok;
+}
+
+export async function deletePrompt(pid: string): Promise<boolean> {
+  const res = await fetch(`${apiBase}/api/prompts/${pid}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  return res.ok;
+}
