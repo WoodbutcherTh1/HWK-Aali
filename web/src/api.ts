@@ -106,6 +106,44 @@ export interface AaliRoleContext {
   user_id: string;
   workspace_id: string;
   permissions: string[];
+  previewing?: boolean;
+}
+
+/* Track B 11.7 — owner preview mode ("view as user"). Both directions
+   carry BOTH credentials (master-key owners have no session token and
+   vice versa); the server decides and never trusts the client. */
+export async function previewStart(): Promise<boolean> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const t = getToken();
+  const s = getSessionToken();
+  if (t) headers["X-API-Key"] = t;
+  if (s) headers["X-Session-Token"] = s;
+  try {
+    const res = await fetch(`${apiBase}/api/auth/preview`, {
+      method: "POST", headers, body: "{}",
+    });
+    const data = await res.json().catch(() => ({}));
+    return res.ok && !!data.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function previewStop(): Promise<boolean> {
+  const headers: Record<string, string> = {};
+  const t = getToken();
+  const s = getSessionToken();
+  if (t) headers["X-API-Key"] = t;
+  if (s) headers["X-Session-Token"] = s;
+  try {
+    const res = await fetch(`${apiBase}/api/auth/preview`, {
+      method: "DELETE", headers,
+    });
+    const data = await res.json().catch(() => ({}));
+    return res.ok && !!data.ok;
+  } catch {
+    return false;
+  }
 }
 
 export async function authMe(): Promise<(MeInfo & { aali?: AaliRoleContext }) | null> {

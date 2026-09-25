@@ -1052,3 +1052,60 @@ button, .chip, .quick-pill, .msg { transition-duration: 0.13s; }
 }
 .upgrade-pill:hover { box-shadow: 0 4px 20px rgba(232, 179, 75, 0.24); }
 .upgrade-pill:active { transform: translateY(0.5px); }
+
+/* ————— Track B 11.6/11.7: role badge + owner preview ————— */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--acc, #e8b34b) 35%, transparent);
+  color: var(--acc, #e8b34b);
+  background: color-mix(in srgb, var(--acc, #e8b34b) 10%, transparent);
+  white-space: nowrap;
+  user-select: none;
+}
+.role-badge.previewing {
+  border-style: dashed;
+  animation: roleBadgePulse 2s ease-in-out infinite;
+}
+@keyframes roleBadgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+.preview-banner {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 8px 16px;
+  font-size: 13px;
+  background: color-mix(in srgb, #e8b34b 16%, var(--bg, #252523));
+  color: var(--fg, #f0ead8);
+  border-bottom: 1px solid color-mix(in srgb, #e8b34b 45%, transparent);
+  backdrop-filter: blur(8px);
+}
+.preview-banner button {
+  border: 1px solid color-mix(in srgb, #e8b34b 55%, transparent);
+  background: color-mix(in srgb, #e8b34b 18%, transparent);
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.preview-banner button:hover {
+  background: color-mix(in srgb, #e8b34b 30%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .role-badge.previewing { animation: none; }
+}

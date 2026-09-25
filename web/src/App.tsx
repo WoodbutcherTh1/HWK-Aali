@@ -17,6 +17,8 @@ import {
   getToken,
   health,
   listSessions,
+  previewStart,
+  previewStop,
   searchMessages,
   setApiBase,
   authHeaders,
@@ -314,7 +316,13 @@ function VoicePicker({
 }
 
 export default function App() {
-  const { role, isOwner, isAdmin, can: canPerm } = useRole();
+  const { role, isOwner, isAdmin, isDev, previewing, can: canPerm, refresh: refreshRole } = useRole();
+  /* Track B 11.6/11.7: owner/dev surfaces — the badge + preview toggle stay
+     visible while previewing so the exit is always reachable. */
+  const showOwnerTools = previewing || isOwner || isAdmin || isDev;
+  const roleLabels: Record<string, string> = {
+    owner: "المالك", dev: "مطوّر", admin: "مشرف", user: "مستخدم", guest: "زائر",
+  };
   const [messages, setMessages] = useState<Msg[]>([]);
   const [draft, setDraft] = useState("");
   const [waiting, setWaiting] = useState(false);
@@ -1275,7 +1283,30 @@ export default function App() {
                 <span className="mc-mode">{currentPolicy.label}</span>
               </span>
               <span className={`conn-dot ${connected === null ? "" : connected ? "ok" : "bad"}`} title={connected ? "متصل" : "غير متصل"} />
+              {showOwnerTools && (
+                <span
+                  className={`role-badge ${previewing ? "previewing" : ""}`}
+                  title={previewing ? "وضع المعاينة — أنت ترى ما يراه المستخدم" : `صلاحيتك على هذا الخادم: ${roleLabels[role] ?? role}`}
+                >
+                  {previewing ? `👁 ${roleLabels[role] ?? role} · معاينة` : `✦ ${roleLabels[role] ?? role}`}
+                </span>
+              )}
               <div className="chat-head-actions">
+                {showOwnerTools && (
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    title={previewing ? "إنهاء المعاينة والعودة لصلاحياتك" : "استعرض كـ مستخدم عادي (11.7)"}
+                    onClick={() => {
+                      void (previewing ? previewStop() : previewStart()).then((ok) => {
+                        if (ok) { void refreshRole(); showToast(previewing ? "انتهت المعاينة — عدت لصلاحياتك" : "👁 معاينة كمستخدم — كل الأسطح المقيدة مخفية الآن"); }
+                        else showToast("تعذّر تغيير وضع المعاينة");
+                      });
+                    }}
+                  >
+                    {previewing ? "👁‍🗨 إنهاء المعاينة" : "👁 معاينة"}
+                  </button>
+                )}
                 <div className="theme-toggle" role="group" aria-label="المظهر">
                   {THEMES.map((t) => (
                     <button
@@ -1463,6 +1494,23 @@ export default function App() {
           </motion.main>
         )}
       </div>
+
+      {/* Track B 11.7 — preview banner: gold, unmissable, always exitable */}
+      {previewing && (
+        <div className="preview-banner">
+          <span>👁 أنت تستعرض آلي كمستخدم عادي — الأسطح المخصصة للمالك/المطوّر مخفية</span>
+          <button
+            type="button"
+            onClick={() => {
+              void previewStop().then((ok) => {
+                if (ok) { void refreshRole(); showToast("انتهت المعاينة"); }
+              });
+            }}
+          >
+            إنهاء المعاينة
+          </button>
+        </div>
+      )}
 
       {/* ACCOUNT AUTH — users | builders & team */}
       <AnimatePresence>

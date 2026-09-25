@@ -29,6 +29,7 @@ export interface RoleContext {
   user_id: string;
   workspace_id: string;
   permissions: string[];
+  previewing?: boolean;
 }
 
 interface RoleState {
@@ -40,6 +41,7 @@ interface RoleState {
   isAdmin: boolean;
   isUser: boolean;
   isGuest: boolean;
+  previewing: boolean;
   can: (permission: string) => boolean;
   refresh: () => Promise<void>;
 }
@@ -56,6 +58,7 @@ function fallbackGuest(): RoleState {
     isAdmin: false,
     isUser: false,
     isGuest: true,
+    previewing: false,
     can: () => false,
     refresh: async () => undefined,
   };
@@ -75,6 +78,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
           user_id: aali.user_id || "",
           workspace_id: aali.workspace_id || "",
           permissions: Array.isArray(aali.permissions) ? aali.permissions : [],
+          previewing: !!aali.previewing,
         });
       } else {
         setCtx(null);
@@ -103,6 +107,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     const isAdmin = role === "admin";
     const isUser = role === "user";
     const isGuest = role === "guest";
+    const previewing = !!ctx?.previewing;
     const perms = new Set(ctx?.permissions ?? []);
     return {
       role,
@@ -113,6 +118,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       isAdmin,
       isUser,
       isGuest,
+      previewing,
       can: (permission: string) => perms.has(permission),
       refresh,
     };
