@@ -16,6 +16,7 @@ import {
   getToken,
   health,
   listSessions,
+  searchMessages,
   setApiBase,
   setToken,
   type ActivityEvent,
@@ -23,6 +24,7 @@ import {
   type MeInfo,
   type PendingAction,
   type Policy,
+  type SearchHit,
   type SessionRow,
 } from "./api";
 import AuthDialog from "./Auth";
@@ -231,6 +233,20 @@ function timeOf(ts?: number) {
   return new Date(ts * 1000).toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit" });
 }
 
+/* Split a server-provided highlight string (contains <mark>/</mark>) into
+   text parts with a marked flag — rendered as plain React text nodes,
+   never dangerouslySetInnerHTML. */
+function parseHighlight(highlight: string): { text: string; marked: boolean }[] {
+  const out: { text: string; marked: boolean }[] = [];
+  let marked = false;
+  for (const part of highlight.split(/(<mark>|<\/mark>)/)) {
+    if (part === "<mark>") marked = true;
+    else if (part === "</mark>") marked = false;
+    else if (part) out.push({ text: part, marked });
+  }
+  return out;
+}
+
 export default function App() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [draft, setDraft] = useState("");
@@ -244,6 +260,16 @@ export default function App() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [activeSid, setActiveSid] = useState<string>(() => localStorage.getItem("aali_sid") || "");
   const [toast, setToast] = useState("");
+  /* — search modal state (Wave 1 #2) — */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchSel, setSearchSel] = useState(0);
+  const searchDebounce = useRef<number | undefined>(undefined);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [jumpTo, setJumpTo] = useState<string | null>(null); // "sid:turnIdx"
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState(false);
   const [navOpen, setNavOpen] = useState(false); // sidebar as overlay on small screens
@@ -343,17 +369,49 @@ export default function App() {
       .catch(() => setGithubToken(""));
   }, []);
 
-  /* Ctrl/⌘ + K — focus the composer (matches the kbd hint on the New Chat button) */
+  /* Ctrl/⌘ + K — open the conversation search modal (Wave 1 #2). The
+     old behavior (focus composer) moves to the composer itself. */
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        inputRef.current?.focus();
+        setSearchOpen(true);
       }
+      if (e.key === "Escape") setSearchOpen(false);
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, []);
+
+  /* Live search: debounced 200ms (spec). Arrow keys move the selection
+     inside the modal's own keydown handler. */
+  useEffect(() => {
+    if (!searchOpen) return;
+    if (searchInputRef.current) searchInputRef.current.focus();
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const q = searchQuery.trim();
+    if (!q) { setSearchHits([]); setSearchTotal(0); setSearchSel(0); return; }
+    window.clearTimeout(searchDebounce.current);
+    searchDebounce.current = window.setTimeout(async () => {
+      setSearchBusy(true);
+      try {
+        const out = await searchMessages(q, { limit: 30 });
+        setSearchHits(out.results);
+        setSearchTotal(out.total);
+        setSearchSel(0);
+      } catch {
+        setSearchHits([]); setSearchTotal(0);
+      } finally {
+        setSearchBusy(false);
+      }
+    }, 200);
+    return () => window.clearTimeout(searchDebounce.current);
+  }, [searchQuery, searchOpen]);
+
+  /* openSearchHit lives below openSession (TDZ-safe dep array). */
 
   const showToast = useCallback((text: string) => {
     setToast(text);
@@ -576,6 +634,13 @@ export default function App() {
     showToast("حُذفت الجلسة");
   };
 
+  const openSearchHit = useCallback(async (hit: SearchHit) => {
+    setSearchOpen(false);
+    await openSession(hit.session_id);
+    setJumpTo(hit.message_id); // consumed by the jump effect below
+    setTimeout(() => setJumpTo(null), 2600);
+  }, [openSession]);
+
   const runSlashCommand = (c: SlashCommand) => {
     setSlashOpen(false);
     if (c.kind === "insert") {
@@ -618,6 +683,18 @@ export default function App() {
   /* Deep link: /ui/?sid=<id> restores that conversation on load (used by
      the sessions sidebar "share link" and by screenshot automation). */
   const deepSid = useMemo(() => new URLSearchParams(window.location.search).get("sid") || "", []);
+
+  /* Jump-to-message effect: after the target session's messages render,
+     scroll the hit into view and flash it (gold ring, CSS .msg-flash). */
+  useEffect(() => {
+    if (!jumpTo) return;
+    const idx = Number(jumpTo.split(":")[1]);
+    if (Number.isNaN(idx)) return;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-midx="${idx}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [jumpTo, messages]);
   useEffect(() => {
     if (!deepSid) return;
     localStorage.setItem("aali_sid", deepSid);
@@ -844,6 +921,7 @@ export default function App() {
 
           <div className="side-section">
             <span>المحادثات</span>
+            <button type="button" className="side-more" title="بحث في المحادثات (Ctrl K)" onClick={() => setSearchOpen(true)}>🔍</button>
             <button type="button" className="side-more" title="تحديث" onClick={() => void refreshSessions()}>⟳</button>
           </div>
           <div className="chat-list">
@@ -1117,10 +1195,11 @@ export default function App() {
             </header>
 
             <div ref={chatRef} className="chat" onScroll={onChatScroll}>
-              {messages.map((m) => (
+              {messages.map((m, midx) => (
                 <motion.div
                   key={m.id}
-                  className={`msg ${m.role}`}
+                  data-midx={midx}
+                  className={`msg ${m.role} ${jumpTo === `${activeSid}:${midx}` ? "msg-flash" : ""}`}
                   initial={msgIn.initial}
                   animate={msgIn.animate}
                 >
@@ -1421,6 +1500,85 @@ export default function App() {
       )}
 
       {toast && <div className="toast">{toast}</div>}
+
+      {/* ————— Conversation search modal (Wave 1 #2, Ctrl/⌘+K) ————— */}
+      <AnimatePresence>
+        {searchOpen && (
+          <motion.div
+            className="search-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setSearchOpen(false); }}
+          >
+            <motion.div
+              className="search-modal"
+              initial={{ y: -14, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: -10, opacity: 0, scale: 0.99 }}
+              transition={{ duration: 0.14 }}
+              role="dialog" aria-modal="true" aria-label="بحث في المحادثات"
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") { e.preventDefault(); setSearchSel((s) => Math.min(s + 1, searchHits.length - 1)); }
+                if (e.key === "ArrowUp") { e.preventDefault(); setSearchSel((s) => Math.max(s - 1, 0)); }
+                if (e.key === "Enter" && searchHits[searchSel]) { e.preventDefault(); void openSearchHit(searchHits[searchSel]); }
+              }}
+            >
+              <div className="search-head">
+                <span className="search-glyph">🔍</span>
+                <input
+                  ref={searchInputRef}
+                  className="search-input"
+                  placeholder="اكتب للبحث..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  dir="auto"
+                />
+                <button type="button" className="search-close" title="إغلاق (Esc)" onClick={() => setSearchOpen(false)}>✕</button>
+              </div>
+              <div className="search-meta">
+                {searchBusy ? "...يبحث" : searchQuery.trim()
+                  ? `${searchTotal} نتيجة`
+                  : "ابحث في كل محادثاتك — لغة عربية أو إنجليزية"}
+              </div>
+              <div className="search-results">
+                {!searchQuery.trim() && (
+                  <div className="search-empty">اكتب للبحث…</div>
+                )}
+                {searchQuery.trim() && !searchBusy && searchHits.length === 0 && (
+                  <div className="search-empty">
+                    ما لقيت شي 🤷
+                    <span className="search-hint">جرّب كلمة أقصر، أو بالعربي والإنجليزي، أو شغّل مطابقة الأوائل (بر → برومبت)</span>
+                  </div>
+                )}
+                {searchHits.map((hit, i) => (
+                  <button
+                    type="button"
+                    key={hit.message_id}
+                    className={`search-hit ${i === searchSel ? "sel" : ""}`}
+                    onMouseEnter={() => setSearchSel(i)}
+                    onClick={() => void openSearchHit(hit)}
+                  >
+                    <span className="hit-role" aria-hidden="true">{hit.role === "user" ? "👤" : "🤖"}</span>
+                    <span className="hit-main">
+                      <span className="hit-title">{hit.session_title}</span>
+                      {/* highlight comes from the server; render as text nodes,
+                          splitting on the mark tags — no dangerouslySetInnerHTML */}
+                      <span className="hit-snippet" dir="auto">
+                        {parseHighlight(hit.highlight).map((part, j) => (
+                          <span key={j} className={part.marked ? "hit-mark" : ""}>{part.text}</span>
+                        ))}
+                      </span>
+                    </span>
+                    <span className="hit-ts">{new Date(hit.timestamp * 1000).toLocaleDateString("ar")}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="search-foot">↑↓ تنقّل · Enter فتح · Esc إغلاق</div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

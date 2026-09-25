@@ -356,6 +356,40 @@ export async function exportSession(
   URL.revokeObjectURL(url);
 }
 
+/* — search (Wave 1 #2, 2026-09-25) —
+   Full-text search over the caller's conversations. The server decides
+   scope (admin all / user own / guests 403) — the client never filters. */
+export interface SearchHit {
+  message_id: string;   // "<sid>:<turn_idx>"
+  session_id: string;
+  session_title: string;
+  role: "user" | "assistant";
+  snippet: string;      // plain text (safe)
+  highlight: string;    // carries <mark> tags (escape before HTML use)
+  timestamp: number;
+  score: number;
+}
+
+export async function searchMessages(
+  q: string,
+  opts: { role?: string; from?: string; to?: string; session?: string;
+          limit?: number; offset?: number } = {},
+): Promise<{ total: number; results: SearchHit[] }> {
+  const params = new URLSearchParams({ q });
+  if (opts.role) params.set("role", opts.role);
+  if (opts.from) params.set("from", opts.from);
+  if (opts.to) params.set("to", opts.to);
+  if (opts.session) params.set("session", opts.session);
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.offset) params.set("offset", String(opts.offset));
+  const res = await fetch(`${apiBase}/api/search?${params.toString()}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`search failed: ${res.status}`);
+  const data = await res.json();
+  return { total: data.total ?? 0, results: Array.isArray(data.results) ? data.results : [] };
+}
+
 export interface CompactResult {
   ok: boolean;
   compacted?: boolean;

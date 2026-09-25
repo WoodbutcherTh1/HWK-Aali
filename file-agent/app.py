@@ -28,6 +28,7 @@ import agent_log
 from agent_log import new_request_id
 from flask import Flask, Response, make_response, request, send_file, send_from_directory
 from agent_loop import AgentLoopError, agent_loop, compact_history
+from file_agent import search_index
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
@@ -319,6 +320,13 @@ def _save_session(record: dict[str, object]) -> None:
             for existing in _sessions.values():
                 handle.write(json.dumps(existing, ensure_ascii=False) + "\n")
     except OSError:
+        pass
+    # Search index (Wave 1 #2): keep the FTS row set in sync on every
+    # save — reindex_session is idempotent (delete+reinsert per sid) and
+    # failures must never break a chat turn.
+    try:
+        search_index.reindex_session(record)
+    except Exception:  # noqa: BLE001 - indexing is best-effort
         pass
 
 
@@ -705,6 +713,13 @@ def _ensure_sessions_loaded() -> None:
     if not _sessions_loaded:
         _load_sessions()
         _sessions_loaded = True
+        # Backfill the FTS search index once per boot (Wave 1 #2):
+        # reindex_session is idempotent per sid, so a re-run is safe;
+        # best-effort — a broken index never blocks the chat.
+        try:
+            search_index.backfill(_sessions)
+        except Exception:  # noqa: BLE001 - indexing is best-effort
+            pass
 
 
 @app.route("/api/sessions", methods=["GET"])
@@ -737,10 +752,27 @@ def api_sessions():
 @app.route("/api/session/<sid>", methods=["GET"])
 def api_session_get(sid: str):
     _ensure_sessions_loaded()
-    rec = _sessions.get(_user_ns(sid))
+    ns_key = _user_ns(sid)
+    rec = _sessions.get(ns_key)
     if not rec:
         return make_response({"ok": False, "error": "session not found"}, 404)
+    # Lazy backfill: a conversation that predates the index (or arrived
+    # via another route that bypassed _save_session) gets indexed on
+    # first read — session_row_count keeps it idempotent.
+    try:
+        if not search_index.session_row_count(*_ns_split(ns_key)):
+            search_index.reindex_session(rec)
+    except Exception:  # noqa: BLE001 - indexing is best-effort
+        pass
     return {"ok": True, "sid": sid, "turns": rec.get("turns", [])}
+
+
+def _ns_split(ns_key: str) -> tuple[str, str]:
+    """("<ns>", "<sid>") from a stored key; ns="" in local mode."""
+    if ":" in ns_key:
+        ns, _, sid = ns_key.rpartition(":")
+        return ns, sid
+    return "", ns_key
 
 
 @app.route("/api/session/<sid>", methods=["DELETE"])
@@ -750,6 +782,13 @@ def api_session_delete(sid: str):
     if key not in _sessions:
         return make_response({"ok": False, "error": "session not found"}, 404)
     _sessions.pop(key, None)
+    # Keep the search index in sync (Wave 1 #2): deleted conversations
+    # must vanish from results. Best-effort, content-free log inside.
+    try:
+        ns, _ = _ns_split(key)
+        search_index.remove_session(ns, sid)
+    except Exception:  # noqa: BLE001 - indexing is best-effort
+        pass
     try:
         with SESSIONS_FILE.open("w", encoding="utf-8") as handle:
             for existing in _sessions.values():
@@ -832,6 +871,133 @@ def api_session_export(sid: str):
     resp.headers["Content-Disposition"] = (
         f'attachment; filename="aali-session-{safe}.{ext}"')
     return resp
+
+
+_SEARCH_RATE: dict[str, list[float]] = {}
+_SEARCH_RATE_MAX = 30  # searches per minute per caller
+_SEARCH_RATE_WINDOW = 60.0
+
+
+def _search_rate_ok(caller: str) -> bool:
+    """Tiny sliding-window limiter (per role: admin/user/local each get
+    their own bucket). Content-free: only the caller tag is stored."""
+    now = time.time()
+    bucket = [t for t in _SEARCH_RATE.get(caller, [])
+              if now - t < _SEARCH_RATE_WINDOW]
+    if len(bucket) >= _SEARCH_RATE_MAX:
+        _SEARCH_RATE[caller] = bucket
+        return False
+    bucket.append(now)
+    _SEARCH_RATE[caller] = bucket
+    return True
+
+
+def _parse_ts(value: str | None) -> float | None:
+    """Accept epoch seconds or ISO dates (YYYY-MM-DD); None otherwise."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return time.mktime(time.strptime(value[:19], fmt))
+        except ValueError:
+            continue
+    return None
+
+
+@app.route("/api/search", methods=["GET"])
+def api_search():
+    """Full-text conversation search (Wave 1 #2, 2026-09-25).
+
+    Role-aware SERVER-SIDE (never client-side):
+      - remote non-admin keys (tunnel/LAN guests) -> 403
+      - admin (master key / admin account)        -> all users' messages
+      - issued key / account session              -> own messages only
+      - local mode (no API key set)               -> everything (it is
+        the owner's machine, single-user by definition)
+    Sessions the caller cannot open are invisible here too: results are
+    ns-filtered, exactly like every other conversation surface."""
+    _ensure_sessions_loaded()
+    query = (request.args.get("q") or "").strip()
+    if not query:
+        return make_response({"ok": False,
+                              "error": "empty query — اكتب كلمة للبحث"}, 400)
+
+    auth = _auth_state()
+    sess = _account_session()
+    is_admin = bool((auth or {}).get("is_admin")
+                    or (sess or {}).get("is_admin"))
+    remote_addr = request.remote_addr or ""
+    is_local = (remote_addr in {"127.0.0.1", "::1", "localhost"}
+                and not request.headers.get("X-Forwarded-For"))
+
+    # Guests (remote non-admin) are refused outright — search over chat
+    # history is an owner/user capability, not a guest one.
+    if not is_local and API_KEY and not is_admin:
+        return make_response({"ok": False,
+                              "error": "forbidden: search is not available to guests"},
+                             403)
+
+    if is_admin:
+        ns: str | None = None  # all users
+        caller = "admin"
+    elif sess and sess.get("key_id"):
+        ns = f"u{sess['key_id']}"
+        caller = f"user:{sess['key_id']}"
+    elif auth and not auth["is_admin"]:
+        ns = f"u{auth['key_id']}"
+        caller = f"user:{auth['key_id']}"
+    elif API_KEY and auth:
+        ns = f"u{_client_key()}"
+        caller = f"user:{auth['key_id']}"
+    else:
+        ns = ""  # local mode: bare sids
+        caller = "local"
+
+    if not _search_rate_ok(caller):
+        return make_response({"ok": False,
+                              "error": "too many searches — بطّل شوية"}, 429)
+
+    limit = min(max(int(request.args.get("limit", 20) or 20), 1), 50)
+    offset = max(int(request.args.get("offset", 0) or 0), 0)
+    role = request.args.get("role") or None
+    if role not in ("user", "assistant"):
+        role = None
+    sid_filter = request.args.get("session") or None
+    project = request.args.get("project") or None
+    ts_from = _parse_ts(request.args.get("from"))
+    ts_to = _parse_ts(request.args.get("to"))
+
+    try:
+        data = search_index.search(
+            query, ns, role=role, sid=sid_filter, ts_from=ts_from,
+            ts_to=ts_to, project_id=project, limit=limit, offset=offset)
+    except Exception:  # noqa: BLE001 - search must never 500 the app
+        return make_response({"ok": False, "error": "search index unavailable"},
+                             503)
+
+    # Attach conversation titles (same rule as /api/sessions: first user
+    # message, 70 chars). Keys in _sessions are "<ns>:<sid>" when namespaced.
+    def _title_of(r: dict) -> str:
+        key = f"{ns}:{r['session_id']}" if ns else r["session_id"]
+        rec = _sessions.get(key) if ns is not None else _sessions.get(key)
+        if ns is None:  # admin: find the row under ANY ns
+            rec = next((v for k, v in _sessions.items()
+                        if k.endswith(f":{r['session_id']}")), None)
+        turns = rec.get("turns") if isinstance(rec, dict) and isinstance(
+            rec.get("turns"), list) else []
+        return next((str(t.get("content", ""))[:70] for t in turns
+                     if t.get("role") == "user"), "محادثة")
+
+    for r in data.get("results", []):
+        r["session_title"] = _title_of(r)
+        r["highlight"] = r.get("snippet", "")
+        r["snippet"] = re.sub(r"</?mark>", "", r.get("snippet", ""))
+    return {"ok": True, "total": data.get("total", 0),
+            "results": data.get("results", [])}
 
 
 @app.route("/api/health", methods=["GET"])

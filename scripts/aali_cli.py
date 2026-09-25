@@ -576,6 +576,83 @@ def render_reply(text: str, color: bool) -> None:
             print(fx(out, _term_width()) if BIDI_MODE else out)
 
 
+# ----------------------------------------------------------------- search
+def cli_search(base: str, raw: str, api_key: str, color: bool,
+               say_fn) -> None:
+    """`/search [options] <query>` — FTS across conversations (Wave 1 #2).
+
+    Options:  --all (paginate 10/page)   --session <sid> (scope)
+    Numbered results; type `/open <session-number-from-/open>` to browse.
+    Last 20 queries persist in ~/.aali_cli_search_history.
+    """
+    parts = raw.split()
+    scope_sid = ""
+    show_all = False
+    while parts and parts[0] in ("--all", "--session"):
+        if parts[0] == "--all":
+            show_all = True
+            parts = parts[1:]
+        else:
+            if len(parts) < 2:
+                say_fn("✗", "--session يحتاج معرّف جلسة", "warn")
+                return
+            scope_sid = parts[1]
+            parts = parts[2:]
+    query = " ".join(parts).strip()
+    if not query:
+        say_fn("✗", '/search <query>  (--all / --session <sid>)', "warn")
+        return
+    # history (last 20, deduped, content stays LOCAL — never uploaded)
+    try:
+        hist_path = Path.home() / ".aali_cli_search_history"
+        seen = [l for l in hist_path.read_text(encoding="utf-8").splitlines()
+                if l.strip()] if hist_path.exists() else []
+        history = [query] + [q for q in seen if q != query]
+        hist_path.write_text("\n".join(history[:20]) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    from urllib.parse import quote as _q
+    path = (f"/api/search?q={_q(query)}&limit={'50' if show_all else '10'}"
+            + (f"&session={_q(scope_sid)}" if scope_sid else ""))
+    try:
+        req = urllib.request.Request(base + path, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = {401: "مفتاح API مطلوب", 403: "البحث متاح للمستخدمين فقط (الضيوف ممنوعون)",
+                  429: "طلبات كثيرة — بطّل شوية"}.get(exc.code, f"HTTP {exc.code}")
+        say_fn("✗", detail, "warn")
+        return
+    except Exception:  # noqa: BLE001
+        say_fn("✗", "السيرفر ما رد — جرّب لاحقاً", "warn")
+        return
+    results = data.get("results", [])
+    total = data.get("total", 0)
+    if not results:
+        say_fn("✗", "ما لقيت شي — جرّب كلمة أقصر أو عبارات أخرى", "warn")
+        return
+    say_fn("✻", f"{total} نتيجة" + (f" (أول {len(results)})" if total > len(results) else ""), "info")
+    for i, r in enumerate(results):
+        who = "👤" if r.get("role") == "user" else "🤖"
+        when = time.strftime("%m-%d %H:%M", time.localtime(r.get("timestamp", 0)))
+        snippet = str(r.get("snippet", "")).replace("\n", " ")[:150]
+        title = str(r.get("session_title", ""))[:40]
+        line = (paint(f"[{i}] ", "gold", enabled=color)
+                + paint(f"{who} {title}", "grey", enabled=color)
+                + paint(f" {when}", "grey", enabled=color) + "\n    "
+                + fx(snippet, _term_width()) if BIDI_MODE else
+                paint(f"[{i}] ", "gold", enabled=color)
+                + paint(f"{who} {title} {when}", "grey", enabled=color))
+        print(line)
+        if not BIDI_MODE:
+            print("    " + snippet)
+    say_fn("✻", "افتح جلسة: /open <رقمها من /open> — ضمن الجلسة نفسها استعمل /open 0", "info")
+
+
 # ----------------------------------------------------------------- streaming
 def stream_ask(base: str, message: str, sid: str, confirm: bool = False,
                api_key: str = "", verbose: bool = False) -> dict:
@@ -695,7 +772,8 @@ HISTORY_MAX = 500
 
 _KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
 _SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear",
-                   "/theme", "/tools", "/multi", "/sid", "/bidi", "/jobs")
+                   "/theme", "/tools", "/multi", "/sid", "/bidi", "/jobs",
+                   "/search")
 
 
 def _jobs_panel(base: str, color: bool) -> None:
@@ -1137,6 +1215,7 @@ def repl(base: str, api_key: str = "") -> None:
                         ("/tools", "Aali's live tool list"),
                         ("/verbose", "show Aali's live reasoning + scratchpad"),
                         ("/jobs", "live jobs board (what's running now)"),
+                        ("/search", "FTS across conversations (--all / --session <sid>)"),
                         ("/multi", "paste a multi-line block"),
                         ("/sid", "show session id"),
         		("/bidi", "Arabic display fix (on/off/auto)"),
@@ -1206,6 +1285,9 @@ def repl(base: str, api_key: str = "") -> None:
                     continue
                 if cmd == "/jobs":
                     _jobs_panel(base, color)
+                    continue
+                if cmd == "/search":
+                    cli_search(base, arg, api_key, color, say)
                     continue
                 if cmd == "/clear":
                     os.system("cls" if os.name == "nt" else "clear")
