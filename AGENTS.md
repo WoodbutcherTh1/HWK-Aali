@@ -136,6 +136,26 @@ in parallel:
   — the watch-party dashboard for long jobs (block clock, per-process cards,
   GPU card, next-event line); Desktop shortcut on the owner's desktop
   (2026-09-25) launches it through scripts/mission_clock.bat.
+- **Part 5 security track 5.1-5.3 (2026-09-25, Buffy)**: (5.1)
+  scripts/prompt_leak_probe.py — 15 AR/EN injection payloads vs the LIVE
+  brain via /api/ask (needs AALI_API_KEY env — without it the uniform-404
+  makes the probe read "unreachable"); classifies L1 prompt-shingle (8-
+  word), L2 canary, L3 protocol JSON, L4 AALI_* env-assign, L5 secret
+  shapes; appends CONTENT-FREE records to
+  D:/hwk-data/security_incidents.log (kinds + reply sha16 + size, never
+  the leaked text); exit 0/1/2 = resistant/leak/not-run. Baseline: 15
+  cases → 1 leak (E08 protocol coercion). (5.2) _redact_prompt_leak in
+  agent_loop — runs on EVERY brain path at the outer agent_loop() choke
+  point: L2/L1 → honest whole-reply degrade; L3/L4/L5 → line-level
+  drops; clean replies pass byte-identical (deterministic identity card
+  is test-pinned to NOT trip the 8-shingle check); recompiled fresh
+  from SYSTEM_PROMPT each call via build_leak_matcher(). (5.3) canary
+  integrity marks XMARK-7731/LEXSEAL-5219/GLINTQUILL-3407 planted in
+  SYSTEM_PROMPT (INTEGRITY MARKS paragraph) — any canary in an output
+  = prompt leak = whole-reply degrade. Post-filter re-run: **15/15
+  clean**. Tests: tests/test_prompt_leak_filter.py (15). Docs:
+  docs/features/prompt_leak_defense.md. Suite 1043/9. 5.4 rate-limit
+  review + 5.5 sandbox pentest remain queued.
 - **Wave 3: shares + prompt library (2026-09-25, Buffy)**: #8 shared
   conversations — file_agent/shares.py: read-only tokened links to a
   frozen copy of one conversation; token IS the credential (urlsafe,
