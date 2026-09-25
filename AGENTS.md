@@ -90,6 +90,52 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **Track A Wave 1 + Track B 11.1–11.5 (2026-09-25, Buffy — COMPLETE, awaiting
+  owner go for Wave 2 / 11.6+)**: conversation export (GET
+  `/api/session/<sid>/export?format=md|json`, sidebar ⬇/{} buttons, tests/test_export.py);
+  FTS conversation search (`file_agent/search_index.py` SQLite FTS5 unicode61
+  prefix 2-3-4 WAL at D:/hwk-data/search/aali_search.db, `/api/search`
+  role-aware guests-403, Ctrl+K modal, CLI `/search`, tests/test_search.py 29
+  incl. 10k<100ms; qmark-binding lesson: snippet() args bind BEFORE
+  where-params); role-based UI (`file_agent/roles.py` owner>dev>admin>user>guest,
+  pure resolver — no request object so X-Role is unreadable by construction,
+  permissions table = single source of truth, `/api/auth/me` returns the role
+  contract, `AALI_DEV_EMAILS`, `_require_role()` = uniform 404, web
+  RoleProvider/IfRole with nav minRole hiding); **Piper TTS**
+  (`file_agent/tts.py`, piper 1.8 in D:/hwk-tools/vision-venv via subprocess,
+  voices D:/hwk-models/piper ar_JO-kareem medium+low, cache
+  D:/hwk-data/tts_cache sha256(voice|speed|text), content-free tts.log,
+  `_ffmpeg()` mp3 w/ honest WAV fallback, 2000/500-char limits, 30/min,
+  endpoint `/api/voice/synthesize` + `/api/voice/list`(+`/voices`), web 🔊
+  button + voice settings, CLI `/voice`+`/say` winsound/afplay,
+  docs/features/tts.md, tests/test_tts.py 29). TTS INCIDENT (2026-09-25,
+  commit 529b39e): specific texts rc=1'd with wave.Error "# channels not
+  specified" — piper yields ZERO chunks when espeak-ng phonemizes a text to
+  nothing (client-side shell-encoding mojibake was the real trigger; direct
+  runs always passed), its set_wav_format never ran and the close() blew up.
+  Child now pre-sets the WAV format (mono/16-bit/voice sample_rate) and calls
+  synthesize_wav(set_wav_format=False) in a finally-close → a no-chunk run
+  closes cleanly as 0 frames and the parent rejects it honestly (size/frame
+  validation, never cached). Tests have an autouse sandbox — the real 63MB
+  voices are unreachable from the suite (an early buggy fake once overwrote
+  one; re-downloaded from HF rhasspy/piper-voices).
+- **Identity truth guard (2026-09-25, ab4f28d)**: owner transcript leak —
+  "who built u?" through the soup /v1 brain answered "trained by Alibaba
+  Cloud" (the base model's baked-in identity; that path lacked the
+  deterministic identity fast-path). Three layers: SYSTEM_PROMPT ORIGIN
+  TRUTH paragraph (EN+AR); `_identity_fast()` single-source identity/builder
+  card shared by _local_tool_call AND _openai_compat_loop (typo-tolerant:
+  "bulid"); `_scrub_identity_leak()` at the outer agent_loop() choke point —
+  brand + FIRST-PERSON maker claim gets dropped line-wise / replaced with the
+  honest HWK card when identity was asked; legit third-party talk ("OpenAI
+  was created by Sam Altman") untouched. Suggestion chips removed from the
+  web UI (owner call; API still ships them for opt-in clients). Verified
+  live: the exact leaking question now returns the honest HWK card. Tests
+  +11 in test_agent_guards.py (29); suite 951 green / 9 skipped.
+- **Mission Clock (LIVE, owner request 2026-09-12)**: scripts/mission_clock.py
+  — the watch-party dashboard for long jobs (block clock, per-process cards,
+  GPU card, next-event line); Desktop shortcut on the owner's desktop
+  (2026-09-25) launches it through scripts/mission_clock.bat.
 - **Tokenizer**: pile (18.8B+ tokens, ~2358 shards) — Arabic next.
 - **Next milestone**: Phase A pretraining launches when pile+arabic shards are
   complete (ctx 1024, d_model 768, resumable, mirrors to X:).
