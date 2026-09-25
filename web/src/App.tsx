@@ -19,6 +19,9 @@ import {
   listSessions,
   searchMessages,
   setApiBase,
+  authHeaders,
+  getVoiceSettings,
+  setVoiceSettings,
   speak,
   stopSpeaking,
   setToken,
@@ -251,6 +254,65 @@ function parseHighlight(highlight: string): { text: string; marked: boolean }[] 
   return out;
 }
 
+/* ————— VoicePicker (Wave 1 #3.6): lists installed Piper voices
+   (Arabic first), lets the owner pick + preview each one. ————— */
+function VoicePicker({
+  cfg,
+  onChange,
+}: {
+  cfg: ReturnType<typeof getVoiceSettings>;
+  onChange: (patch: Partial<ReturnType<typeof getVoiceSettings>>) => void;
+}) {
+  const [voices, setVoices] = useState<{ id: string; name: string; language: string; quality: string; arabic: boolean }[]>([]);
+  const [previewing, setPreviewing] = useState("");
+  const [defaultVoice, setDefaultVoice] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`${getApiBase()}/api/voice/list`, { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive || !d?.ok) return;
+        setVoices(d.voices || []);
+        setDefaultVoice(d.default || "");
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+
+  return (
+    <div className="voice-picker">
+      {voices.length === 0 && <small>لا أصوات مثبتة — ثبّت Piper أو نزّل أصواتاً</small>}
+      {voices.map((v) => (
+        <div key={v.id} className={`voice-opt ${cfg.voice === v.id || (!cfg.voice && v.id === defaultVoice) ? "sel" : ""}`}>
+          <button
+            type="button"
+            className="voice-use"
+            onClick={() => onChange({ voice: v.id })}
+            title={`استخدام ${v.name}`}
+          >
+            <b>{v.arabic ? "🇯🇴 " : "🌐 "}{v.name}</b>
+            <small>{v.language} · {v.quality || "—"}{v.id === defaultVoice ? " · افتراضي" : ""}</small>
+          </button>
+          <button
+            type="button"
+            className="voice-preview"
+            title="معاينة"
+            disabled={previewing === v.id}
+            onClick={() => {
+              setPreviewing(v.id);
+              speak("مرحباً، هذه معاينة لصوت آلي", { voice: v.id, speed: cfg.speed, volume: cfg.volume })
+                .finally(() => setPreviewing(""));
+            }}
+          >
+            {previewing === v.id ? "◌" : "▶"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const { role, isOwner, isAdmin, can: canPerm } = useRole();
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -275,6 +337,17 @@ export default function App() {
   const searchDebounce = useRef<number | undefined>(undefined);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [jumpTo, setJumpTo] = useState<string | null>(null); // "sid:turnIdx"
+  /* ————— voice settings (Wave 1 #3.5-3.7) ————— */
+  const [voiceCfg, setVoiceCfg] = useState(getVoiceSettings);
+  const [speaking, setSpeaking] = useState(false);
+  const [synthLoading, setSynthLoading] = useState<number | null>(null); // msg id
+  const updateVoiceCfg = useCallback((patch: Partial<ReturnType<typeof getVoiceSettings>>) => {
+    setVoiceCfg((cur) => {
+      const next = { ...cur, ...patch };
+      setVoiceSettings(next);
+      return next;
+    });
+  }, []);
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState(false);
   const [navOpen, setNavOpen] = useState(false); // sidebar as overlay on small screens
@@ -549,6 +622,15 @@ export default function App() {
         );
         setConnected(data.ok);
         void refreshSessions();
+        /* Auto-play (3.5): after streaming ends, read the reply aloud —
+           only when the toggle is ON and the reply is real text. */
+        if (voiceCfg.autoPlay && reply && !data.needs_confirm) {
+          void speak(reply, {
+            voice: voiceCfg.voice || undefined,
+            speed: voiceCfg.speed,
+            volume: voiceCfg.volume,
+          }).then((ok) => { setSpeaking(ok); if (ok) setTimeout(() => setSpeaking(false), 3000); });
+        }
       } catch (err) {
         const aborted = controller.signal.aborted;
         setMessages((m) =>
@@ -573,7 +655,7 @@ export default function App() {
         abortRef.current = null;
       }
     },
-    [waiting, policy, refreshSessions]
+    [waiting, policy, refreshSessions, voiceCfg]
   );
 
   const confirmPending = useCallback(() => {
@@ -1253,10 +1335,24 @@ export default function App() {
                         <div className="msg-actions">
                           <button
                             type="button"
-                            title="استماع للرد (Piper — محلي)"
-                            onClick={() => { stopSpeaking(); void speak(m.text); }}
+                            title={synthLoading === m.id ? "جارٍ التوليد…" : speaking ? "إيقاف النطق" : "استماع للرد (Piper — محلي)"}
+                            onClick={() => {
+                              if (speaking) { stopSpeaking(); setSpeaking(false); return; }
+                              setSynthLoading(m.id);
+                              speak(m.text, {
+                                voice: voiceCfg.voice || undefined,
+                                speed: voiceCfg.speed,
+                                volume: voiceCfg.volume,
+                              })
+                                .then((ok) => {
+                                  if (ok) { setSpeaking(true); setTimeout(() => setSpeaking(false), 3000); }
+                                  else showToast("تعذّر توليد الصوت — جرّب مجدداً");
+                                })
+                                .catch(() => showToast("تعذّر توليد الصوت — جرّب مجدداً"))
+                                .finally(() => setSynthLoading(null));
+                            }}
                           >
-                            🔊
+                            {synthLoading === m.id ? "◌" : speaking ? "⏹" : "🔊"}
                           </button>
                           <button
                             type="button"
@@ -1418,6 +1514,35 @@ export default function App() {
                   </button>
                 ))}
               </div>
+            </label>
+
+            {/* ————— voice section (Wave 1 #3.6) ————— */}
+            <label>
+              الصوت — قراءة الردود
+              <div className="voice-row">
+                <button
+                  type="button"
+                  className={`voice-toggle ${voiceCfg.autoPlay ? "on" : ""}`}
+                  onClick={() => updateVoiceCfg({ autoPlay: !voiceCfg.autoPlay })}
+                >
+                  {voiceCfg.autoPlay ? "مفعّل — يقرأ كل رد تلقائياً" : "متوقف"}
+                </button>
+              </div>
+              <div className="voice-row">
+                <small>السرعة: {voiceCfg.speed.toFixed(1)}×</small>
+                <input
+                  type="range" min={0.5} max={2} step={0.1}
+                  value={voiceCfg.speed}
+                  onChange={(e) => updateVoiceCfg({ speed: Number(e.target.value) })}
+                />
+                <small>الصوت: {voiceCfg.volume}%</small>
+                <input
+                  type="range" min={0} max={100} step={5}
+                  value={voiceCfg.volume}
+                  onChange={(e) => updateVoiceCfg({ volume: Number(e.target.value) })}
+                />
+              </div>
+              <VoicePicker cfg={voiceCfg} onChange={updateVoiceCfg} />
             </label>
             <label>
               عنوان الخادم (API)

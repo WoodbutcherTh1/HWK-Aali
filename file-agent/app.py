@@ -1010,14 +1010,34 @@ def api_search():
             "results": data.get("results", [])}
 
 
+_TTS_RATE: dict[str, list[float]] = {}
+_TTS_RATE_MAX = 30          # syntheses per minute per caller
+_TTS_RATE_WINDOW = 60.0
+
+
+def _tts_rate_ok(caller: str) -> bool:
+    now = time.time()
+    bucket = [t for t in _TTS_RATE.get(caller, [])
+              if now - t < _TTS_RATE_WINDOW]
+    if len(bucket) >= _TTS_RATE_MAX:
+        _TTS_RATE[caller] = bucket
+        return False
+    bucket.append(now)
+    _TTS_RATE[caller] = bucket
+    return True
+
+
 @app.route("/api/voice/synthesize", methods=["POST"])
 def api_voice_synthesize():
-    """Text -> WAV audio (Piper, local, offline). Wave 1 #3, 2026-09-25.
+    """Text -> audio (Piper, local, offline). Wave 1 #3 (full contract).
 
-    Body: {text, voice?, speed?}. Speed 0.5-2.0 (1 = normal). Arabic-first:
-    the default voice is the first Arabic voice installed. Gated by the
-    `tts` permission (guests 404; Track B 11.2 contract). Piper runs in an
-    ISOLATED venv via subprocess — no new deps in the server venv."""
+    Body: {text, voice?, speed?, format?}. Speed 0.5-2.0 (1 = normal).
+    format=wav (default) | mp3 (via ffmpeg; honest WAV fallback when
+    ffmpeg is absent, signalled by X-Aali-Format + note in 503-free body).
+    Role-aware: guests are limited to 500 chars (auth users 2000) BUT
+    guests still get the uniform 404 — TTS is user+ only (Track B).
+    Status codes: 400 empty text, 413 too long, 404 unknown voice (and
+    uniform-404 for unauthorized callers), 429 rate limit, 503 synth fail."""
     denied = _require_role("tts")
     if denied is not None:
         return denied
@@ -1025,26 +1045,55 @@ def api_voice_synthesize():
     text = str(payload.get("text") or "")
     if not text.strip():
         return make_response({"ok": False, "error": "empty text"}, 400)
+
+    # Role-aware char limit (server-side only; guests never reach here
+    # because of the 404 above, so the guest limit applies to a future
+    # guest-allowed variant — kept explicit for the contract).
+    ctx = _resolve_role()
+    limit = aali_tts.MAX_TEXT_CHARS
+    if ctx["role"] == "guest":
+        limit = aali_tts.GUEST_TEXT_CHARS
+    if len(text) > limit:
+        return make_response(
+            {"ok": False, "error": f"text too long (max {limit} chars)"}, 413)
+
+    if not _tts_rate_ok(ctx["user_id"]):
+        return make_response({"ok": False,
+                              "error": "too many requests — بطّل شوية"}, 429)
+
     result = aali_tts.synthesize(
         text,
         voice_id=payload.get("voice") or None,
         speed=payload.get("speed", 1.0),
+        fmt=payload.get("format") or "wav",
     )
     if not result.get("ok"):
-        return make_response({"ok": False,
-                              "error": result.get("error", "tts failed")}, 503)
-    response = send_file(result["wav"], mimetype="audio/wav")
+        error = result.get("error", "tts failed")
+        status = 404 if error.startswith("unknown voice") else 503
+        return make_response({"ok": False, "error": error}, status)
+
+    mime = "audio/mpeg" if result.get("format") == "mp3" else "audio/wav"
+    response = send_file(result["audio"], mimetype=mime)
     response.headers["X-Aali-Voice"] = result.get("voice", "")
+    response.headers["X-Aali-Format"] = result.get("format", "wav")
     response.headers["X-Aali-Cached"] = "1" if result.get("cached") else "0"
+    if result.get("note"):
+        response.headers["X-Aali-Note"] = result["note"]
     return response
+
+
+@app.route("/api/voice/list", methods=["GET"])
+def api_voice_list():
+    """Installed TTS voices (Arabic first): {id, name, language, gender,
+    quality}. Aliased at /api/voice/voices for the earlier clients."""
+    return {"ok": True, "available": aali_tts.available(),
+            "voices": aali_tts.list_voices(),
+            "default": aali_tts.default_voice()}
 
 
 @app.route("/api/voice/voices", methods=["GET"])
 def api_voice_voices():
-    """Installed TTS voices (Arabic first) + whether TTS is available."""
-    return {"ok": True, "available": aali_tts.available(),
-            "voices": aali_tts.list_voices(),
-            "default": aali_tts.default_voice()}
+    return api_voice_list()
 
 
 @app.route("/api/health", methods=["GET"])

@@ -44,7 +44,7 @@ export function setToken(t: string) {
   if (t) localStorage.setItem(TOKEN_KEY, t);
   else localStorage.removeItem(TOKEN_KEY);
 }
-function authHeaders(extra?: Record<string, string>): Record<string, string> {
+export function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...extra };
   const t = getToken();
   if (t) h["X-API-Key"] = t;
@@ -424,7 +424,7 @@ export function stopSpeaking(): void {
 
 export async function speak(
   text: string,
-  opts: { voice?: string; speed?: number } = {},
+  opts: { voice?: string; speed?: number; volume?: number } = {},
 ): Promise<boolean> {
   stopSpeaking();
   const res = await fetch(`${apiBase}/api/voice/synthesize`, {
@@ -436,6 +436,7 @@ export async function speak(
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
+  if (typeof opts.volume === "number") audio.volume = Math.min(Math.max(opts.volume / 100, 0), 1);
   currentAudio = audio;
   audio.onended = () => {
     if (currentAudio === audio) currentAudio = null;
@@ -445,8 +446,33 @@ export async function speak(
     await audio.play();
     return true;
   } catch {
+    // iOS Safari: playback needs a user gesture — auto-play may fail on
+    // first touch-less attempt; surface false and let the caller toast.
     return false;
   }
+}
+
+/* ————— voice settings (Wave 1 #3.5-3.7) —————
+   Persisted locally; the server keeps no per-user voice state yet. */
+export interface VoiceSettings {
+  autoPlay: boolean;
+  voice: string;
+  speed: number;   // 0.5 - 2.0
+  volume: number;  // 0 - 100
+}
+
+const VOICE_KEY = "aali_voice";
+
+export function getVoiceSettings(): VoiceSettings {
+  try {
+    const raw = localStorage.getItem(VOICE_KEY);
+    if (raw) return { autoPlay: false, voice: "", speed: 1, volume: 100, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { autoPlay: false, voice: "", speed: 1, volume: 100 };
+}
+
+export function setVoiceSettings(s: VoiceSettings): void {
+  try { localStorage.setItem(VOICE_KEY, JSON.stringify(s)); } catch { /* ignore */ }
 }
 
 export interface CompactResult {

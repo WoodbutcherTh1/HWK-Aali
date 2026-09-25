@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import subprocess
 import sys
 import time
@@ -576,6 +577,128 @@ def render_reply(text: str, color: bool) -> None:
             print(fx(out, _term_width()) if BIDI_MODE else out)
 
 
+# ----------------------------------------------------------------- voice
+
+def _voice_cfg() -> dict:
+    """Load ~/.aali_cli_voice: {auto, voice, speed}. Defaults: auto off."""
+    try:
+        cfg = json.loads(VOICE_FILE.read_text(encoding="utf-8"))
+        if isinstance(cfg, dict):
+            return {"auto": bool(cfg.get("auto")), "voice": str(cfg.get("voice") or ""),
+                    "speed": float(cfg.get("speed", 1.0))}
+    except (OSError, ValueError):
+        pass
+    return {"auto": False, "voice": "", "speed": 1.0}
+
+
+def _voice_save(cfg: dict) -> None:
+    try:
+        VOICE_FILE.write_text(json.dumps(cfg), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _play_wav(path: str) -> None:
+    """Play a WAV locally (Windows winsound; else best-effort afplay/aplay)."""
+    if sys.platform == "win32":
+        import winsound
+        winsound.PlaySound(path, winsound.SND_FILENAME)
+        return
+    for player in ("afplay", "aplay", "paplay"):
+        if shutil.which(player):
+            subprocess.run([player, path], capture_output=True, timeout=120)
+            return
+    print(paint("(no audio player found)", "grey"))
+
+
+def cli_voice(base: str, raw: str, api_key: str, color: bool, say_fn) -> None:
+    """`/voice on|off|list|set <id>|speed <n>|status` — Wave 1 #3.8."""
+    cfg = _voice_cfg()
+    parts = raw.split()
+    sub = parts[0] if parts else "status"
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    if sub == "on":
+        cfg["auto"] = True
+        _voice_save(cfg)
+        say_fn("✻", "النطق التلقائي مفعّل — كل رد سيُقرأ صوتياً", "info")
+    elif sub == "off":
+        cfg["auto"] = False
+        _voice_save(cfg)
+        say_fn("✻", "النطق التلقائي متوقف", "info")
+    elif sub == "list":
+        try:
+            req = urllib.request.Request(base + "/api/voice/list", headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            say_fn("✗", "تعذّر جلب قائمة الأصوات", "warn")
+            return
+        for v in data.get("voices", []):
+            star = " ←" if v["id"] == cfg.get("voice") or (
+                not cfg.get("voice") and v["id"] == data.get("default")) else ""
+            print(paint(f"  {v['id']}  ", "gold", enabled=color)
+                  + paint(f"{v.get('language', '')} {v.get('quality', '')}{star}",
+                          "grey", enabled=color))
+    elif sub == "set" and len(parts) >= 2:
+        cfg["voice"] = parts[1]
+        _voice_save(cfg)
+        say_fn("✻", f"الصوت: {parts[1]}", "info")
+    elif sub == "speed" and len(parts) >= 2:
+        try:
+            cfg["speed"] = min(max(float(parts[1]), 0.5), 2.0)
+        except ValueError:
+            say_fn("✗", "/voice speed 0.5..2.0", "warn")
+            return
+        _voice_save(cfg)
+        say_fn("✻", f"السرعة: {cfg['speed']}×", "info")
+    else:
+        auto = "مفعّل" if cfg.get("auto") else "متوقف"
+        say_fn("✻", f"auto={auto} voice={cfg.get('voice') or '(افتراضي)'} speed={cfg.get('speed')}×", "info")
+        say_fn("✻", "/voice on|off|list|set <id>|speed <n> — و /say <نص> للنطق الفوري", "info")
+
+
+def cli_say(base: str, raw: str, api_key: str, color: bool, say_fn) -> None:
+    """`/say <text>` — synthesize + play immediately (Wave 1 #3.8)."""
+    text = raw.strip()
+    if not text:
+        say_fn("✗", '/say <نص>', "warn")
+        return
+    cfg = _voice_cfg()
+    payload = json.dumps({"text": text, "voice": cfg.get("voice") or None,
+                          "speed": cfg.get("speed", 1.0)}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    say_fn("◌", "جارٍ توليد الصوت…", "info")
+    try:
+        req = urllib.request.Request(base + "/api/voice/synthesize", data=payload,
+                                     headers=headers)
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            ct = resp.headers.get("Content-Type", "audio/wav")
+            audio = resp.read()
+    except urllib.error.HTTPError as exc:
+        say_fn("✗", f"فشل التوليد: HTTP {exc.code}", "warn")
+        return
+    except Exception:  # noqa: BLE001
+        say_fn("✗", "السيرفر ما رد", "warn")
+        return
+    suffix = ".mp3" if "mpeg" in ct else ".wav"
+    out = Path(tempfile.gettempdir()) / f"aali_say{suffix}"
+    out.write_bytes(audio)
+    if suffix == ".mp3":
+        # winsound plays WAV only; mp3 goes through ffmpeg when present
+        ff = shutil.which("ffmpeg")
+        if ff:
+            wav_out = out.with_suffix(".wav")
+            subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(out),
+                            str(wav_out)], capture_output=True, timeout=60)
+            out = wav_out
+    _play_wav(str(out))
+    say_fn("✻", "تم ✓", "info")
+
+
 # ----------------------------------------------------------------- search
 def cli_search(base: str, raw: str, api_key: str, color: bool,
                say_fn) -> None:
@@ -768,12 +891,13 @@ def one_shot(base: str, question: str, api_key: str = "") -> None:
 
 # ----------------------------------------------------------------- line editor
 HISTORY_FILE = Path.home() / ".aali_cli_history"
+VOICE_FILE = Path.home() / ".aali_cli_voice"
 HISTORY_MAX = 500
 
 _KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
 _SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear",
                    "/theme", "/tools", "/multi", "/sid", "/bidi", "/jobs",
-                   "/search")
+                   "/search", "/voice", "/say")
 
 
 def _jobs_panel(base: str, color: bool) -> None:
@@ -1216,6 +1340,8 @@ def repl(base: str, api_key: str = "") -> None:
                         ("/verbose", "show Aali's live reasoning + scratchpad"),
                         ("/jobs", "live jobs board (what's running now)"),
                         ("/search", "FTS across conversations (--all / --session <sid>)"),
+                        ("/voice", "TTS settings: on|off|list|set <id>|speed <n>"),
+                        ("/say", "speak text aloud via Piper (/say <text>)"),
                         ("/multi", "paste a multi-line block"),
                         ("/sid", "show session id"),
         		("/bidi", "Arabic display fix (on/off/auto)"),
@@ -1288,6 +1414,12 @@ def repl(base: str, api_key: str = "") -> None:
                     continue
                 if cmd == "/search":
                     cli_search(base, arg, api_key, color, say)
+                    continue
+                if cmd == "/voice":
+                    cli_voice(base, arg, api_key, color, say)
+                    continue
+                if cmd == "/say":
+                    cli_say(base, arg, api_key, color, say)
                     continue
                 if cmd == "/clear":
                     os.system("cls" if os.name == "nt" else "clear")
