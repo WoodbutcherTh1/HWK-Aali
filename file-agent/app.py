@@ -36,6 +36,7 @@ from file_agent import preview as aali_preview
 from file_agent import redaction as aali_redaction
 from file_agent import shares as aali_shares
 from file_agent import prompts as aali_prompts
+from file_agent import assistants as aali_assistants
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
@@ -485,6 +486,20 @@ def api_ask():
         if rag_sources == [] and aali_projects.list_documents(
                 pid, _projects_ns()).get("docs"):
             rag_note = "قاعدة معرفة المشروع لا تحتوي شيئاً ذا صلة بهذا السؤال"
+    # Custom assistant persona (Wave 4): TEXT only, injected AFTER the
+    # project prepend so the persona line leads the final message. It can
+    # never change the tool policy — the server-enforced guest policy
+    # applied above stands regardless of what the persona says.
+    aid = str(record.get("assistant_id") or "")
+    assistant = (aali_assistants.get_assistant(aid, _projects_ns())
+                 if aid else None)
+    if assistant is None and aid:
+        # Assistant deleted by another client: detach silently.
+        record.pop("assistant_id", None)
+        _save_session(record)
+    persona = aali_assistants.persona_block(assistant)
+    if persona:
+        message = f"{persona}\n{message}"
     _append_turn(record, "user", message)
     _meter_chars(len(message), 0)
     gate_state: dict[str, object] = {}
@@ -655,6 +670,17 @@ def api_ask_stream():
             if rag_sources == [] and aali_projects.list_documents(
                     pid, _projects_ns()).get("docs"):
                 rag_note = "قاعدة معرفة المشروع لا تحتوي شيئاً ذا صلة بهذا السؤال"
+    # Custom assistant persona (Wave 4): same contract as /api/ask — TEXT
+    # only, persona line leads the message, policy untouched.
+    aid = str(record.get("assistant_id") or "")
+    assistant = (aali_assistants.get_assistant(aid, _projects_ns())
+                 if aid else None)
+    if assistant is None and aid:
+        record.pop("assistant_id", None)
+        _save_session(record)
+    persona = aali_assistants.persona_block(assistant)
+    if persona:
+        message = f"{persona}\n{message}"
     _append_turn(record, "user", message)
 
     request_id = new_request_id()
@@ -1290,6 +1316,138 @@ def api_projects_activate():
     rec["project_id"] = str(pid)
     _save_session(rec)
     return {"ok": True, "project": _project_payload(p)}
+
+
+# ————— Wave 4: custom assistants (persona configs over the machinery) —————
+
+def _assistant_payload(a: dict | None) -> dict:
+    if not a:
+        return {}
+    return {"id": a["id"], "name": a.get("name", ""),
+            "icon": a.get("icon", "🎭"), "tagline": a.get("tagline", ""),
+            "instruction": a.get("instruction", ""),
+            "project_id": a.get("project_id"),
+            "created": a.get("created", 0)}
+
+
+@app.route("/api/assistants", methods=["GET"])
+def api_assistants_list():
+    denied = _require_role("assistants")
+    if denied is not None:
+        return denied
+    return {"ok": True,
+            "assistants": [_assistant_payload(a) for a in
+                           aali_assistants.list_assistants(_projects_ns())]}
+
+
+@app.route("/api/assistants", methods=["POST"])
+def api_assistants_create():
+    denied = _require_role("assistants")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    out = aali_assistants.create_assistant(
+        str(body.get("name") or ""), _projects_ns(),
+        icon=str(body.get("icon") or "🎭"),
+        tagline=str(body.get("tagline") or ""),
+        instruction=str(body.get("instruction") or ""),
+        project_id=(str(body["project_id"]) if body.get("project_id")
+                    else None))
+    if not out.get("ok"):
+        return make_response(out, 400)
+    return {"ok": True,
+            "assistant": _assistant_payload(out["assistant"])}, 201
+
+
+@app.route("/api/assistants/<aid>", methods=["PUT"])
+def api_assistant_update(aid):
+    denied = _require_role("assistants")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    # JSON has no False vs None: explicit false/"" unpins, a string pins,
+    # an absent field leaves the pin untouched.
+    project_id = body.get("project_id", None)
+    if project_id in (False, ""):
+        project_id = False
+    elif project_id is not None:
+        project_id = str(project_id)
+    out = aali_assistants.update_assistant(
+        aid, _projects_ns(),
+        name=body.get("name"), icon=body.get("icon"),
+        tagline=body.get("tagline"), instruction=body.get("instruction"),
+        project_id=project_id)
+    if not out.get("ok"):
+        status = 404 if out.get("error") == "المساعد غير موجود" else 400
+        return make_response(out, status)
+    return {"ok": True, "assistant": _assistant_payload(out["assistant"])}
+
+
+@app.route("/api/assistants/<aid>", methods=["DELETE"])
+def api_assistant_delete(aid):
+    denied = _require_role("assistants")
+    if denied is not None:
+        return denied
+    out = aali_assistants.delete_assistant(aid, _projects_ns())
+    if not out.get("ok"):
+        return make_response(out, 404)
+    # Detach any session still bound to the deleted assistant so the next
+    # ask is honest (no ghost persona).
+    changed = False
+    for rec in _sessions.values():
+        if rec.get("assistant_id") == aid:
+            rec.pop("assistant_id", None)
+            changed = True
+    if changed:
+        first = next(iter(_sessions.values()), None)
+        if first is not None:
+            _save_session(first)
+    return {"ok": True}
+
+
+@app.route("/api/assistants/active", methods=["GET"])
+def api_assistants_active():
+    """The ACTIVE assistant for the caller's current session (chat chip)."""
+    denied = _require_role("assistants")
+    if denied is not None:
+        return denied
+    sid = request.args.get("sid") or ""
+    key = _user_ns(sid) if sid else ""
+    rec = _sessions.get(key) if key else None
+    aid = str((rec or {}).get("assistant_id") or "")
+    if not aid:
+        return {"ok": True, "assistant": None}
+    a = aali_assistants.get_assistant(aid, _projects_ns())
+    return {"ok": True, "assistant": _assistant_payload(a) if a else None}
+
+
+@app.route("/api/assistants/active", methods=["POST"])
+def api_assistants_activate():
+    """Bind/unbind the ACTIVE assistant to the caller's session:
+    {sid, assistant_id|null}. The persona is TEXT injected at ask time —
+    the tool policy is never touched (guest policy enforced server-side
+    stands regardless of what the persona says)."""
+    denied = _require_role("assistants")
+    if denied is not None:
+        return denied
+    body = request.get_json(silent=True) or {}
+    sid = str(body.get("sid") or "")
+    if not sid:
+        return make_response({"ok": False, "error": "sid required"}, 400)
+    rec = _sessions.get(_user_ns(sid))
+    if rec is None:
+        return make_response({"ok": False, "error": "session not found"}, 404)
+    aid = body.get("assistant_id")
+    if aid in (None, "", False):
+        rec.pop("assistant_id", None)
+        _save_session(rec)
+        return {"ok": True, "assistant": None}
+    a = aali_assistants.get_assistant(str(aid), _projects_ns())
+    if a is None:
+        return make_response({"ok": False, "error": "not found"}, 404)
+    rec["assistant_id"] = str(aid)
+    _save_session(rec)
+    return {"ok": True, "assistant": _assistant_payload(a)}
 
 
 # ————— Wave 3 #8: shared conversations (read-only tokened links) —————

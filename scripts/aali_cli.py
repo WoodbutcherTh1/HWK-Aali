@@ -1003,6 +1003,156 @@ def cli_prompts(base: str, arg: str, api_key: str, color: bool, say_fn) -> None:
         print(line)
 
 
+# ------------------------------------------------------------ assistants
+def cli_assistants(base: str, raw: str, api_key: str, color: bool,
+                   say_fn) -> None:
+    """`/assistants` — custom assistants: named personas over Aali (Wave 4).
+
+    /assistants                list assistants (numbered)
+    /assistants new <name>     create one — paste the persona instructions,
+                               end with a line '+++'
+    /assistants use <n>        bind assistant N to THIS session
+    /assistants off            unbind (Aali back to his own persona)
+    /assistants edit <n>       replace assistant N's instructions (paste, +++ )
+    /assistants del <n>        delete assistant N (all sessions detach)
+    """
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+
+    def _req(path: str, method: str = "GET", body: dict | None = None
+             ) -> tuple[int, dict]:
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(base + path, headers=headers,
+                                     data=data, method=method)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, {}
+        except Exception:  # noqa: BLE001
+            return 0, {}
+
+    def _paste() -> str:
+        say_fn("✻", "الصق التعليمات ثم اكتب +++ في سطر مستقل للإنهاء (فارغ = تخطّى):",
+               "info")
+        lines: list[str] = []
+        try:
+            while True:
+                ln = input()
+                if ln.strip() == "+++":
+                    break
+                lines.append(ln)
+        except EOFError:
+            pass
+        return "\n".join(lines).strip()
+
+    parts = raw.split()
+    sub = parts[0] if parts else "list"
+
+    if sub in ("list", ""):
+        code, data = _req("/api/assistants")
+        if code != 200:
+            say_fn("✗", "تعذّر جلب المساعدين"
+                   + (f" (HTTP {code})" if code else ""), "warn")
+            return
+        rows = data.get("assistants", [])
+        if not rows:
+            say_fn("✗", 'لا مساعدين — أنشئ واحداً: /assistants new <اسم>',
+                   "warn")
+            return
+        say_fn("✻", f"{len(rows)} مساعد — استخدمه: /assistants use <رقم>",
+               "info")
+        for i, a in enumerate(rows):
+            print(paint(f"[{i}] ", "gold", enabled=color)
+                  + fx(f"{a.get('icon', '🎭')} {a.get('name', '')}",
+                       _term_width())
+                  + paint(f"  {a.get('tagline', '')}", "grey", enabled=color))
+        return
+
+    if sub == "new":
+        name = " ".join(parts[1:]).strip()
+        if not name:
+            say_fn("✗", '/assistants new <اسم المساعد>', "warn")
+            return
+        instruction = _paste()
+        code, _ = _req("/api/assistants", "POST",
+                       {"name": name, "instruction": instruction})
+        say_fn("✻" if code == 201 else "✗",
+               "أُنشئ المساعد ✓" if code == 201 else f"فشل (HTTP {code})",
+               "info" if code == 201 else "warn")
+        return
+
+    def _pick(which: str):
+        try:
+            idx = int(parts[1])
+        except (IndexError, ValueError):
+            say_fn("✗", f"/assistants {which} <رقم من /assistants>", "warn")
+            return None
+        code, data = _req("/api/assistants")
+        rows = data.get("assistants", []) if code == 200 else []
+        if idx < 0 or idx >= len(rows):
+            say_fn("✗", "رقم غير موجود", "warn")
+            return None
+        return rows[idx]
+
+    if sub == "use":
+        row = _pick("use")
+        if row is None:
+            return
+        sid = get_sid() if "get_sid" in globals() else ""
+        if not sid:
+            say_fn("✗", "ابدأ محادثة أولاً", "warn")
+            return
+        code, _ = _req("/api/assistants/active", "POST",
+                       {"sid": sid, "assistant_id": row["id"]})
+        say_fn("✻" if code == 200 else "✗",
+               f"يتكلم آلي الآن بأسلوب «{row['name']}» ✓"
+               if code == 200 else f"فشل الربط (HTTP {code})",
+               "info" if code == 200 else "warn")
+        return
+
+    if sub == "off":
+        sid = get_sid() if "get_sid" in globals() else ""
+        if not sid:
+            say_fn("✗", "لا جلسة نشطة", "warn")
+            return
+        code, _ = _req("/api/assistants/active", "POST",
+                       {"sid": sid, "assistant_id": None})
+        say_fn("✻" if code == 200 else "✗",
+               "عاد آلي لشخصيته الأساسية ✓" if code == 200
+               else f"فشل (HTTP {code})",
+               "info" if code == 200 else "warn")
+        return
+
+    if sub == "edit":
+        row = _pick("edit")
+        if row is None:
+            return
+        instruction = _paste()
+        code, _ = _req(f"/api/assistants/{row['id']}", "PUT",
+                       {"instruction": instruction})
+        say_fn("✻" if code == 200 else "✗",
+               "حُفظت التعليمات ✓" if code == 200 else f"فشل (HTTP {code})",
+               "info" if code == 200 else "warn")
+        return
+
+    if sub == "del":
+        row = _pick("del")
+        if row is None:
+            return
+        code, _ = _req(f"/api/assistants/{row['id']}", "DELETE")
+        say_fn("✻" if code == 200 else "✗",
+               "حُذف المساعد وفُصل عن كل الجلسات ✓" if code == 200
+               else f"غير موجود (HTTP {code})",
+               "info" if code == 200 else "warn")
+        return
+
+    say_fn("✗", "/assistants list|new|use|off|edit|del", "warn")
+
+
 # ----------------------------------------------------------------- search
 def cli_search(base: str, raw: str, api_key: str, color: bool,
                say_fn) -> None:
@@ -1201,7 +1351,7 @@ HISTORY_MAX = 500
 _KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
 _SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear", "/projects",
                    "/theme", "/tools", "/multi", "/sid", "/bidi", "/jobs",
-                   "/share", "/prompts", "/search", "/voice", "/say")
+                   "/share", "/prompts", "/assistants", "/search", "/voice", "/say")
 
 
 def _jobs_panel(base: str, color: bool) -> None:
@@ -1644,6 +1794,7 @@ def repl(base: str, api_key: str = "") -> None:
                         ("/verbose", "show Aali's live reasoning + scratchpad"),
                         ("/jobs", "live jobs board (what's running now)"),
                         ("/projects", "المشاريع وقاعدة المعرفة: list|new|use|off|docs|add"),
+                        ("/assistants", "المساعدون المخصصون: list|new|use|off|edit|del"),
                         ("/search", "FTS across conversations (--all / --session <sid>)"),
                         ("/voice", "TTS settings: on|off|list|set <id>|speed <n>"),
                         ("/say", "speak text aloud via Piper (/say <text>)"),
@@ -1722,6 +1873,9 @@ def repl(base: str, api_key: str = "") -> None:
                     continue
                 if cmd == "/projects":
                     cli_projects(base, arg, api_key, color, say)
+                    continue
+                if cmd == "/assistants":
+                    cli_assistants(base, arg, api_key, color, say)
                     continue
                 if cmd == "/share":
                     cli_share(base, arg, api_key, color, say)

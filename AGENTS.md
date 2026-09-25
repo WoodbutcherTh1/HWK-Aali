@@ -136,6 +136,24 @@ in parallel:
   — the watch-party dashboard for long jobs (block clock, per-process cards,
   GPU card, next-event line); Desktop shortcut on the owner's desktop
   (2026-09-25) launches it through scripts/mission_clock.bat.
+- **Wave 4 item 1: custom assistants (2026-09-25, Buffy)**: named persona
+  configs OVER the existing machinery — file_agent/assistants.py (JSONL
+  store D:/hwk-data/assistants.jsonl, caps 40/120/2000 chars + 50/ns,
+  ns-scoped like prompts/shares) + roles `assistants` permission
+  (user/dev/owner; admin mirrors the prompts template) + app.py CRUD +
+  /api/assistants/active bind + ask-time persona injection on /api/ask AND
+  /api/ask/stream — persona is TEXT only, injected AFTER the
+  [تعليمات المشروع] prepend so it leads the message, and can NEVER change
+  the tool policy (client policy + server-enforced remote-guest policy keep
+  precedence; test-pinned). Delete detaches ALL session binds; stale binds
+  (assistant deleted elsewhere) detach silently at the next ask — never a
+  ghost persona. Guests: uniform 404 on every route. Clients: web 🎭 nav +
+  dialog + header chip + /assistants slash cmd; CLI /assistants
+  list|new|use|off|edit|del (+TAB, /help). Docs: docs/features/
+  custom_assistants.md. Tests: tests/test_assistants.py (21); suite 1094
+  green / 10 skipped. Lesson re-pinned: _user_ns is request-scoped — with
+  the MASTER key the embedded id is the PLAINTEXT key (u<key>:<sid>), not
+  the key_id; tests replicate the format outside a request context.
 - **Part 5 security track 5.4-5.5 (2026-09-25, Buffy)**: (5.4 rate-limit
   review) found login/verify/reset code-guessing UNBOUNDED — fixed:
   login 5 fails → 5-min in-memory lockout (rejects the CORRECT password

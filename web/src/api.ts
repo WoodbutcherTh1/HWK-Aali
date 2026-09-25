@@ -709,3 +709,64 @@ export async function deletePrompt(pid: string): Promise<boolean> {
   });
   return res.ok;
 }
+
+/* ————— Wave 4: custom assistants ————— */
+export interface AssistantRow {
+  id: string; name: string; icon: string; tagline: string;
+  instruction: string; project_id: string | null; created: number;
+}
+
+export async function listAssistants(): Promise<AssistantRow[]> {
+  const res = await fetch(`${apiBase}/api/assistants`, { headers: authHeaders() });
+  if (!res.ok) return [];
+  return (await res.json()).assistants ?? [];
+}
+
+export async function createAssistant(
+  name: string, tagline: string, instruction: string, icon: string,
+): Promise<AssistantRow | null> {
+  const res = await fetch(`${apiBase}/api/assistants`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name, tagline, instruction, icon }),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).assistant ?? null;
+}
+
+export async function updateAssistant(
+  aid: string, patch: Partial<Pick<AssistantRow, "name" | "icon" | "tagline" | "instruction">>,
+): Promise<AssistantRow | null> {
+  const res = await fetch(`${apiBase}/api/assistants/${aid}`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).assistant ?? null;
+}
+
+export async function deleteAssistant(aid: string): Promise<boolean> {
+  const res = await fetch(`${apiBase}/api/assistants/${aid}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  return res.ok;
+}
+
+export async function getActiveAssistant(sid: string): Promise<AssistantRow | null> {
+  const res = await fetch(`${apiBase}/api/assistants/active?sid=${encodeURIComponent(sid)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).assistant ?? null;
+}
+
+export async function setActiveAssistant(sid: string, assistantId: string | null): Promise<AssistantRow | null> {
+  const res = await fetch(`${apiBase}/api/assistants/active`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ sid, assistant_id: assistantId }),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).assistant ?? null;
+}

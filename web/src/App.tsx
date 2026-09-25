@@ -24,6 +24,12 @@ import {
   listPrompts,
   addPrompt,
   deletePrompt,
+  listAssistants,
+  createAssistant,
+  updateAssistant,
+  deleteAssistant,
+  getActiveAssistant,
+  setActiveAssistant,
   listProjects,
   listProjectDocs,
   createProject,
@@ -52,6 +58,7 @@ import {
   type RagSource,
   type ShareRow,
   type BuiltinPrompt,
+  type AssistantRow,
   type CustomPrompt,
   type SearchHit,
   type SessionRow,
@@ -202,7 +209,7 @@ type NavItem = {
   icon: string;
   label: string;
   prompt?: string;
-  action?: "github" | "policy" | "projects";
+  action?: "github" | "policy" | "projects" | "assistants";
   badge?: string;
   minRole?: "guest" | "user" | "admin" | "dev" | "owner";
   children?: { icon: string; label: string; prompt: string }[];
@@ -223,6 +230,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   { icon: "🧩", label: "سير عمل n8n", badge: "تجريبي", prompt: "اصنع لي سير عمل n8n: عند وصول بريد جديد أرسل ملخصه إلى تيليجرام", minRole: "user" },
   { icon: "🗂️", label: "المشاريع", minRole: "user", action: "projects" },
+  { icon: "🎭", label: "المساعدون", minRole: "user", action: "assistants" },
   { icon: "⬇️", label: "التنزيلات", minRole: "user" },
   { icon: "🐙", label: "GitHub", action: "github", minRole: "user" },
   { icon: "🛡️", label: "سياسة التنفيذ", action: "policy", minRole: "guest" },
@@ -256,6 +264,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { cmd: "extract", icon: "📄", label: "استخراج", hint: "استخرج نصاً من صورة أو مستند", kind: "insert", value: "استخرج النص/المحتوى من الملف التالي: " },
   { cmd: "web", icon: "🌐", label: "بحث في الويب", hint: "ابحث ثم اقرأ أفضل نتيجة", kind: "insert", value: "ابحث في الويب عن: " },
   { cmd: "prompts", icon: "✦", label: "مكتبة الموجّهات", hint: "جاهزة + موجّهاتك المحفوظة", kind: "action", value: "prompts" },
+  { cmd: "assistants", icon: "🎭", label: "المساعدون المخصصون", hint: "شخصيات تغيّر أسلوب آلي دون تغيير صلاحياته", kind: "action", value: "assistants" },
   { cmd: "share", icon: "🔗", label: "مشاركة المحادثة", hint: "رابط قراءة فقط قابل للإلغاء", kind: "action", value: "share" },
   { cmd: "github", icon: "🐙", label: "GitHub", hint: "افتح لوحة GitHub", kind: "action", value: "github" },
   { cmd: "policy", icon: "🛡️", label: "سياسة التنفيذ", hint: "تلقائي / قوي / اسأل دائماً", kind: "action", value: "policy" },
@@ -343,10 +352,11 @@ function VoicePicker({
 
 /* ————— Wave 2: Projects + RAG manager (in-app dialog) ————— */
 function ProjectsDialog({
-  onClose, onActivated, showToast,
+  onClose, onActivated, activeId, showToast,
 }: {
   onClose: () => void;
   onActivated: (p: ProjectRow | null) => void;
+  activeId: string | null;
   showToast: (s: string) => void;
 }) {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -436,7 +446,7 @@ function ProjectsDialog({
                   <small>{p.doc_count} مستند · {Math.round((p.doc_chars || 0) / 100) / 10}k حرف</small>
                 </div>
                 <div className="project-row-actions">
-                  {activeProjectId === p.id && <span className="beta-badge">مفعّل</span>}
+                  {activeId === p.id && <span className="beta-badge">مفعّل</span>}
                   <button type="button" className="ghost-btn" title="استخدام في المحادثة" onClick={(e) => { e.stopPropagation(); void use(p); }}>💬</button>
                   <button type="button" className="ghost-btn" title="أرشفة" onClick={(e) => { e.stopPropagation(); void archive(p); }}>📦</button>
                   <button type="button" className="ghost-btn" title="حذف" onClick={(e) => { e.stopPropagation(); void del(p); }}>🗑</button>
@@ -608,6 +618,104 @@ function PromptsDialog({ onClose, onInsert, showToast }: { onClose: () => void; 
   );
 }
 
+const ASSISTANT_ICONS = ["🎭", "🤖", "🧑‍🏫", "🧑‍💻", "📐", "🧾", "🌐", "🎮", "📚", "✦"];
+
+/* ————— Wave 4: custom assistants dialog ————— */
+function AssistantsDialog({
+  onClose, onActivated, activeId, showToast,
+}: {
+  onClose: () => void;
+  onActivated: (a: AssistantRow | null) => void;
+  activeId: string | null;
+  showToast: (s: string) => void;
+}) {
+  const [rows, setRows] = useState<AssistantRow[]>([]);
+  const [name, setName] = useState("");
+  const [tagline, setTagline] = useState("");
+  const [instr, setInstr] = useState("");
+  const [icon, setIcon] = useState("🎭");
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(async () => setRows(await listAssistants()), []);
+  useEffect(() => { void reload(); }, [reload]);
+
+  const add = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    const a = await createAssistant(name.trim(), tagline.trim(), instr.trim(), icon);
+    setBusy(false);
+    if (a) { setName(""); setTagline(""); setInstr(""); await reload(); showToast("أُنشئ المساعد ✦"); }
+    else showToast("تعذّر إنشاء المساعد");
+  };
+  const del = async (aid: string) => {
+    if (await deleteAssistant(aid)) {
+      await reload();
+      if (activeId === aid) onActivated(null);
+      showToast("حُذف المساعد وفُصل عن كل المحادثات");
+    }
+  };
+  const use = async (a: AssistantRow) => {
+    const sid = getSid();
+    if (!sid) { showToast("ابدأ محادثة أولاً"); return; }
+    const act = await setActiveAssistant(sid, a.id);
+    if (act) { onActivated(act); showToast(`يتكلم آلي الآن بأسلوب «${a.name}»`); }
+  };
+  const unuse = async () => {
+    const sid = getSid();
+    if (!sid) return;
+    if (await setActiveAssistant(sid, null)) { onActivated(null); showToast("عاد آلي لشخصيته الأساسية"); }
+  };
+  const saveEdit = async (a: AssistantRow) => {
+    const out = await updateAssistant(a.id, { tagline: a.tagline, instruction: a.instruction });
+    if (out) { await reload(); showToast("حُفظت تعديلات المساعد"); }
+    else showToast("تعذّر الحفظ");
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal prompts-modal assistants-modal" onClick={(e) => e.stopPropagation()} dir="rtl">
+        <div className="modal-head">
+          <h3>🎭 المساعدون المخصصون</h3>
+          <button type="button" className="ghost-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="prompts-body">
+          <p className="prompts-sub">شخصيات تحدد أسلوب آلي وأدبه ونهجه — نص فقط، لا تغيّر صلاحياته ولا أدواته أبداً.</p>
+          {rows.length === 0 && <p className="quiet">لا مساعدين بعد — أنشئ شخصية خاصة بك.</p>}
+          {rows.map((a) => (
+            <div key={a.id} className="prompt-row">
+              <button
+                type="button"
+                className="prompt-use"
+                title={a.instruction}
+                onClick={() => void use(a)}
+              >
+                <span>{a.icon} <b>{a.name}</b>{activeId === a.id && <span className="beta-badge">مفعّل</span>}</span>
+                <small>{a.tagline || a.instruction.slice(0, 60) || "شخصية مخصصة"}</small>
+              </button>
+              <button type="button" className="ghost-btn" title="حذف" onClick={() => void del(a.id)}>🗑</button>
+            </div>
+          ))}
+          <b className="prompts-sub">أضف مساعداً</b>
+          <div className="prompt-add">
+            <div className="assistant-icons">
+              {ASSISTANT_ICONS.map((ic) => (
+                <button key={ic} type="button" className={`icon-pick ${icon === ic ? "on" : ""}`} onClick={() => setIcon(ic)}>{ic}</button>
+              ))}
+            </div>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="الاسم (مثل: مدرّس الرياضيات)" maxLength={40} />
+            <input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="وصف قصير (اختياري)" maxLength={120} />
+            <textarea value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="تعليمات الشخصية: كيف يجيب؟ ما أسلوبه؟ (اختياري)" rows={3} maxLength={2000} />
+            <button type="button" className="upgrade-pill" disabled={!name.trim() || busy} onClick={() => void add()}>＋ إنشاء</button>
+          </div>
+          {activeId && (
+            <button type="button" className="ghost-btn" onClick={() => void unuse()}>فصل المساعد عن المحادثة</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { role, isOwner, isAdmin, isDev, previewing, can: canPerm, refresh: refreshRole } = useRole();
   /* Track B 11.6/11.7: owner/dev surfaces — the badge + preview toggle stay
@@ -649,6 +757,10 @@ export default function App() {
   /* ————— Wave 3: shares + prompt library ————— */
   const [shareOpen, setShareOpen] = useState(false);
   const [promptsOpen, setPromptsOpen] = useState(false);
+  /* ————— Wave 4: custom assistants ————— */
+  const [assistantsOpen, setAssistantsOpen] = useState(false);
+  const [activeAssistant, setActiveAssistantState] = useState<AssistantRow | null>(null);
+  const activeAssistantId = activeAssistant?.id ?? null;
   const updateVoiceCfg = useCallback((patch: Partial<ReturnType<typeof getVoiceSettings>>) => {
     setVoiceCfg((cur) => {
       const next = { ...cur, ...patch };
@@ -822,12 +934,23 @@ export default function App() {
     }
   }, []);
 
+  /* Wave 4: the chat chip follows the session's active assistant. */
+  const refreshActiveAssistant = useCallback(async () => {
+    try {
+      const sid = getSid();
+      setActiveAssistantState(sid ? await getActiveAssistant(sid) : null);
+    } catch {
+      setActiveAssistantState(null);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshSessions();
     void refreshActiveProject();
+    void refreshActiveAssistant();
     const t = setInterval(() => void refreshSessions(), 20000);
     return () => clearInterval(t);
-  }, [refreshSessions, refreshActiveProject]);
+  }, [refreshSessions, refreshActiveProject, refreshActiveAssistant]);
 
   // auto-grow the composer textarea; scrollbar stays hidden until the cap
   useEffect(() => {
@@ -1059,6 +1182,10 @@ export default function App() {
     switch (c.value) {
       case "prompts":
         setPromptsOpen(true);
+        setDraft("");
+        break;
+      case "assistants":
+        setAssistantsOpen(true);
         setDraft("");
         break;
       case "share":
@@ -1325,6 +1452,7 @@ export default function App() {
                   onClick={() => {
                     if (item.action === "github") void openGithubPanel();
                     else if (item.action === "projects") setProjectsOpen(true);
+                    else if (item.action === "assistants") setAssistantsOpen(true);
                     else if (item.action === "policy") setPolicyOpen(true);
                     else if (item.label === "التنزيلات") window.open(getApiBase().replace(/\/+$/, "") + "/download", "_blank");
                     else if (item.prompt) void send(item.prompt);
@@ -1613,6 +1741,23 @@ export default function App() {
                 <span className="mc-star">✦</span> آلي
                 <span className="mc-mode">{currentPolicy.label}</span>
               </span>
+              {activeAssistant && (
+                <button
+                  type="button"
+                  className="project-chip"
+                  title={`يتكلم آلي بأسلوب «${activeAssistant.name}» — اضغط للفصل`}
+                  onClick={() => {
+                    const sid = getSid();
+                    if (!sid) return;
+                    void setActiveAssistant(sid, null).then(() => {
+                      setActiveAssistantState(null);
+                      showToast("عاد آلي لشخصيته الأساسية");
+                    });
+                  }}
+                >
+                  {activeAssistant.icon} {activeAssistant.name} ✕
+                </button>
+              )}
               {activeProject && (
                 <button
                   type="button"
@@ -1882,6 +2027,7 @@ export default function App() {
         <ProjectsDialog
           onClose={() => setProjectsOpen(false)}
           onActivated={(p) => setActiveProjectState(p)}
+          activeId={activeProjectId}
           showToast={showToast}
         />
       )}
@@ -1894,6 +2040,16 @@ export default function App() {
         <PromptsDialog
           onClose={() => setPromptsOpen(false)}
           onInsert={(body) => setDraft((d) => (d ? d + " " : "") + body)}
+          showToast={showToast}
+        />
+      )}
+
+      {/* Wave 4: custom assistants */}
+      {assistantsOpen && (
+        <AssistantsDialog
+          onClose={() => setAssistantsOpen(false)}
+          onActivated={(a) => setActiveAssistantState(a)}
+          activeId={activeAssistantId}
           showToast={showToast}
         />
       )}
