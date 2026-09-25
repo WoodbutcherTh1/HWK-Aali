@@ -136,6 +136,48 @@ in parallel:
   — the watch-party dashboard for long jobs (block clock, per-process cards,
   GPU card, next-event line); Desktop shortcut on the owner's desktop
   (2026-09-25) launches it through scripts/mission_clock.bat.
+- **Track B 11.6-11.7 + Aali Monitor (2026-09-25, Buffy)**: (1) role-gated
+  system routes — /api/system/training (owner; aali_jobs snapshot board),
+  /api/system/models (owner+dev; served brain + D:/hwk-models metadata),
+  /api/system/logs (owner+dev; WHITELISTED logs, tail<=1000, every line
+  redact_secrets'd), /api/system/health_full (public health + uptime/
+  sessions/search/tts/job-alerts), /api/auth/whoami_raw — ALL uniform-404
+  via _require_role; app.py refactor: _raw_role() (no preview) vs
+  _resolve_role() (preview-aware). (2) Owner preview mode ("view as
+  user") — file_agent/preview.py + POST/DELETE /api/auth/preview (404 for
+  user/guest; owner-grade only): account sessions carry a SERVER-side
+  flag (accounts.set_session_flag; clients can never set/clear it),
+  master-key/local owners get a bounded process-global timer (30 min
+  default, {"ttl":s}); while previewing _resolve_role returns role
+  `user` + previewing:true — never lower/never higher — so every gated
+  surface answers exactly as a real user would see it; audited
+  content-free (preview_start/stop). Web: gold role badge in chat header
+  (owner/dev/admin only, HIDE for user/guest), «👁 معاينة» toggle + fixed
+  gold banner with exit, role re-fetch after toggles. (3) Aali Monitor
+  side project (owner-ordered): aali_monitor/ package — core.py (PURE
+  stdlib parsers: server state from aali_server.log, trainer step/total
+  + `done:` from phase_d_train.log, PROMOTE/NO-GO verdict from
+  soup_pipeline.log, GPU via nvidia-smi split-from-right, disk_free,
+  injected HTTP probes for :5055/:20129; Arabic-first alerts list) +
+  shell.py (pywebview window + pystray tray over a poller thread,
+  hide-to-tray while the watcher lives, honest headless fallback, alert
+  dedup with re-arm, test seams snapshot_fn/max_polls — the suite never
+  touches the network) + __main__.py (--headless/--once/--data-dir).
+  Deps (pywebview/pystray/Pillow) live ONLY in
+  D:/hwk-tools/monitor-venv; scripts/aali_monitor.bat falls back to
+  .venv headless; Desktop shortcut created. Proven live from the venv:
+  --once parsed the real PROMOTE verdict + GPU + brain/API up. Tests:
+  tests/test_roles_routes.py (13) + tests/test_monitor_core.py (24).
+  Docs: docs/features/system_routes.md + docs/monitor.md. Suite 987/9.
+  LESSON (bit twice): an edit dropped a docstring's `"""` opener in
+  app.py — the unterminated string made Python read later COMMENT-ish
+  lines as code, and the SyntaxError pointed at the WRONG line (an
+  em-dash) with a bogus 'invalid character' — when an error text looks
+  impossible, bisect with compile(prefix) instead of trusting the line
+  number. Also: app.py's `agent_loop` name is the imported FUNCTION, not
+  the module — module-level attrs need `import agent_loop as
+  agent_loop_mod` (a latent bug in _brain_summary masked by its broad
+  except).
 - **Tokenizer**: pile (18.8B+ tokens, ~2358 shards) — Arabic next.
 - **Next milestone**: Phase A pretraining launches when pile+arabic shards are
   complete (ctx 1024, d_model 768, resumable, mirrors to X:).
