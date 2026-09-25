@@ -1109,3 +1109,80 @@ button, .chip, .quick-pill, .msg { transition-duration: 0.13s; }
 @media (prefers-reduced-motion: reduce) {
   .role-badge.previewing { animation: none; }
 }
+
+/* ————— Wave 2: projects + RAG ————— */
+.project-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--acc, #e8b34b) 40%, transparent);
+  background: color-mix(in srgb, var(--acc, #e8b34b) 12%, transparent);
+  color: var(--acc, #e8b34b);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+.project-chip:hover { background: color-mix(in srgb, var(--acc, #e8b34b) 22%, transparent); }
+
+.projects-modal { max-width: 900px; width: min(900px, 94vw); }
+.projects-modal .modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--line, #3a3a36);
+}
+.projects-modal .modal-head h3 { margin: 0; font-size: 16px; }
+.projects-layout {
+  display: grid; grid-template-columns: 1fr 1.3fr; gap: 14px;
+  padding: 14px 18px 18px; max-height: 70vh; overflow: auto;
+}
+@media (max-width: 720px) { .projects-layout { grid-template-columns: 1fr; } }
+.projects-list, .project-detail {
+  background: var(--panel, #2d2d2a);
+  border: 1px solid var(--line, #3a3a36);
+  border-radius: 12px; padding: 12px; display: grid; gap: 8px;
+  align-content: start;
+}
+.project-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 9px 12px; border-radius: 10px; cursor: pointer;
+  border: 1px solid transparent; transition: background 0.13s ease;
+}
+.project-row:hover { background: color-mix(in srgb, var(--fg, #f0ead8) 5%, transparent); }
+.project-row.sel { border-color: var(--acc, #e8b34b); }
+.project-row b { display: block; font-size: 14px; }
+.project-row small { color: var(--mut, #9a958a); font-size: 11px; }
+.project-row-actions { display: flex; gap: 4px; align-items: center; }
+.project-new { display: grid; gap: 6px; margin-top: 6px; }
+.project-new input, .doc-add input, .doc-add textarea, .instr-edit textarea {
+  width: 100%; background: var(--bg, #252523); color: var(--fg, #f0ead8);
+  border: 1px solid var(--line, #3a3a36); border-radius: 8px;
+  padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical;
+}
+.project-detail h4 { margin: 2px 0 6px; font-size: 15px; }
+.instr-edit { display: grid; gap: 6px; }
+.kb-list { display: grid; gap: 4px; margin-top: 4px; }
+.kb-list > b { font-size: 12px; color: var(--mut, #9a958a); }
+.doc-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--fg, #f0ead8) 4%, transparent);
+  font-size: 13px;
+}
+.doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-add { display: grid; gap: 6px; margin-top: 4px; }
+.rag-citations {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed color-mix(in srgb, var(--fg, #f0ead8) 14%, transparent);
+}
+.rag-label { font-size: 11px; color: var(--mut, #9a958a); font-weight: 600; }
+.rag-cite {
+  font-size: 11px; padding: 2px 10px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--acc, #e8b34b) 35%, transparent);
+  color: var(--acc, #e8b34b);
+  cursor: help; max-width: 260px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

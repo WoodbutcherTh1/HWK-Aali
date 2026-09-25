@@ -231,6 +231,32 @@ export interface ActivityEvent {
   provider?: string;
   model?: string;
 }
+export interface RagSource {
+  doc_id: string;
+  doc_name: string;
+  chunk: number;
+  snippet: string;
+}
+
+export interface ProjectRow {
+  id: string;
+  name: string;
+  instruction: string;
+  doc_count: number;
+  doc_chars: number;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface ProjectDoc {
+  id: string;
+  name: string;
+  source: string;
+  size: number;
+  chunks: number;
+  added_at: number;
+}
+
 export interface AskResult {
   ok: boolean;
   reply?: string;
@@ -239,6 +265,8 @@ export interface AskResult {
   needs_confirm?: boolean;
   pending_action?: PendingAction;
   suggestions?: string[];
+  rag_sources?: RagSource[];
+  rag_note?: string;
 }
 
 async function persistSid(data: AskResult) {
@@ -266,6 +294,84 @@ export async function ask(
   const data: AskResult = await res.json();
   await persistSid(data);
   return data;
+}
+
+/* ————— Wave 2: Projects + RAG knowledge base ————— */
+
+export async function listProjects(): Promise<ProjectRow[]> {
+  const res = await fetch(`${apiBase}/api/projects`, { headers: authHeaders() });
+  if (!res.ok) return [];
+  return (await res.json()).projects ?? [];
+}
+
+export async function createProject(name: string, instruction: string): Promise<ProjectRow | null> {
+  const res = await fetch(`${apiBase}/api/projects`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name, instruction }),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).project ?? null;
+}
+
+export async function updateProject(
+  pid: string, patch: { name?: string; instruction?: string; archived?: boolean }
+): Promise<ProjectRow | null> {
+  const res = await fetch(`${apiBase}/api/projects/${pid}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).project ?? null;
+}
+
+export async function deleteProject(pid: string): Promise<boolean> {
+  const res = await fetch(`${apiBase}/api/projects/${pid}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  return res.ok;
+}
+
+export async function listProjectDocs(pid: string): Promise<ProjectDoc[]> {
+  const res = await fetch(`${apiBase}/api/projects/${pid}/docs`, { headers: authHeaders() });
+  if (!res.ok) return [];
+  return (await res.json()).docs ?? [];
+}
+
+export async function addProjectDoc(pid: string, name: string, content: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${apiBase}/api/projects/${pid}/docs`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name, content }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return res.ok ? { ok: true } : { ok: false, error: data.error || "فشل الإضافة" };
+}
+
+export async function removeProjectDoc(pid: string, docId: string): Promise<boolean> {
+  const res = await fetch(`${apiBase}/api/projects/${pid}/docs/${docId}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  return res.ok;
+}
+
+export async function getActiveProject(sid: string): Promise<ProjectRow | null> {
+  const res = await fetch(`${apiBase}/api/projects/active?sid=${encodeURIComponent(sid)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).project ?? null;
+}
+
+export async function setActiveProject(sid: string, projectId: string | null): Promise<ProjectRow | null> {
+  const res = await fetch(`${apiBase}/api/projects/active`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ sid, project_id: projectId }),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).project ?? null;
 }
 
 /* — streaming ask: returns the same shape as ask(), plus fires onActivity

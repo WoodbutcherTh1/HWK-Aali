@@ -12,11 +12,20 @@ import {
   exportSession,
   defaultApiBase,
   getApiBase,
+  getActiveProject,
   getSession,
   getSid,
   getToken,
   health,
   listSessions,
+  listProjects,
+  listProjectDocs,
+  createProject,
+  updateProject,
+  deleteProject,
+  addProjectDoc,
+  removeProjectDoc,
+  setActiveProject,
   previewStart,
   previewStop,
   searchMessages,
@@ -32,6 +41,9 @@ import {
   type MeInfo,
   type PendingAction,
   type Policy,
+  type ProjectDoc,
+  type ProjectRow,
+  type RagSource,
   type SearchHit,
   type SessionRow,
 } from "./api";
@@ -56,6 +68,8 @@ interface Msg {
   pending?: PendingAction;
   suggestions?: string[];
   files?: Attachment[]; // attachments the user sent with this message
+  ragSources?: RagSource[]; // knowledge-base citations (Wave 2)
+  ragNote?: string;         // honest "nothing relevant" note (Wave 2)
 }
 
 interface Activity {
@@ -179,7 +193,7 @@ type NavItem = {
   icon: string;
   label: string;
   prompt?: string;
-  action?: "github" | "policy";
+  action?: "github" | "policy" | "projects";
   badge?: string;
   minRole?: "guest" | "user" | "admin" | "dev" | "owner";
   children?: { icon: string; label: string; prompt: string }[];
@@ -199,6 +213,7 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { icon: "🧩", label: "سير عمل n8n", badge: "تجريبي", prompt: "اصنع لي سير عمل n8n: عند وصول بريد جديد أرسل ملخصه إلى تيليجرام", minRole: "user" },
+  { icon: "🗂️", label: "المشاريع", minRole: "user", action: "projects" },
   { icon: "⬇️", label: "التنزيلات", minRole: "user" },
   { icon: "🐙", label: "GitHub", action: "github", minRole: "user" },
   { icon: "🛡️", label: "سياسة التنفيذ", action: "policy", minRole: "guest" },
@@ -315,6 +330,149 @@ function VoicePicker({
   );
 }
 
+/* ————— Wave 2: Projects + RAG manager (in-app dialog) ————— */
+function ProjectsDialog({
+  onClose, onActivated, showToast,
+}: {
+  onClose: () => void;
+  onActivated: (p: ProjectRow | null) => void;
+  showToast: (s: string) => void;
+}) {
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [sel, setSel] = useState<ProjectRow | null>(null);
+  const [docs, setDocs] = useState<ProjectDoc[]>([]);
+  const [name, setName] = useState("");
+  const [instr, setInstr] = useState("");
+  const [docName, setDocName] = useState("");
+  const [docText, setDocText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(async () => {
+    setProjects(await listProjects());
+  }, []);
+  const reloadDocs = useCallback(async (pid: string) => {
+    setDocs(await listProjectDocs(pid));
+  }, []);
+  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    if (sel) void reloadDocs(sel.id);
+    else setDocs([]);
+  }, [sel, reloadDocs]);
+
+  const create = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    const p = await createProject(name.trim(), instr.trim());
+    setBusy(false);
+    if (p) { setName(""); setInstr(""); await reload(); setSel(p); showToast("تم إنشاء المشروع ✦"); }
+    else showToast("تعذّر إنشاء المشروع");
+  };
+  const saveInstr = async () => {
+    if (!sel) return;
+    setBusy(true);
+    const p = await updateProject(sel.id, { instruction: instr });
+    setBusy(false);
+    if (p) { setSel(p); await reload(); showToast("حُفظت تعليمات المشروع"); }
+  };
+  const addDoc = async () => {
+    if (!sel || !docName.trim() || !docText.trim()) return;
+    setBusy(true);
+    const out = await addProjectDoc(sel.id, docName.trim(), docText);
+    setBusy(false);
+    if (out.ok) {
+      setDocName(""); setDocText("");
+      await reloadDocs(sel.id);
+      await reload();
+      showToast("أُضيف المستند إلى قاعدة المعرفة ✦");
+    } else showToast(out.error || "فشل الإضافة");
+  };
+  const removeDoc = async (did: string) => {
+    if (!sel) return;
+    if (await removeProjectDoc(sel.id, did)) { await reloadDocs(sel.id); await reload(); }
+  };
+  const archive = async (p: ProjectRow) => {
+    if (await updateProject(p.id, { archived: true })) { await reload(); if (sel?.id === p.id) setSel(null); }
+  };
+  const del = async (p: ProjectRow) => {
+    if (await deleteProject(p.id)) { await reload(); if (sel?.id === p.id) setSel(null); showToast("حُذف المشروع" ); }
+  };
+  const use = async (p: ProjectRow) => {
+    const sid = getSid();
+    if (!sid) { showToast("ابدأ محادثة أولاً"); return; }
+    const act = await setActiveProject(sid, p.id);
+    if (act) { onActivated(act); showToast(`سيجيب آلي الآن بمعرفة مشروع «${p.name}»`); }
+  };
+  const unuse = async () => {
+    const sid = getSid();
+    if (!sid) return;
+    if (await setActiveProject(sid, null)) { onActivated(null); showToast("فُصل المشروع عن المحادثة"); }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal projects-modal" onClick={(e) => e.stopPropagation()} dir="rtl">
+        <div className="modal-head">
+          <h3>🗂️ المشاريع وقواعد المعرفة</h3>
+          <button type="button" className="ghost-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="projects-layout">
+          <div className="projects-list">
+            {projects.length === 0 && <p className="quiet">لا مشاريع بعد — أنشئ واحداً ليجيب آلي من معرفته الخاصة.</p>}
+            {projects.map((p) => (
+              <div key={p.id} className={`project-row ${sel?.id === p.id ? "sel" : ""}`} onClick={() => setSel(p)}>
+                <div>
+                  <b>{p.name}</b>
+                  <small>{p.doc_count} مستند · {Math.round((p.doc_chars || 0) / 100) / 10}k حرف</small>
+                </div>
+                <div className="project-row-actions">
+                  {activeProjectId === p.id && <span className="beta-badge">مفعّل</span>}
+                  <button type="button" className="ghost-btn" title="استخدام في المحادثة" onClick={(e) => { e.stopPropagation(); void use(p); }}>💬</button>
+                  <button type="button" className="ghost-btn" title="أرشفة" onClick={(e) => { e.stopPropagation(); void archive(p); }}>📦</button>
+                  <button type="button" className="ghost-btn" title="حذف" onClick={(e) => { e.stopPropagation(); void del(p); }}>🗑</button>
+                </div>
+              </div>
+            ))}
+            <div className="project-new">
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم مشروع جديد" maxLength={80} />
+              <input value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="تعليمات المشروع (اختياري)" maxLength={2000} />
+              <button type="button" className="upgrade-pill" disabled={busy || !name.trim()} onClick={() => void create()}>＋ إنشاء</button>
+            </div>
+          </div>
+          <div className="project-detail">
+            {!sel && <p className="quiet">اختر مشروعاً لعرض مستنداته وتعليماته.</p>}
+            {sel && (
+              <>
+                <h4>{sel.name}</h4>
+                <div className="instr-edit">
+                  <textarea value={instr || sel.instruction} placeholder="تعليمات يدخلها آلي في كل محادثة ضمن هذا المشروع…" maxLength={2000}
+                    onChange={(e) => setInstr(e.target.value)} rows={3} />
+                  <button type="button" className="ghost-btn" disabled={busy} onClick={() => void saveInstr()}>حفظ التعليمات</button>
+                </div>
+                <div className="kb-list">
+                  <b>قاعدة المعرفة ({docs.length})</b>
+                  {docs.map((d) => (
+                    <div key={d.id} className="doc-row">
+                      <span className="doc-name" title={`${d.size} حرف · ${d.chunks} مقطع`}>📄 {d.name}</span>
+                      <button type="button" className="ghost-btn" title="حذف" onClick={() => void removeDoc(d.id)}>✕</button>
+                    </div>
+                  ))}
+                  {docs.length === 0 && <p className="quiet">لا مستندات — أضف نصوصاً ليجيب آلي منها مع ذكر المصدر.</p>}
+                </div>
+                <div className="doc-add">
+                  <input value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="اسم المستند" maxLength={140} />
+                  <textarea value={docText} onChange={(e) => setDocText(e.target.value)} placeholder="الصق نص المستند هنا (حتى 200 ألف حرف)…" rows={4} />
+                  <button type="button" className="upgrade-pill" disabled={busy || !docName.trim() || !docText.trim()} onClick={() => void addDoc()}>＋ إضافة لقاعدة المعرفة</button>
+                </div>
+                <button type="button" className="ghost-btn" onClick={() => void unuse()}>إيقاف استخدام هذا المشروع في المحادثة</button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { role, isOwner, isAdmin, isDev, previewing, can: canPerm, refresh: refreshRole } = useRole();
   /* Track B 11.6/11.7: owner/dev surfaces — the badge + preview toggle stay
@@ -349,6 +507,10 @@ export default function App() {
   const [voiceCfg, setVoiceCfg] = useState(getVoiceSettings);
   const [speaking, setSpeaking] = useState(false);
   const [synthLoading, setSynthLoading] = useState<number | null>(null); // msg id
+  /* ————— projects + RAG (Wave 2) ————— */
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [activeProject, setActiveProjectState] = useState<ProjectRow | null>(null);
+  const activeProjectId = activeProject?.id ?? null;
   const updateVoiceCfg = useCallback((patch: Partial<ReturnType<typeof getVoiceSettings>>) => {
     setVoiceCfg((cur) => {
       const next = { ...cur, ...patch };
@@ -512,11 +674,22 @@ export default function App() {
     }
   }, []);
 
+  /* Wave 2: the chat chip follows the session's active project. */
+  const refreshActiveProject = useCallback(async () => {
+    try {
+      const sid = getSid();
+      setActiveProjectState(sid ? await getActiveProject(sid) : null);
+    } catch {
+      setActiveProjectState(null);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshSessions();
+    void refreshActiveProject();
     const t = setInterval(() => void refreshSessions(), 20000);
     return () => clearInterval(t);
-  }, [refreshSessions]);
+  }, [refreshSessions, refreshActiveProject]);
 
   // auto-grow the composer textarea; scrollbar stays hidden until the cap
   useEffect(() => {
@@ -623,6 +796,8 @@ export default function App() {
                   thinking: false,
                   text: reply,
                   pending: data.needs_confirm ? data.pending_action : undefined,
+                  ragSources: data.rag_sources,
+                  ragNote: data.rag_note,
                   // owner decision 2026-09-25: no follow-up chips in the web UI
                 }
               : x
@@ -1003,6 +1178,7 @@ export default function App() {
                   title={item.prompt}
                   onClick={() => {
                     if (item.action === "github") void openGithubPanel();
+                    else if (item.action === "projects") setProjectsOpen(true);
                     else if (item.action === "policy") setPolicyOpen(true);
                     else if (item.label === "التنزيلات") window.open(getApiBase().replace(/\/+$/, "") + "/download", "_blank");
                     else if (item.prompt) void send(item.prompt);
@@ -1282,6 +1458,23 @@ export default function App() {
                 <span className="mc-star">✦</span> آلي
                 <span className="mc-mode">{currentPolicy.label}</span>
               </span>
+              {activeProject && (
+                <button
+                  type="button"
+                  className="project-chip"
+                  title={`يجيب آلي من معرفة مشروع «${activeProject.name}» — اضغط للفصل`}
+                  onClick={() => {
+                    const sid = getSid();
+                    if (!sid) return;
+                    void setActiveProject(sid, null).then(() => {
+                      setActiveProjectState(null);
+                      showToast("فُصل المشروع عن المحادثة");
+                    });
+                  }}
+                >
+                  🗂️ {activeProject.name} ✕
+                </button>
+              )}
               <span className={`conn-dot ${connected === null ? "" : connected ? "ok" : "bad"}`} title={connected ? "متصل" : "غير متصل"} />
               {showOwnerTools && (
                 <span
@@ -1359,6 +1552,23 @@ export default function App() {
                       )}
                       {m.thinking ? <ThinkingOrbit /> : <Markdown text={m.text} />}
                       {m.thinking && <div style={{ marginTop: 10 }}>{ActivityPanel}</div>}
+                      {/* Wave 2: knowledge-base citations + honest no-hit note */}
+                      {!m.thinking && m.role === "assistant" && (m.ragSources?.length || m.ragNote) && (
+                        <div className="rag-citations">
+                          {m.ragSources?.length ? (
+                            <>
+                              <span className="rag-label">📚 من قاعدة المعرفة:</span>
+                              {m.ragSources.map((s) => (
+                                <span key={s.doc_id + ":" + s.chunk} className="rag-cite" title={s.snippet}>
+                                  {s.doc_name} · مقطع {s.chunk + 1}
+                                </span>
+                              ))}
+                            </>
+                          ) : (
+                            <span className="rag-label quiet">{m.ragNote}</span>
+                          )}
+                        </div>
+                      )}
                       {!m.thinking && m.role === "assistant" && (
                         <div className="msg-actions">
                           <button
@@ -1510,6 +1720,15 @@ export default function App() {
             إنهاء المعاينة
           </button>
         </div>
+      )}
+
+      {/* Wave 2: projects + RAG knowledge base manager */}
+      {projectsOpen && (
+        <ProjectsDialog
+          onClose={() => setProjectsOpen(false)}
+          onActivated={(p) => setActiveProjectState(p)}
+          showToast={showToast}
+        />
       )}
 
       {/* ACCOUNT AUTH — users | builders & team */}
