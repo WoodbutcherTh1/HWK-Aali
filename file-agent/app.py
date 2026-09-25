@@ -27,10 +27,13 @@ from pathlib import Path
 import agent_log
 from agent_log import new_request_id
 from flask import Flask, Response, make_response, request, send_file, send_from_directory
+import agent_loop as agent_loop_mod
 from agent_loop import AgentLoopError, agent_loop, compact_history
 from file_agent import search_index
 from file_agent import tts as aali_tts
 from file_agent import roles as aali_roles
+from file_agent import preview as aali_preview
+from file_agent import redaction as aali_redaction
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
@@ -303,6 +306,7 @@ def _attachment_context(attachments: list[dict[str, object]]) -> str:
     return "\n".join(parts)
 
 _sessions: dict[str, dict[str, object]] = {}
+_STARTED_TS = time.time()  # process boot -- /api/system/* uptime (Track B 11.6)
 
 
 def _load_sessions() -> None:
@@ -1308,8 +1312,9 @@ def _require_admin():
     return None
 
 
-def _resolve_role() -> dict:
-    """Server-side role resolution for THIS request (Track B 11.1).
+def _raw_role() -> dict:
+    """Role resolution for THIS request WITHOUT the preview downgrade
+    (Track B 11.7: the preview-control route must see the REAL role).
 
     Gathers only server-verified facts — master key match, issued-key
     auth, account session, origin (loopback + no X-Forwarded-For) — and
@@ -1330,6 +1335,33 @@ def _resolve_role() -> dict:
         is_local=is_local,
         authenticated=bool(sess or auth),
     )
+
+
+def _resolve_role() -> dict:
+    """Effective role for THIS request = raw role minus any active owner
+    preview (Track B 11.7). Preview applies ONLY to owner-grade callers:
+    account sessions carry a server-side flag (a client can never set or
+    clear it); master-key/local-owner contexts use a process-global timer
+    the owner started. The downgrade is to `user` -- never lower, never
+    higher -- and is stamped `previewing: true` for the web banner."""
+    ctx = _raw_role()
+    sess_token = request.headers.get("X-Session-Token", "")
+    previewing = False
+    if sess_token and ctx["role"] in ("owner", "admin", "dev") \
+            and aali_preview.active(sess_token):
+        previewing = True
+    elif not sess_token and ctx["role"] == "owner" \
+            and aali_preview.master_active():
+        previewing = True
+    if previewing:
+        ctx = {
+            "role": "user",
+            "user_id": ctx["user_id"],
+            "workspace_id": ctx["workspace_id"],
+            "permissions": list(aali_roles.permissions_for("user")),
+            "previewing": True,
+        }
+    return ctx
 
 
 def _require_role(permission: str):
@@ -1468,6 +1500,195 @@ def api_auth_me():
 def api_auth_logout():
     accounts.logout(request.headers.get("X-Session-Token", ""))
     return {"ok": True}
+
+
+# ---------- Track B 11.7: owner preview mode ("View as user") ----------
+
+def _audit_preview(action: str) -> None:
+    actor, kind = _audit_actor()
+    audit.record(action, target="preview", actor=actor, actor_kind=kind,
+                 ip=_audit_ip())
+
+
+@app.route("/api/auth/preview", methods=["POST"])
+def api_auth_preview_start():
+    """Start viewing as a normal user (owner-grade callers only; others get
+    the uniform 404 -- this surface does not exist for them). Two carrier
+    paths: an account session gets a SERVER-SIDE flag; a master-key/local
+    owner (no session token) gets a bounded process-global window."""
+    ctx = _raw_role()  # the CONTROL route must see the real role
+    if ctx["role"] not in ("owner", "admin", "dev"):
+        return make_response({"ok": False, "error": "not found"}, 404)
+    token = request.headers.get("X-Session-Token", "")
+    if token and accounts.session(token):
+        out = aali_preview.start(token)
+        if out is None:
+            return make_response({"ok": False, "error": "not found"}, 404)
+        _audit_preview("preview_start")
+        return {"ok": True, **out}
+    if ctx["role"] == "owner":
+        body = request.get_json(silent=True) or {}
+        out = aali_preview.master_start(
+            int(body.get("ttl") or 0) or None)
+        _audit_preview("preview_start")
+        return {"ok": True, "previewing": True, "ttl": out["ttl"]}
+    return make_response({"ok": False, "error": "not found"}, 404)
+
+
+@app.route("/api/auth/preview", methods=["DELETE"])
+def api_auth_preview_stop():
+    """End the preview. Idempotent; never reveals whether one was active
+    beyond the caller's own session state."""
+    ctx = _raw_role()
+    if ctx["role"] not in ("owner", "admin", "dev"):
+        return make_response({"ok": False, "error": "not found"}, 404)
+    token = request.headers.get("X-Session-Token", "")
+    if token and accounts.session(token):
+        aali_preview.stop(token)
+        _audit_preview("preview_stop")
+        return {"ok": True, "previewing": False}
+    if ctx["role"] == "owner":
+        aali_preview.master_stop()
+        _audit_preview("preview_stop")
+        return {"ok": True, "previewing": False}
+    return make_response({"ok": False, "error": "not found"}, 404)
+
+
+# ---------- Track B 11.6: role-gated system routes (uniform 404 contract) ----------
+
+_LOG_FILES = {
+    "aali_server": "D:/hwk-data/aali_server.log",
+    "phase_d_train": "D:/hwk-data/phase_d_train.log",
+    "phase_c_sft": "D:/hwk-data/phase_c_sft.log",
+    "phase_c_chain": "D:/hwk-data/phase_c_chain.log",
+    "tts": "D:/hwk-data/tts.log",
+    "tool_guard": "D:/hwk-data/tool_guard_audit.jsonl",
+    "gpu_gate": "D:/hwk-data/gpu_gate.log",
+    "tunnel": "D:/hwk-data/tunnel_autostart.log",
+}
+
+
+def _model_dirs() -> list[dict]:
+    """Name + size of each model directory on D:/hwk-models (no weights are
+    ever read or served -- metadata only)."""
+    root = Path("D:/hwk-models")
+    out: list[dict] = []
+    try:
+        for entry in sorted(root.iterdir()):
+            if not entry.is_dir():
+                continue
+            size = sum(f.stat().st_size for f in entry.rglob("*")
+                       if f.is_file()) if entry.is_dir() else 0
+            out.append({"name": entry.name,
+                        "size_gb": round(size / 1e9, 2)})
+    except OSError:
+        pass
+    return out
+
+
+@app.route("/api/system/training", methods=["GET"])
+def api_system_training():
+    """OWNER-only live training board (aali_jobs read-only snapshot:
+    GPU, Phase D, caretaker, pipeline, Pi-CI, disks). 404 for everyone
+    else -- even its existence is hidden."""
+    denied = _require_role("training")
+    if denied is not None:
+        return denied
+    import sys as _sys
+    scripts_dir = str(Path(__file__).resolve().parents[1] / "scripts")
+    if scripts_dir not in _sys.path:
+        _sys.path.insert(0, scripts_dir)
+    try:
+        import aali_jobs  # noqa: PLC0415 -- heavy stdlib import, route-local
+        snap = aali_jobs.snapshot()
+    except Exception as exc:  # noqa: BLE001 -- honest degraded board
+        snap = {"generated": None, "alerts": 1, "rows": [
+            {"section": "Jobs", "icon": "⚠️",
+             "text": f"snapshot unavailable: {type(exc).__name__}"}]}
+    return {"ok": True, "uptime_s": int(time.time() - _STARTED_TS),
+            "jobs": snap}
+
+
+@app.route("/api/system/models", methods=["GET"])
+def api_system_models():
+    """Owner+dev: which brain is served, the promoted-adapter detail, the
+    interim Ollama model, and model-dir metadata from D:/hwk-models."""
+    denied = _require_role("models")
+    if denied is not None:
+        return denied
+    return {"ok": True, "serving": _brain_summary(),
+            "ollama_model": agent_loop_mod.OLLAMA_MODEL,
+            "own_model_enabled": os.getenv("AALI_OWN_MODEL", "1") != "0",
+            "model_dirs": _model_dirs()}
+
+
+@app.route("/api/system/logs", methods=["GET"])
+def api_system_logs():
+    """Owner+dev: tailed server logs. Whitelist only (?file=name),
+    tail-capped (?tail<=1000, default 200), and every line passes the
+    secret-redaction filter before leaving the machine."""
+    denied = _require_role("logs")
+    if denied is not None:
+        return denied
+    name = request.args.get("file", "aali_server")
+    path = _LOG_FILES.get(name)
+    if path is None:
+        return make_response({"ok": False,
+                              "error": f"unknown log; available: {sorted(_LOG_FILES)}"},
+                             400)
+    try:
+        tail = max(1, min(int(request.args.get("tail", "200")), 1000))
+    except ValueError:
+        tail = 200
+    lines: list[str] = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()[-tail:]
+    except OSError:
+        return {"ok": True, "file": name, "exists": False, "lines": []}
+    return {"ok": True, "file": name, "exists": True, "tail": tail,
+            "lines": [aali_redaction.redact_secrets(ln.rstrip("\n"))
+                      for ln in lines]}
+
+
+@app.route("/api/system/health_full", methods=["GET"])
+def api_system_health_full():
+    """Owner+dev: the public health body PLUS the numbers a watchdog must
+    never see -- role coverage, search index size, TTS availability, live
+    job alerts, process uptime."""
+    denied = _require_role("health_full")
+    if denied is not None:
+        return denied
+    health = api_health()  # reuse the public payload, then extend
+    try:
+        indexed = search_index.count()
+    except Exception:  # noqa: BLE001
+        indexed = None
+    import sys as _sys
+    scripts_dir = str(Path(__file__).resolve().parents[1] / "scripts")
+    if scripts_dir not in _sys.path:
+        _sys.path.insert(0, scripts_dir)
+    try:
+        import aali_jobs  # noqa: PLC0415
+        alerts = aali_jobs.snapshot()["alerts"]
+    except Exception:  # noqa: BLE001
+        alerts = None
+    return {**health, "full": True,
+            "uptime_s": int(time.time() - _STARTED_TS),
+            "sessions_in_memory": len(_sessions),
+            "search_indexed": indexed,
+            "tts_available": aali_tts.available(),
+            "job_alerts": alerts}
+
+
+@app.route("/api/auth/whoami_raw", methods=["GET"])
+def api_auth_whoami_raw():
+    """Owner+dev debugging: the RAW role verdict (never preview-downgraded)
+    next to the effective one -- makes the preview visible while testing."""
+    denied = _require_role("advanced_settings")
+    if denied is not None:
+        return denied
+    return {"ok": True, "raw": _raw_role(), "effective": _resolve_role()}
 
 
 @app.route("/api/auth/handoff", methods=["POST"])
@@ -1769,8 +1990,8 @@ def _brain_summary() -> dict:
     if os.getenv("AALI_OLLAMA", "1") != "0":
         try:
             import requests as _rq
-            if _rq.get(agent_loop.OLLAMA_URL + "/api/tags", timeout=2).ok:
-                return {"provider": "ollama", "detail": agent_loop.OLLAMA_MODEL,
+            if _rq.get(agent_loop_mod.OLLAMA_URL + "/api/tags", timeout=2).ok:
+                return {"provider": "ollama", "detail": agent_loop_mod.OLLAMA_MODEL,
                         "note": "interim brain until Aali's own model is promoted"}
         except Exception:  # noqa: BLE001
             pass
@@ -1884,7 +2105,7 @@ def admin_dashboard():
 const $=id=>document.getElementById(id);
 function api(method,path,body,key){
   /* key may be the master AALI_API_KEY OR a session token from the web app's
-     one-click handoff (/admin?token=…) — send both headers; the server
+     one-click handoff (/admin?token=…) -- send both headers; the server
      resolves admin via X-API-Key (master) or X-Session-Token (account). */
   return fetch(path,{method,headers:{'Content-Type':'application/json','X-API-Key':key||$('adminkey').value.trim(),'X-Session-Token':key||$('adminkey').value.trim()},body:body?JSON.stringify(body):undefined}).then(r=>r.json());
 }
@@ -1906,7 +2127,7 @@ function render(s){
   api('GET','/api/admin/keys').then(r=>{
     if(!r.ok) return;
     $('keys').innerHTML=(r.keys||[]).map(x=>
-      '<tr data-kid="'+x.key_id+'"><td>'+ (x.label||'—') +'</td><td class="mono">'+x.prefix+'…</td><td>'+fmt(x.created_at)+'</td><td>'+x.requests+'</td><td>'+x.chars_in+'+'+x.chars_out+'</td><td>'+fmt(x.last_used_at)+'</td><td><span class="tag '+(x.revoked?'off':'ok')+'">'+(x.revoked?'مُلغى':'نشط')+'</span></td><td>'+(x.revoked?'':'<button class="danger" data-revoke="1">إلغاء</button>')+'</td></tr>'
+      '<tr data-kid="'+x.key_id+'"><td>'+ (x.label||'--') +'</td><td class="mono">'+x.prefix+'…</td><td>'+fmt(x.created_at)+'</td><td>'+x.requests+'</td><td>'+x.chars_in+'+'+x.chars_out+'</td><td>'+fmt(x.last_used_at)+'</td><td><span class="tag '+(x.revoked?'off':'ok')+'">'+(x.revoked?'مُلغى':'نشط')+'</span></td><td>'+(x.revoked?'':'<button class="danger" data-revoke="1">إلغاء</button>')+'</td></tr>'
     ).join('') || '<tr><td colspan="8" class="muted">لا مفاتيح بعد</td></tr>';
   });
 }

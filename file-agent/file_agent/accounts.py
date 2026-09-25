@@ -306,7 +306,25 @@ def session(token: str) -> dict | None:
             "role": rec.get("role", "user"),
             "is_admin": rec.get("role") == "admin",
             "key_id": rec.get("key_id"),
+            # Server-side flags (Track B 11.7 preview): set/cleared ONLY via
+            # set_session_flag from server code — never from client payloads.
+            "flags": {k: v for k, v in sess.items()
+                      if k not in ("email", "expires")},
         }
+
+
+def set_session_flag(token: str, name: str, value: bool) -> None:
+    """Set/clear a server-side flag on THIS session (Track B 11.7 preview
+    mode). Unknown/expired token = silent no-op. Flags never persist into
+    new sessions and can never be set through any API payload."""
+    with _lock:
+        if not _accounts:
+            _load()
+        sess = _sessions.get(_token_hash(token))
+        if not sess:
+            return
+        sess[name] = bool(value)
+        _save()
 
 
 def logout(token: str) -> None:
