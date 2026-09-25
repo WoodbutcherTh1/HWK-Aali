@@ -656,7 +656,10 @@ def test_sessions_api_list_get_delete(tmp_path, monkeypatch):
 
 
 def test_api_key_gate_blocks_unauthorized(monkeypatch, tmp_path):
-    """Multi-user mode: no/wrong X-API-Key → 401 on /api/*."""
+    """Multi-user mode: no/wrong X-API-Key is refused on /api/*.
+
+    Track B 11.2 (2026-09-25): the refusal is now a uniform 404 — an
+    unauthorized caller must never learn that the surface exists."""
     monkeypatch.setenv("AGENT_WORKSPACE", str(tmp_path))
     import importlib
 
@@ -671,8 +674,8 @@ def test_api_key_gate_blocks_unauthorized(monkeypatch, tmp_path):
     assert client.get("/api/health", headers={"X-API-Key": "wrong"}).status_code == 200
     assert client.get("/api/health", headers={"X-API-Key": "secret-key-1"}).status_code == 200
     # but everything else with an /api prefix is gated
-    assert client.post("/api/ask", json={"message": "hi", "sid": "t"}).status_code == 401
+    assert client.post("/api/ask", json={"message": "hi", "sid": "t"}).status_code == 404
     assert client.post("/api/ask", json={"message": "hi", "sid": "t"},
-                       headers={"X-API-Key": "wrong"}).status_code == 401
+                       headers={"X-API-Key": "wrong"}).status_code == 404
     # non-API routes (the UI) stay open
     assert client.get("/ui/").status_code in (200, 404)

@@ -80,11 +80,13 @@ def test_user_session_blocked_from_admin_surface(client):
     _signup_and_verify(client, "plain@example.com")
     token = _login(client, "plain@example.com")
     r = client.get("/api/admin/keys", headers=_auth_headers(token))
-    assert r.status_code == 401
+    # Track B 11.2 (owner rule): 404, not 401/403 — never reveal the surface.
+    assert r.status_code == 404
 
 
 def test_no_token_blocked_from_admin_surface(client):
-    assert client.get("/api/admin/keys").status_code == 401
+    # Track B 11.2: uniform 404 for unauthorized access.
+    assert client.get("/api/admin/keys").status_code == 404
 
 
 def test_master_key_still_works(client):
@@ -109,7 +111,7 @@ def test_dashboard_token_handoff_dual_headers(client):
     assert r.status_code == 200, r.get_json()
 
     r = client.get("/api/admin/stats", headers=dashboard_headers(user_tok))
-    assert r.status_code == 401
+    assert r.status_code == 404  # Track B 11.2: 404 not 401
 
 
 def test_session_token_never_valid_as_api_key(client):
@@ -118,7 +120,7 @@ def test_session_token_never_valid_as_api_key(client):
     _signup_and_verify(client, "hmam@hwk.team")
     token = _login(client, "hmam@hwk.team")
     r = client.get("/api/admin/stats", headers={"X-API-Key": token})
-    assert r.status_code == 401
+    assert r.status_code == 404  # Track B 11.2: 404 not 401
 
 
 def test_admin_accounts_listing_and_delete(client):
@@ -170,8 +172,9 @@ def test_audit_endpoint_admin_gated(client):
     user_tok = _login(client, "plain@example.com")
 
     assert client.get("/api/admin/audit", headers=_auth_headers(admin_tok)).status_code == 200
-    assert client.get("/api/admin/audit", headers=_auth_headers(user_tok)).status_code == 401
-    assert client.get("/api/admin/audit").status_code == 401
+    # Track B 11.2: 404 for unauthorized users and anonymous callers.
+    assert client.get("/api/admin/audit", headers=_auth_headers(user_tok)).status_code == 404
+    assert client.get("/api/admin/audit").status_code == 404
     assert client.get("/api/admin/audit", headers={"X-API-Key": MASTER}).status_code == 200
 
 
@@ -199,9 +202,10 @@ def test_handoff_mint_requires_admin_session(client):
     admin_tok = _login(client, "hmam@hwk.team")
     user_tok = _login(client, "plain@example.com")
 
-    assert client.post("/api/auth/handoff").status_code == 401
-    assert client.post("/api/auth/handoff", headers=_auth_headers(user_tok)).status_code == 401
-    assert client.post("/api/auth/handoff", headers={"X-API-Key": MASTER}).status_code == 401
+    # Track B 11.2: 404 for callers the admin handoff is not for.
+    assert client.post("/api/auth/handoff").status_code == 404
+    assert client.post("/api/auth/handoff", headers=_auth_headers(user_tok)).status_code == 404
+    assert client.post("/api/auth/handoff", headers={"X-API-Key": MASTER}).status_code == 404
 
     r = client.post("/api/auth/handoff", headers=_auth_headers(admin_tok))
     assert r.status_code == 200, r.get_json()
@@ -287,4 +291,5 @@ def test_logout_endpoint(client):
     _signup_and_verify(client, "bye@example.com")
     token = _login(client, "bye@example.com")
     assert client.post("/api/auth/logout", headers=_auth_headers(token)).status_code == 200
-    assert client.get("/api/auth/me", headers=_auth_headers(token)).status_code == 401
+    # Track B 11.2: a logged-out session gets the uniform 404.
+    assert client.get("/api/auth/me", headers=_auth_headers(token)).status_code == 404

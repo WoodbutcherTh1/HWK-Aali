@@ -98,8 +98,9 @@ def test_export_is_session_scoped(client):
 
 def test_export_requires_key_in_key_mode(client):
     _seed("s5", [{"role": "user", "content": "x", "ts": 0}])
+    # Track B 11.2: unauthenticated callers get the uniform 404.
     r = client.get("/api/session/s5/export")
-    assert r.status_code == 401
+    assert r.status_code == 404
 
 
 def test_non_chat_roles_skipped_in_markdown(client):

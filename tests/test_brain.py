@@ -61,23 +61,24 @@ def test_obsidian_vault_links(tmp_path) -> None:
 
 
 def test_brain_page_is_admin_only(monkeypatch) -> None:
-    """Multi-user mode: /brain must 401 without the admin key, 200 with it."""
+    """Multi-user mode: /brain hides from non-admins (Track B 11.2: 404 —
+    the surface must not reveal itself), 200 with the admin key."""
     monkeypatch.setenv("AALI_API_KEY", "brain-test-master")
     import importlib
     import app as aali_app
     importlib.reload(aali_app)
     client = aali_app.app.test_client()
-    assert client.get("/brain").status_code == 401
-    assert client.get("/api/brain/live").status_code == 401
+    assert client.get("/brain").status_code == 404
+    assert client.get("/api/brain/live").status_code == 404
     ok = client.get("/brain", headers={"X-API-Key": "brain-test-master"})
     assert ok.status_code == 200
     assert "شجرة عقل آلي" in ok.get_data(as_text=True)
     live = client.get("/api/brain/live", headers={"X-API-Key": "brain-test-master"})
     assert live.status_code == 200
     assert live.get_json()["ok"] is True
-    # feed endpoints: same gate as the page
-    assert client.get("/api/brain/events").status_code == 401
-    assert client.get("/api/brain/stream").status_code == 401
+    # feed endpoints: same gate as the page (Track B 11.2: uniform 404)
+    assert client.get("/api/brain/events").status_code == 404
+    assert client.get("/api/brain/stream").status_code == 404
     ev = client.get("/api/brain/events?limit=2", headers={"X-API-Key": "brain-test-master"})
     assert ev.status_code == 200 and ev.get_json()["ok"] is True
     assert isinstance(ev.get_json()["events"], list)

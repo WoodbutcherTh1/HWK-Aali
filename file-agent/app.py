@@ -29,6 +29,7 @@ from agent_log import new_request_id
 from flask import Flask, Response, make_response, request, send_file, send_from_directory
 from agent_loop import AgentLoopError, agent_loop, compact_history
 from file_agent import search_index
+from file_agent import roles as aali_roles
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
@@ -143,7 +144,11 @@ def _require_api_key():
         return None
     auth = _auth_state()
     if not auth:
-        return make_response({"ok": False, "error": "unauthorized: missing or wrong X-API-Key"}, 401)
+        # Track B 11.2: an unknown caller probing protected API space gets
+        # a uniform 404 — never a 401 that confirms the surface exists.
+        # (Real clients authenticate before calling; the UI treats 404
+        # exactly like 401 anyway.)
+        return make_response({"ok": False, "error": "not found"}, 404)
     if not auth["is_admin"] and apikeys.over_daily_cap(auth["key_id"]):
         return make_response({"ok": False, "error": "daily request cap reached for this key"}, 429)
     # Meter usage (best-effort) for every authenticated /api call.
@@ -725,12 +730,16 @@ def _ensure_sessions_loaded() -> None:
 @app.route("/api/sessions", methods=["GET"])
 def api_sessions():
     """Sidebar data: one row per session (title = first user message).
-    In multi-user mode only the calling user's sessions are listed."""
+    Track B 11.2: the OWNER sees every session (machine master); users
+    and issued keys see only their own namespace — enforced here, the
+    client never filters."""
     _ensure_sessions_loaded()
-    prefix = f"u{_client_key()}:" if API_KEY else ""
+    ctx = _resolve_role()
+    is_owner = ctx["role"] == "owner"
+    prefix = f"u{_client_key()}:" if (API_KEY and not is_owner) else ""
     rows = []
     for key, rec in _sessions.items():
-        if API_KEY and not key.startswith(prefix):
+        if API_KEY and not is_owner and not key.startswith(prefix):
             continue
         turns = rec.get("turns") if isinstance(rec.get("turns"), list) else []
         title = next(
@@ -1195,9 +1204,9 @@ def api_desktop_version():
 # ————— Aali as a provider: key platform + admin —————
 
 def _require_admin():
-    """Return None when the caller is admin (master key OR account session with
-    an admin-role email), else a 401. One app: builders sign in like users and
-    simply see more."""
+    """Admin gate (Track B 11.2): 404 when the caller is not admin —
+    unauthorized surfaces must not reveal existence (owner rule).
+    Master key OR account session with an admin-role email."""
     if not API_KEY:
         return None  # local single-user mode: open admin (localhost tooling)
     sess = _account_session()
@@ -1205,7 +1214,42 @@ def _require_admin():
         return None
     auth = _auth_state()
     if not auth or not auth["is_admin"]:
-        return make_response({"ok": False, "error": "admin key required"}, 401)
+        return make_response({"ok": False, "error": "not found"}, 404)
+    return None
+
+
+def _resolve_role() -> dict:
+    """Server-side role resolution for THIS request (Track B 11.1).
+
+    Gathers only server-verified facts — master key match, issued-key
+    auth, account session, origin (loopback + no X-Forwarded-For) — and
+    delegates the decision to file_agent.roles.resolve_role. A client-sent
+    X-Role header is ignored BY DESIGN; this function never reads it."""
+    sess = _account_session()
+    auth = _auth_state()
+    remote_addr = request.remote_addr or ""
+    is_local = (remote_addr in {"127.0.0.1", "::1", "localhost"}
+                and not request.headers.get("X-Forwarded-For"))
+    return aali_roles.resolve_role(
+        api_key_configured=bool(API_KEY),
+        is_master_key=bool(API_KEY and auth and auth["is_admin"]
+                           and auth.get("key") == API_KEY),
+        account_email=sess["email"] if sess else None,
+        account_is_admin=bool(sess and sess["is_admin"]),
+        key_id=(auth or {}).get("key_id"),
+        is_local=is_local,
+        authenticated=bool(sess or auth),
+    )
+
+
+def _require_role(permission: str):
+    """404 (never 403) when the caller lacks `permission` — an unauthorized
+    surface must not reveal that it exists (owner rule, Track B 11.2).
+    Returns None when allowed."""
+    ctx = _resolve_role()
+    if not aali_roles.has_permission(ctx["role"], permission):
+        return make_response(
+            {"ok": False, "error": "not found"}, 404)
     return None
 
 
@@ -1303,11 +1347,31 @@ def api_auth_reset_confirm():
 
 @app.route("/api/auth/me", methods=["GET"])
 def api_auth_me():
-    """Who am I: {email, role, is_admin} for the current session token."""
+    """Who am I — THE role endpoint for every client (Track B 11.1/11.3).
+
+    Signed-in account: {email, role, is_admin, aali:{role,user_id,
+    workspace_id,permissions}}. Master key / issued key (no session):
+    the same body with email=None. Unauthenticated remote callers get
+    401 (guests resolve role via /api/health's open body instead —
+    health stays open for watchdogs and must never leak)."""
     sess = _account_session()
-    if not sess:
-        return make_response({"ok": False, "error": "not signed in"}, 401)
-    return {"ok": True, "email": sess["email"], "role": sess["role"], "is_admin": sess["is_admin"]}
+    auth = _auth_state()
+    if not sess and not auth:
+        if not API_KEY:
+            # Local single-user mode, no credentials: this is the owner's
+            # browser — hand it the owner context so the UI renders the
+            # full surface (role comes from the machine, not the client).
+            return {"ok": True, "email": None, "role": "admin",
+                    "is_admin": True, "aali": _resolve_role()}
+        # Track B 11.2: key mode without credentials -> uniform 404.
+        return make_response({"ok": False, "error": "not found"}, 404)
+    ctx = _resolve_role()
+    if sess:
+        return {"ok": True, "email": sess["email"], "role": sess["role"],
+                "is_admin": sess["is_admin"], "aali": ctx}
+    return {"ok": True, "email": None,
+            "role": "admin" if ctx["role"] == "owner" else "user",
+            "is_admin": ctx["role"] == "owner", "aali": ctx}
 
 
 @app.route("/api/auth/logout", methods=["POST"])
@@ -1325,7 +1389,8 @@ def api_auth_handoff():
     Handoff tokens are SHA-256-hashed, exactly like sessions."""
     sess = _account_session()
     if not sess or not sess["is_admin"]:
-        return make_response({"ok": False, "error": "admin session required"}, 401)
+        # Track B 11.2: 404 — the handoff surface must not reveal itself.
+        return make_response({"ok": False, "error": "not found"}, 404)
     token = secrets.token_urlsafe(32)
     _HANDOFF_TOKENS["ht:" + hashlib.sha256(token.encode("utf-8")).hexdigest()] = {
         "email": sess["email"],

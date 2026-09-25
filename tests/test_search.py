@@ -217,7 +217,8 @@ def test_performance_10k_rows(db):
 
 def test_endpoint_requires_key(client, db):
     _seed_ns(f"u{MASTER}", "e1", [_turn("user", "findable")])
-    assert client.get("/api/search?q=findable").status_code == 401
+    # Track B 11.2: unauthenticated callers get the uniform 404.
+    assert client.get("/api/search?q=findable").status_code == 404
 
 
 def test_endpoint_empty_query_400(client, db):
