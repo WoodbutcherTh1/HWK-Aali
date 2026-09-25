@@ -101,14 +101,34 @@ export async function authResetConfirm(email: string, code: string, newPassword:
   });
   return res.json();
 }
-export async function authMe(): Promise<MeInfo | null> {
-  const t = getSessionToken();
-  if (!t) return null;
+export interface AaliRoleContext {
+  role: "owner" | "dev" | "admin" | "user" | "guest";
+  user_id: string;
+  workspace_id: string;
+  permissions: string[];
+}
+
+export async function authMe(): Promise<(MeInfo & { aali?: AaliRoleContext }) | null> {
+  // Track B 11.3: send BOTH credentials (master key holders have no
+  // session token; account users have no API key) — the server decides.
+  const t = getToken();
+  const s = getSessionToken();
+  if (!t && !s) return null;
+  const headers: Record<string, string> = {};
+  if (t) headers["X-API-Key"] = t;
+  if (s) headers["X-Session-Token"] = s;
   try {
-    const res = await fetch(`${apiBase}/api/auth/me`, { headers: { "X-Session-Token": t } });
+    const res = await fetch(`${apiBase}/api/auth/me`, { headers });
     if (!res.ok) return null;
     const data = await res.json();
-    return data.ok ? { email: data.email, role: data.role, is_admin: data.is_admin } : null;
+    return data.ok
+      ? {
+          email: data.email,
+          role: data.role,
+          is_admin: data.is_admin,
+          aali: data.aali,
+        }
+      : null;
   } catch {
     return null;
   }

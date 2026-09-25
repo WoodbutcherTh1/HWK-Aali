@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { IfRole, useRole } from "./store/role";
 import {
   adminHandoff,
   askStream,
@@ -173,26 +174,27 @@ type NavItem = {
   prompt?: string;
   action?: "github" | "policy";
   badge?: string;
+  minRole?: "guest" | "user" | "admin" | "dev" | "owner";
   children?: { icon: string; label: string; prompt: string }[];
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { icon: "📁", label: "الملفات", prompt: "اعرض ملفات مجلد العمل ولخّص لي محتواها وبنيتها" },
-  { icon: "🛠️", label: "ابنِ تطبيقاً", prompt: "أنشئ تطبيق ويب بسيط لعرض الأذكار اليومية ثم شغّله" },
-  { icon: "🌐", label: "بحث ويب", prompt: "ابحث في الويب عن آخر مستجدات الذكاء الاصطناعي ولخّصها" },
-  { icon: "📄", label: "المستندات", prompt: "اقرأ ملف PDF في مجلد العمل ولخّص أهم النقاط بالعربية" },
+  { icon: "📁", label: "الملفات", prompt: "اعرض ملفات مجلد العمل ولخّص لي محتواها وبنيتها", minRole: "user" },
+  { icon: "🛠️", label: "ابنِ تطبيقاً", prompt: "أنشئ تطبيق ويب بسيط لعرض الأذكار اليومية ثم شغّله", minRole: "user" },
+  { icon: "🌐", label: "بحث ويب", prompt: "ابحث في الويب عن آخر مستجدات الذكاء الاصطناعي ولخّصها", minRole: "guest" },
+  { icon: "📄", label: "المستندات", prompt: "اقرأ ملف PDF في مجلد العمل ولخّص أهم النقاط بالعربية", minRole: "user" },
   {
-    icon: "🖼️", label: "الوسائط",
+    icon: "🖼️", label: "الوسائط", minRole: "user",
     children: [
       { icon: "👁️", label: "اقرأ صورة", prompt: "اقرأ الصورة الموجودة في مجلد العمل واستخرج النص منها" },
       { icon: "🎨", label: "حرّر صورة", prompt: "حرّر صورة: صحّح الألوان واجعلها بأسلوب غروب دافئ" },
       { icon: "🎬", label: "حلّل فيديو", prompt: "لخّص لي فيديو في مجلد العمل: ما النص الظاهر وما المحتوى المنطوق؟" },
     ],
   },
-  { icon: "🧩", label: "سير عمل n8n", badge: "تجريبي", prompt: "اصنع لي سير عمل n8n: عند وصول بريد جديد أرسل ملخصه إلى تيليجرام" },
-  { icon: "⬇️", label: "التنزيلات" },
-  { icon: "🐙", label: "GitHub", action: "github" },
-  { icon: "🛡️", label: "سياسة التنفيذ", action: "policy" },
+  { icon: "🧩", label: "سير عمل n8n", badge: "تجريبي", prompt: "اصنع لي سير عمل n8n: عند وصول بريد جديد أرسل ملخصه إلى تيليجرام", minRole: "user" },
+  { icon: "⬇️", label: "التنزيلات", minRole: "user" },
+  { icon: "🐙", label: "GitHub", action: "github", minRole: "user" },
+  { icon: "🛡️", label: "سياسة التنفيذ", action: "policy", minRole: "guest" },
 ];
 
 const QUICK_ACTIONS = [
@@ -248,6 +250,7 @@ function parseHighlight(highlight: string): { text: string; marked: boolean }[] 
 }
 
 export default function App() {
+  const { role, isOwner, isAdmin, can: canPerm } = useRole();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [draft, setDraft] = useState("");
   const [waiting, setWaiting] = useState(false);
@@ -875,7 +878,12 @@ export default function App() {
           </button>
 
           <nav className="side-nav">
-            {NAV_ITEMS.map((item) =>
+            {NAV_ITEMS.filter((item) => {
+              /* Track B 11.5: role-filtered navigation — HIDE, not disable.
+                 Rank: guest < user < admin < dev < owner (matches server). */
+              const rank = { guest: 0, user: 1, admin: 2, dev: 3, owner: 4 } as const;
+              return rank[item.minRole ?? "guest"] <= rank[role as keyof typeof rank] || role === "owner";
+            }).map((item) =>
               item.children ? (
                 <div key={item.label} className={`nav-group ${mediaOpen ? "open" : ""}`}>
                   <button
@@ -1017,21 +1025,32 @@ export default function App() {
                 ))}
               </div>
               {/* account: users | builders & team — one app, roles differ */}
-              {me ? (
+              {me && (isOwner || isAdmin) ? (
                 <button
                   type="button"
                   className="upgrade-pill"
                   style={{ padding: "7px 14px" }}
-                  title={me.is_admin ? "لوحة الفريق: /admin" : "حسابك"}
+                  title="لوحة الفريق: /admin"
                   onClick={() => {
-                    if (!me.is_admin) { setAuthOpen(true); return; }
                     void adminHandoff().then((url) =>
                       url ? window.open(url, "_blank") : window.open(getApiBase() + "/admin", "_blank")
                     );
                   }}
                 >
-                  <span>✦</span> {me.email.split("@")[0]}
-                  {me.is_admin && <span className="admin-chip">فريق</span>}
+                  <span>✦</span> {me.email?.split("@")[0] ?? "مدير"}
+                  <span className="admin-chip">فريق</span>
+                </button>
+              ) : me ? (
+                /* Track B 11.4: plain users see their ACCOUNT (no admin
+                   handoff, no «فريق» chip) — the admin surface is hidden. */
+                <button
+                  type="button"
+                  className="upgrade-pill"
+                  style={{ padding: "7px 14px" }}
+                  title="حسابك"
+                  onClick={() => setAuthOpen(true)}
+                >
+                  <span>✦</span> {me.email?.split("@")[0] ?? "حسابي"}
                 </button>
               ) : (
                 <button type="button" className="upgrade-pill" style={{ padding: "7px 14px" }} onClick={() => setAuthOpen(true)}>
