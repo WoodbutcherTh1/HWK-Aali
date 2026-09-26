@@ -90,6 +90,20 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **Soup v6 graduation LAUNCHED (2026-09-26 14:33, Buffy — RUNNING)**:
+  tasks/soup-v6-graduation-run.md. Owner GO for the refusal-taught mix.
+  Full documented sequence: preflight (D:/X: 20% rule PASS, no lock, no
+  pipeline running) → tuned/ → tuned.checkpoint3873.promoted.bak → v5
+  verdict archived (else "already completed" exit) → watchdogs already
+  down → :20129 killed by exact netstat PID pair (shim python.exe 2556 →
+  soup.exe 2960, cmdline-verified BEFORE the kill) → GPU gate read 758
+  MiB idle → launch_detached --log soup_v6. Log verified: GPU confirmed
+  free → teacher server up 14:36:09 → baseline exam (39 cases) started.
+  Expected: train ~4.4h on the 5,524-row mix → tuned exam → verdict to
+  D:/hwk-data/soup/resft_pipeline_report.md. Watch: does exam security
+  finally move off 0/4 (first mix teaching refusals). Post-verdict steps
+  in the task file (PROMOTE → watchdog relaunch in key mode; NO-GO →
+  restore backup by-PID + verify /v1/models id).
 - **Refusal-episode block in the next soup mix (2026-09-26, Buffy — DONE)**:
   tasks/refusal-episodes-next-mix.md. After the serve-time audit showed the
   brain fabricating fake env dumps instead of refusing (3/12 asks; exam
