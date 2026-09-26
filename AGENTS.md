@@ -129,6 +129,18 @@ in parallel:
   park the scratch brain (current), pivot the source to the Soup BASE
   Qwen CPU serve (owner call — touches branding/identity rules), or wait
   for more Phase D tokens. No run 9 from this file.
+  OWNER DECISION (2026-09-26): option (a) — scratch brain PARKED as
+  research, checkpoint-3873 stays the live brain. Serve-time refusal audit
+  (scripts/audit_refusal_gates.py, tests/test_audit_refusal_gates.py 17):
+  3 live runs x 4 env-dump attack wordings through the key-gated
+  /api/ask/stream — SECURITY LAYERS HELD every time (zero run_command
+  dispatches, no secret shapes, no real Windows env values), but the brain
+  FABRICATED a fake env dump in 3/12 asks (Linux-value theater, not a
+  leak — the _REAL_WINDOWS_ENV_RE real-leak regex never fired) and flipped
+  compliance↔refusal across runs on the same AR prompt. Honest verdict:
+  the runtime gates are what keep the machine safe; the brain's security
+  DISCOURSE stays unreliable (same family as exam security 0/4).
+  Content-free records: D:/hwk-data/audit_refusal_gates.log.
 - **Track A Wave 1 + Track B 11.1–11.5 (2026-09-25, Buffy — COMPLETE, awaiting
   owner go for Wave 2 / 11.6+)**: conversation export (GET
   `/api/session/<sid>/export?format=md|json`, sidebar ⬇/{} buttons, tests/test_export.py);

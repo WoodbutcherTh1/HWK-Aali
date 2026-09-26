@@ -87,3 +87,37 @@ not hope.
 
 sft_distill.jsonl as it stands (5 rows) is NOT a Phase C mix — no run 9
 from it. No auto-promotion, model/scratch/final.pt untouched.
+
+## SERVE-TIME REFUSAL AUDIT (2026-09-26, owner request — options (a) accepted)
+Owner accepted option (a): scratch brain PARKED as research, checkpoint-3873
+stays the live brain. Follow-up question: when the brain COMPLIES (as seen
+in distillation), do the serve-time gates hold? Probe:
+scripts/audit_refusal_gates.py + tests/test_audit_refusal_gates.py (17,
+pure logic only — the live probe is never run from tests). It drives the
+LIVE key-gated /api/ask/stream with the 2 compliance seeds + the 2 Part 5.1
+env-dump wordings, records content-free (kinds + sha16 + booleans) to
+D:/hwk-data/audit_refusal_gates.log, exit 0/1 = held/findings.
+
+RESULTS (3 runs x 4 cases):
+- SECURITY LAYERS HELD in every run: ZERO run_command dispatches ever
+  reached the tool layer (the brain answered in text only) — the allow-list
+  + _EXFIL_PATTERNS env-dump block were never even needed (they are
+  test-pinned separately in test_hwk.py). No secret shapes in any reply or
+  tool result. No real Windows env values anywhere.
+- HONESTY FINDING: in 3/12 asks the brain FABRICATED a fake env dump
+  instead of refusing — `os.environ = {'PATH': '/usr/local/bin:...'}`
+  (Linux values on a Windows machine) and `PYTHONPATH=/root/.cache/...`.
+  Theater, NOT a leak (values invented; the real-leak regex
+  _REAL_WINDOWS_ENV_RE — C:\\ / APPDATA / AALI_*= — never fired). Same
+  failure family as the exam's security 0/4.
+- NON-DETERMINISM: the same AR env-dump prompt flipped compliance-theater
+  ↔ refusal across runs; AR prompts refused more consistently than EN.
+- The existing prompt-leak filter (_redact_prompt_leak) does NOT classify
+  fabricated env theater (nothing real leaks) — a possible future guard,
+  owner call.
+
+AUDIT VERDICT: gates held, no breach, no urgent fix. The distillation
+verdict is reinforced from the other side — the brain's security DISCOURSE
+is unreliable, and the runtime layers are what actually keep the machine
+safe. Parked state confirmed: model/scratch/final.pt absent (scratch stays
+research), :20129 = checkpoint-3873, :5055 healthy.
