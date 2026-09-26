@@ -1,7 +1,7 @@
 # Phase C — SFT Aali's own brain (relaunch after power-off)
 
-- owner: buffy (this PC, Freebuff night session)
-- status: in-progress (run 5 in flight: masking + row-shape + generation guards)
+- owner: buffy (this PC, Freebuff session)
+- status: in-progress (RELAUNCH 2026-09-26: base switched context-4k -> phase-d-8k, owner GO given)
 - started: 2026-09-14 ~00:40 local
 
 ## Why
@@ -11,6 +11,87 @@ waiter (was waiting on the GPU since 21:48), the night caretaker, and the v5
 exam-breakdown watcher. The v5 graduation itself was already DONE
 (checkpoint-3873 PROMOTE, verdict written 18:19), Phase B is complete, and the
 bootstrapped Phase C state (D:/hwk-models/aali-sft-4k, step 0) survived.
+
+## RELAUNCH (2026-09-26 ~07:15, owner green-light)
+
+Phase D complete (stage 5: eval 1.94, ctx 8192, weights at
+D:/hwk-models/phase-d-8k). Owner GO'd the Phase C SFT retry on the new base:
+
+1. Pre-flight verified: trainer default dropout 0.1 == phase-d-8k config
+   (resume config check passes; context 8192->4096 is RoPE-exempt);
+   aali-sft-4k held the STALE context-4k bootstrap -> archived to
+   aali-sft-4k.context4k-bootstrap and re-bootstrapped from phase-d-8k;
+   sft_v2.jsonl (5,472 rows, toolbelt mix) unchanged;
+   phase_c_after_v4 envs: AALI_PHASE_C_STEPS=2500 AALI_PHASE_C_LR=2e-5
+   (sft_small lesson: 2500 ~ 6 epochs; run 6 concluded capacity was the
+   wall, and phase-d-8k is a much stronger base).
+2. GPU freed: brain :20129 killed by exact netstat PID (rule-compliant);
+   brain watchdog left running by design — card_is_safe makes it WAIT
+   while the trainer holds the card (never fights a trainer).
+3. Chain launched detached: launch_detached.py --log phase_c_chain
+   (waits for GPU free via the shared gate, then train_scratch --resume,
+   then serve-shape smoke into phase_c_chain.log).
+4. NO automatic promotion: model/scratch/final.pt replaced only on the
+   owner's decision after a good smoke (same gate as before).
+
+## RELAUNCH OUTCOME (2026-09-26 08:26) — NOT deployable
+
+Run 7 completed clean (exit 0, 2500 steps, 81.9M tokens, ~38 min,
+tok/s ~36-47k): loss ~1.9, eval 2.156 -> 2.049. Smoke (serve-shape, CPU):
+- BOTH answers are pseudo-Quranic salad (``«اب بَيْتَ الأَرْضَ...»`` style)
+  with diacritics — the phase-d-8k base's own pretraining attractor.
+- ZERO tool-protocol JSON in either answer (worse than run 6's shape).
+Verdict: DO NOT PROMOTE. model/scratch/final.pt untouched.
+
+**Diagnosis — the data is the wall now, not the trainer and not only
+capacity**: sft_v2.jsonl (5,472 rows) was built to teach a Qwen-1.5B
+ADAPTER the protocol. Every row embeds the SOUP serving template — the
+Qwen chat template + English protocol sentence ("Reply with either a
+natural-language answer or exactly one JSON object...") + LOTS of JSON.
+Phase C serves the SCRATCH transcript instead (System line -> tools ->
+turns -> "Assistant:"), so the formats never matched: the model learns
+soup-shaped rows, then is probed in a shape it never saw. Fix before any
+run 8: rebuild the SFT mix in the SCRATCH row shape (bootstrap_sft_state
+docstring + _sft_record_text hold the contract; hooks exist in
+scripts/build_aali_sft_v2.py's builder family).
+
+Services restored after the run: brain :20129 (checkpoint-3873, verified
+/v1/models) + API :5055 healthy + brain watchdog relaunched (pid 75328).
+Stale bootstrap archived at D:/hwk-models/aali-sft-4k.context4k-bootstrap;
+run-7 weights at D:/hwk-models/aali-sft-4k.
+
+## RUN 8 (2026-09-26 ~09:42, Buffy) — scratch-shaped mix, launched
+
+Owner GO. The run-7 fix (rebuild in SCRATCH row shape) implemented:
+
+1. `scripts/build_aali_sft_scratch.py` (NEW, tests/test_sft_scratch_builder.py
+   17): converts sft_v2.jsonl -> sft_scratch.jsonl in the SCRATCH contract —
+   DROPS the soup protocol system message from every row (the trainer
+   prepends SCRATCH_SYSTEM_LINE; the record system line would render as a
+   SECOND System turn), UNWRAPS {"tool":"final","content":X} to plain X at
+   every assistant position (3,520 unwrapped — scratch serves plain text;
+   the soup envelope rendered raw would reach users), REPAIRS invented tool
+   names via tool_guard ALIASES + one conservative fuzzy match and DROPS
+   rows with unresolvable names (parse-and-redump, never string-replace),
+   gates answer<=200 / total<=900 estimated tokens (v2 estimator) and the
+   ends-with-assistant structure. Output: 5,472 -> 5,472 rows, 0 drops,
+   0 name repairs (v2's registry gate had already cleaned names),
+   completions 66% JSON -> 2% JSON (5,361 plain + 111 real tool calls),
+   arabic share 0.356 preserved. Report: sft_scratch.report.json.
+   Pinned by tests that render converted records through
+   train_scratch._sft_record_text and assert the EXACT serving transcript
+   shape (System line -> tools -> turns -> instruction -> answer).
+2. Pre-flight: run-7 weights archived aali-sft-4k.run7-soupshape;
+   re-bootstrapped from phase-d-8k (config verbatim, dropout 0.1, step=0,
+   fresh optimizer); brain :20129 killed by exact netstat PID 3552
+   (soup.exe serve checkpoint-3873 — cmdline verified first); watchdog
+   left running (card_is_safe makes it wait, never fight).
+3. Launched detached: AALI_PHASE_C_DATA=D:/hwk-data/soup/sft_scratch.jsonl
+   AALI_PHASE_C_STEPS=2500 AALI_PHASE_C_LR=2e-5 launch_detached --log
+   phase_c_chain (pid 5632). Brain :20129 is DOWN for the duration —
+   restore checkpoint-3873 after the run (no auto-promotion either way).
+4. Owner decision after smoke: replace model/scratch/final.pt only on a
+   good smoke, same gate as every previous run.
 
 ## Night 2 (2026-09-14 ~07:00-08:30) — ROOT CAUSE found + fixed
 The first Phase C SFT "passed" (loss 0.0009) but the served brain output an
