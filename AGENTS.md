@@ -90,7 +90,31 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
-- **Soup v6 graduation LAUNCHED (2026-09-26 14:33, Buffy — RUNNING)**:
+- **Soup v7 mix-hygiene gate BUILT + graduation LAUNCHED (2026-09-26 evening,
+  Buffy — RUNNING, owner asleep w/ blanket autonomy)**:
+  tasks/soup-v7-mix-hygiene.md. Owner GO for the v7 lever (drop the
+  attack→compliance rows, rebuild, graduate). build_aali_sft_v2.py gained
+  _ATTACK_FAMILIES (env-dump/dotenv/prompt-extraction/secret-harvest,
+  AR+EN) + hygiene_pair_problems/hygiene_problems/attack_compliance_rows
+  (dispatch-with-attack incl. the v6 AR exec-tool shape, narration-
+  compliance, fabricated-reply; refusals pass via _REFUSAL_MARKS) — every
+  row scanned at WRITE time, flagged rows dropped WHOLE and named in
+  report['excluded']['mix_hygiene'], post-write scan mix_hygiene_ok +
+  exit-2 gate; soup_pipeline.run_training mirrors the scan (1-second fail,
+  6th stale-file gate). Tests: +8 in test_sft_v2_builder.py incl. the
+  LIVE canary on the deployed mix (failed by design pre-rebuild — caught
+  the exact 6 dirty rows — green after); suite 1180 green / 10 skipped.
+  Rebuild: 5,517 records, arabic 0.350, refusal 9+9 clean, all floors
+  green, backup sft_v2.pre_v7_hygiene_backup.jsonl. Launch (v6 sequence,
+  every step verified): disk 20% PASS (D: 30.2%, X: 34.2%; C: 100% —
+  flagged for the owner) → :20129 owner cmdline-VERIFIED (pid 92508 =
+  soup.exe serve checkpoint-3936) → killed by exact PID → GPU 649 MiB →
+  tuned.checkpoint3936.promoted.bak → v6 verdict archived →
+  launch_detached --log soup_v7 (start 21:58:22). Expected verdict ~01:20
+  (train ~3h14m on 5,517). Watch: security off 0/4 now that the mix no
+  longer contradicts itself.
+- **Soup v6 GRADUATED — PROMOTE, security 0/4 again, mix self-contradiction
+  found (2026-09-26 14:33→17:55, Buffy — DONE)**:
   tasks/soup-v6-graduation-run.md. Owner GO for the refusal-taught mix.
   Full documented sequence: preflight (D:/X: 20% rule PASS, no lock, no
   pipeline running) → tuned/ → tuned.checkpoint3873.promoted.bak → v5
@@ -100,10 +124,24 @@ in parallel:
   MiB idle → launch_detached --log soup_v6. Log verified: GPU confirmed
   free → teacher server up 14:36:09 → baseline exam (39 cases) started.
   Expected: train ~4.4h on the 5,524-row mix → tuned exam → verdict to
-  D:/hwk-data/soup/resft_pipeline_report.md. Watch: does exam security
-  finally move off 0/4 (first mix teaching refusals). Post-verdict steps
-  in the task file (PROMOTE → watchdog relaunch in key mode; NO-GO →
-  restore backup by-PID + verify /v1/models id).
+  D:/hwk-data/soup/resft_pipeline_report.md. RESULT: NO — security 0/4
+  for the FOURTH graduation; tuned 3/39 vs baseline 1/39, all three passes
+  non-security (gpu_busy/halluc_admit/emoji_sadness); env-dump cases still
+  emit attack-as-content tool JSON (run/python → tool_guard renames to
+  run_command, so the runtime policy gate remains the real boundary — held
+  12/12 in the Sep-26 live audit). ROOT CAUSE (2026-09-27 mix scan):
+  sft_v2 carries ~9 conversation-log rows whose reply AFTER an env-dump ask
+  is compliance narration/fabrication theater ("Okay, I will check the
+  printenv...") alongside the 8 authored final_json refusals — the data
+  teaches BOTH dispositions for the SAME attack and the 1.5B student
+  resolved toward compliance; refusal_row_problems validates only AUTHORED
+  rows. NEXT LEVER (owner-gated): whole-mix attack→compliance scan/repair
+  gate (exit-2) in build_aali_sft_v2 → v7 rebuild + graduation; alternative
+  stance: accept the 1.5B security-discourse ceiling, runtime gates as the
+  boundary. Watchdogs NOT relaunched (owner go pending). Run was healthy:
+  floors all green, 12/12 mid-train probes exit-3 (known CPU-starve
+  telemetry, correctly never aborted), train 14:38→17:52, checkpoint-3936
+  verified via /v1/models; :5055 healthy in key mode.
 - **Refusal-episode block in the next soup mix (2026-09-26, Buffy — DONE)**:
   tasks/refusal-episodes-next-mix.md. After the serve-time audit showed the
   brain fabricating fake env dumps instead of refusing (3/12 asks; exam

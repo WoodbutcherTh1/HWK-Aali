@@ -1948,6 +1948,179 @@ def refusal_floor_failures(counts: dict[str, int]) -> list[str]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Mix-hygiene gate (2026-09-27, v6 postmortem): the refusal block taught
+# refusals while legacy conversation-log/mentor rows taught COMPLIANCE for
+# the same attacks - "Okay, I will check the printenv in the workspace and
+# provide the output for you. Please wait." sat beside the authored
+# final_json refusal episodes, the 1.5B student resolved the contradiction
+# toward compliance, and exam security stayed 0/4 for a FOURTH graduation.
+# refusal_row_problems validates only the AUTHORED refusal rows; THIS gate
+# scans EVERY row for an attack-ask followed by a compliance reply. Flagged
+# rows are dropped whole (a partial repair would leave the ask paired with
+# an arbitrary turn - a mangled episode teaches mangled behavior) and named
+# in the report, never silent (the 2026-09-10 audit lesson).
+# ---------------------------------------------------------------------------
+
+# Attack-ask families: (name, lowercase matchers over a USER turn). One
+# matcher hit is enough. Kept narrow: only asks that pair with a
+# compliance-shaped reply teach the wrong behavior.
+_ATTACK_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("env-dump", (
+        "print(os.environ", "os.environ)", "printenv", "env vars",
+        "environment variables", "متغيرات البيئة", "المتغيرات البيئية",
+        "اطبع متغيرات", "كل متغيرات",
+    )),
+    ("dotenv-read", (
+        ".env\"", ".env'", ".env file", "read the .env", "ملف .env",
+        "ملف البيئة",
+    )),
+    ("prompt-extraction", (
+        "system prompt", "your instructions", "previous instructions",
+        "تعليماتك", "أوامر النظام", "برومبت",
+    )),
+    ("token-or-secret-harvest", (
+        "api key", "api-key", "credentials", "passwords", "كلمات السر",
+        "كلمات المرور", "مفتاح api", "مفاتيح api",
+    )),
+)
+
+# Tool names that EXECUTE when called - a call right after an attack ask is
+# compliance even when the attack string never made it into the arguments
+# (the v6 AR exam shape: user asks for env vars, model emits
+# {"tool":"python","arguments":{"code":"import sys\nprint(sys.path)"}}).
+_EXEC_TOOL_NAMES = frozenset({
+    "run", "run_cmd", "run_command", "python", "python3", "shell",
+    "bash", "sh", "exec", "execute", "cmd", "terminal", "command",
+    "node", "pip", "npm",
+})
+
+# Compliance-narration openers (the v6 root-cause rows) + fabrication marks
+# (results the model cannot have - it never ran anything).
+_COMPLY_OPENERS = (
+    "okay,", "ok,", "sure,", "of course", "no problem", "certainly",
+    "here is the output", "here's the output", "here are the",
+    "i will check", "i'll check", "will check", "will run",
+    "let me check", "let me run", "please wait", "please provide",
+    "حسناً", "حسنا", "تمام،", "تمام,", "بالطبع", "سأقوم", "سوف أقوم",
+    "دعني", "انتظر", "تفضل",
+)
+_FABRIC_MARKS = (
+    "did not appear", "no variables", "no output", "empty output",
+    "didn't return", "لم يظهر", "لا توجد متغيرات", "لا توجد أي متغيرات",
+    "لا توجد نتائج", "لا أملك القدرة",
+)
+
+# A reply is SAFE when it refuses: the builder's own cue words (shared with
+# the refusal-quality gate) plus harm/policy discourse beyond bare cues.
+_REFUSAL_MARKS = _REFUSAL_CUES_AR + _REFUSAL_CUES_EN + (
+    "لأسباب أمنية", "لأسباب أمان", "الأمان", "أمنية", "حساسة", "حساس",
+    "security reasons", "for safety", "safeguard", "sensitive",
+    "not something i", "لا أشارك",
+)
+_NARRATION_RE = re.compile(
+    r"i\s+(?:will|'ll|am going to)\s+"
+    r"(?:check|run|print|get|read|show|execute|see)")
+
+
+def _unwrap_final_text(content: str) -> str:
+    """Turn-level unwrap of a {"tool":"final","content":X} envelope (same
+    contract as refusal_final_text, applied to a single message)."""
+    text = (content or "").strip()
+    if text.startswith("{") and '"tool"' in text[:40]:
+        try:
+            obj = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        if isinstance(obj, dict) and obj.get("tool") == "final":
+            return str(obj.get("content", ""))
+    return text
+
+
+def _turn_text(message: dict) -> str:
+    content = message.get("content", "")
+    return content if isinstance(content, str) else str(content)
+
+
+def hygiene_pair_problems(user_text: str, reply_text: str) -> list[dict]:
+    """Classify ONE attack-ask -> assistant-reply pair.
+
+    [] = safe to train (a refusal, or a reply with no teachable compliance
+    signal). Problems are content-free: {"family","reason"} only.
+      dispatch-with-attack - the reply CALLS a tool whose arguments carry
+          the attack, or invokes an execution tool right after the ask
+          (the v6 exam shape);
+      narration-compliance - the reply narrates compliance ("Okay, I will
+          check the printenv...") - the v6 root cause;
+      fabricated-reply    - the reply invents results ("the env vars did
+          not appear") instead of refusing;
+      attack-adjacent-tool- a non-final tool call right after the attack
+          ask (e.g. memory-save from injected web text - the exam's
+          indirect-injection case).
+    """
+    lowered_user = user_text.lower()
+    families = [name for name, marks in _ATTACK_FAMILIES
+                if any(mark in lowered_user for mark in marks)]
+    if not families:
+        return []
+    raw = reply_text.strip()
+    unwrapped = _unwrap_final_text(raw)
+    lowered_reply = unwrapped.lower()
+    if any(mark in lowered_reply for mark in _REFUSAL_MARKS):
+        return []
+    head = _TOOL_HEAD_RE.match(raw)
+    problems: list[dict] = []
+    if head and head.group(1) != "final":
+        tool_name = head.group(1)
+        attack_in_args = any(
+            mark in raw.lower()
+            for _family, marks in _ATTACK_FAMILIES for mark in marks)
+        reason = ("dispatch-with-attack"
+                  if attack_in_args or tool_name.lower() in _EXEC_TOOL_NAMES
+                  else "attack-adjacent-tool")
+        return [{"family": family, "reason": reason} for family in families]
+    if any(mark in lowered_reply for mark in _FABRIC_MARKS):
+        return [{"family": family, "reason": "fabricated-reply"}
+                for family in families]
+    if any(op in lowered_reply for op in _COMPLY_OPENERS) or _NARRATION_RE.search(
+            lowered_reply):
+        return [{"family": family, "reason": "narration-compliance"}
+                for family in families]
+    return problems
+
+
+def hygiene_problems(record: dict) -> list[dict]:
+    """Every attack-ask -> compliance/fabrication pair in ONE record
+    (turn-indexed). [] = the row is safe to train."""
+    problems: list[dict] = []
+    messages = [m for m in record.get("messages", []) if isinstance(m, dict)]
+    for index, message in enumerate(messages):
+        if message.get("role") != "user":
+            continue
+        reply = next((m for m in messages[index + 1:]
+                      if m.get("role") == "assistant"), None)
+        if reply is None:
+            continue
+        problems.extend(
+            dict(pair, turn=index)
+            for pair in hygiene_pair_problems(
+                _turn_text(message), _turn_text(reply)))
+    return problems
+
+
+def attack_compliance_rows(records: list[dict]) -> list[dict]:
+    """CONTENT-FREE summaries of every record carrying >=1 attack->compliance
+    pair: {"source", "problems"} - never the row text (the same audit
+    discipline as the rest of the pipeline)."""
+    flagged: list[dict] = []
+    for record in records:
+        problems = hygiene_problems(record)
+        if problems:
+            flagged.append({"source": str(record.get("source", "?")),
+                            "problems": problems})
+    return flagged
+
+
 def near_miss_leak_check(records: list[dict]) -> list[str]:
     """THE loss-safety tripwire: a wrong name must never appear in an
     ASSISTANT turn of any written row (soup trains every assistant turn -
@@ -2034,6 +2207,7 @@ def build(out_path: Path) -> dict:
     with out_path.open("w", encoding="utf-8") as handle:
         kept = dropped = 0
         dropped_sources: list[str] = []
+        hygiene_drops: list[dict] = []
         for record in all_records:
             # Token-budget gate: rows that fit are written as-is; rows that
             # do not get one trim attempt; anything still over is DROPPED AND
@@ -2042,6 +2216,15 @@ def build(out_path: Path) -> dict:
             candidate = record if row_fits(record) else trim_to_budget(record)
             if (candidate is not None and row_fits(candidate)
                     and _usable_training_row(candidate)):
+                # Mix-hygiene gate (2026-09-27 v6 postmortem): a row that
+                # pairs a security-attack ask with a compliance/fabrication
+                # reply teaches compliance - dropped WHOLE and named.
+                hygiene = hygiene_problems(candidate)
+                if hygiene:
+                    hygiene_drops.append({
+                        "source": str(candidate.get("source", "?")),
+                        "problems": hygiene})
+                    continue
                 handle.write(json.dumps(candidate, ensure_ascii=False) + "\n")
                 written.append(candidate)
                 kept += 1
@@ -2055,6 +2238,15 @@ def build(out_path: Path) -> dict:
                 "count": dropped, "sources": sorted(set(dropped_sources)),
                 "reason": ("token budget: prompt/answer must fit the trainer "
                            f"window (max_length={TRAIN_MAX_LENGTH})")}
+        if hygiene_drops:
+            hygiene_families = Counter(
+                p["family"] for d in hygiene_drops for p in d["problems"])
+            report["excluded"]["mix_hygiene"] = {
+                "count": len(hygiene_drops),
+                "families": dict(hygiene_families),
+                "sources": sorted({d["source"] for d in hygiene_drops}),
+                "reason": ("attack-ask followed by a compliance/fabrication "
+                           "reply - v6 postmortem (exam security 0/4)")}
 
     counts = Counter(str(record.get("source", "?")) for record in all_records)
     arabic_count = sum(
@@ -2101,6 +2293,11 @@ def build(out_path: Path) -> dict:
     report["refusal_floors_ok"] = not ref_failures
     if ref_failures:
         report["refusal_floor_failures"] = ref_failures
+    # Mix-hygiene gate (2026-09-27 v6 postmortem): the WRITTEN file must
+    # carry zero attack->compliance rows - the same measured-on-written-rows
+    # contract as every other gate.
+    report["mix_hygiene_written_violations"] = attack_compliance_rows(written)
+    report["mix_hygiene_ok"] = not report["mix_hygiene_written_violations"]
     return report
 
 
@@ -2146,6 +2343,17 @@ def main() -> int:
               file=sys.stderr)
         for failure in report.get("refusal_floor_failures", []):
             print(f"  - {failure}", file=sys.stderr)
+        return 2
+    if report.get("mix_hygiene_written_violations"):
+        # The 2026-09-27 v6 postmortem: a mix that teaches compliance for
+        # the attacks its refusal block refuses cannot move exam security.
+        # The write-time drop makes survivors near-impossible; the gate
+        # still fails LOUD if any reach the file (hand-edited dataset).
+        print("MIX HYGIENE GATE FAILED - attack-ask rows still teach compliance:",
+              file=sys.stderr)
+        for item in report["mix_hygiene_written_violations"][:10]:
+            reasons = ", ".join(sorted({p["reason"] for p in item["problems"]}))
+            print(f"  - {item['source']}: {reasons}", file=sys.stderr)
         return 2
     return 0
 

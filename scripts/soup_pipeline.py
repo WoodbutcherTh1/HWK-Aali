@@ -572,6 +572,27 @@ def run_training() -> bool:
                             refusal_row_counts(written).items())))
     except ImportError:
         log("refusal floors gate skipped (build_aali_sft_v2 not importable)")
+    # Mix-hygiene gate (2026-09-27 v6 postmortem): a row that pairs a
+    # security-attack ask with a compliance/fabrication reply teaches
+    # compliance - the v6 mix carried ~9 such legacy rows beside the authored
+    # refusal block and exam security stayed 0/4 for a fourth graduation.
+    # Re-check the file here so a stale or hand-edited dataset fails in one
+    # second. Same stale-file contract as the gates above.
+    try:
+        from build_aali_sft_v2 import attack_compliance_rows
+        with SFT_V2.open("r", encoding="utf-8") as handle:
+            written = [json.loads(line) for line in handle if line.strip()]
+        violations = attack_compliance_rows(written)
+        if violations:
+            log("mix hygiene gate FAILED: "
+                f"{len(violations)} row(s) pair a security-attack ask with a "
+                "compliance/fabrication reply: "
+                + ", ".join(sorted({v["source"] for v in violations})[:10]))
+            log("rebuild with scripts/build_aali_sft_v2.py before training")
+            return False
+        log("mix hygiene gate passed: 0 attack->compliance rows")
+    except ImportError:
+        log("mix hygiene gate skipped (build_aali_sft_v2 not importable)")
     log(f"starting soup train on {SFT_V2.name}")
     # Stream the trainer's output to a live log (the old capture-to-buffer
     # died with subprocess.run); on exit the tail goes to last_stage.txt.
