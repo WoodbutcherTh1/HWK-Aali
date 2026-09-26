@@ -90,6 +90,45 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **Phase C CLOSED + teacher distillation built (2026-09-26, Buffy)**:
+  owner decision — checkpoint-3873 STAYS the served brain (own-brain =
+  research); Phase C task closed (tasks/phase-c-own-brain-sft-relaunch.md
+  status: done). Lever (b) is GO: scripts/distill_teacher.py +
+  tests/test_distill_teacher.py (24) — asks the PROMOTED teacher
+  (checkpoint-3873 on :20129/v1, the soup_exam single-user-message request
+  shape) to answer 60 seed prompts RENDERED IN THE SCRATCH SERVING SHAPE
+  (train_scratch._sft_prompt_text rendering travels as the user message —
+  run-7 lesson: shapes must match), then quality-gates every reply before it
+  becomes a training row: 8-word shingle self-leak + canaries (the Part 5
+  L1/L2 rules mirrored), EXAM-WORDING collision fails the build LOUDLY at
+  startup (v3 media-lesson; raw-prompt fingerprints catch short prompts the
+  v2 shingle loader misses), final envelopes unwrapped to plain text,
+  tool JSON parsed-and-redumped with registry-or-alias names + required
+  schema args from the LIVE definitions (TOOL_EXECUTION maps execution
+  targets, NOT schemas), language gate (AR seeds get Arabic replies, EN
+  seeds Latin — run-6 salad lesson), v2-estimator budgets (answer ≤200 /
+  total ≤900), empty/echo drops — every drop named in the report, nothing
+  silent. Identity questions NEVER reach the teacher: whenever
+  agent_loop._identity_fast matches, its deterministic card IS the answer
+  (verified live: 'Who are you exactly?' → name card ~38 tokens; identity
+  seeds that the fast-path does NOT verify are dropped loudly, never sent —
+  'مين أنت بالضبط؟' passes a human eye but not the regexes). Seeds:
+  data/distill_seeds.jsonl (60, AR/EN pairs: chat, capability, refusal,
+  honesty, memory, tool, identity). Output D:/hwk-data/distill/
+  sft_distill.jsonl (+ .report.json, counters only) via launch_detached;
+  run 9 (AALI_PHASE_C_DATA=sft_distill.jsonl) stays a HUMAN decision.
+  LESSON: output.with_suffix(".report.json") must travel with the output
+  arg, not a module constant — the tmp-path tests caught the report
+  overwriting the production file. Suite: test_distill_teacher.py 33 green.
+  LIVE VERDICT (2 runs): checkpoint-3873 is NOT a viable distillation
+  source — 60 seeds → 5 rows (4 deterministic identity cards + 1 chat);
+  teacher drops: 43 schema (tool JSON without required args), 7 self-leak
+  parrots, 2 refusal-COMPLIANCES (v1 gates caught fenced-JSON + kind-aware
+  + refusal-cue holes first: ungated v1 nearly trained an env-dump
+  compliance). Owner options recorded in tasks/distill-teacher-scratch.md:
+  park the scratch brain (current), pivot the source to the Soup BASE
+  Qwen CPU serve (owner call — touches branding/identity rules), or wait
+  for more Phase D tokens. No run 9 from this file.
 - **Track A Wave 1 + Track B 11.1–11.5 (2026-09-25, Buffy — COMPLETE, awaiting
   owner go for Wave 2 / 11.6+)**: conversation export (GET
   `/api/session/<sid>/export?format=md|json`, sidebar ⬇/{} buttons, tests/test_export.py);

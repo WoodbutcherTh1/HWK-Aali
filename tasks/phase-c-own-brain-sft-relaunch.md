@@ -1,8 +1,10 @@
 # Phase C — SFT Aali's own brain (relaunch after power-off)
 
 - owner: buffy (this PC, Freebuff session)
-- status: in-progress (RELAUNCH 2026-09-26: base switched context-4k -> phase-d-8k, owner GO given)
+- status: done (2026-09-26 owner decision: KEEP checkpoint-3873 as the served brain;
+  scratch brain = research. Continuation lives in tasks/distill-teacher-scratch.md)
 - started: 2026-09-14 ~00:40 local
+- closed: 2026-09-26
 
 ## Why
 The owner accidentally powered the PC off (~2026-09-13 23:31). This killed:
@@ -92,6 +94,50 @@ Owner GO. The run-7 fix (rebuild in SCRATCH row shape) implemented:
    restore checkpoint-3873 after the run (no auto-promotion either way).
 4. Owner decision after smoke: replace model/scratch/final.pt only on a
    good smoke, same gate as every previous run.
+
+## RUN 8 OUTCOME (2026-09-26 10:32) — shape fixed, capacity still the wall
+
+Run 8 completed clean (exit 0, 2500 steps, 81.9M tokens, ~32 min,
+~42.5k tok/s): loss ~2.0-2.5, eval 2.40 -> 2.355 (NOT comparable to run 7's
+2.049 — different data shape, different loss surface). Serve-shape smoke:
+- EN answer: a CODE attractor fragment `if("%s", "%s"))` — new failure
+  mode (code-heavy rows in the mix), not the soup JSON of run 7.
+- AR answer: pseudo-Quranic salad, same as run 7 — the phase-d-8k base's
+  pretraining attractor survives 2500 SFT steps.
+- The FORMAT is now right (rows teach the serving shape; zero soup JSON
+  anywhere) — what remains is FLUENCY: the 110M base at ~14.6B total
+  tokens still cannot compose natural prose, and SFT cannot add that.
+Verdict: DO NOT PROMOTE. model/scratch/final.pt untouched. Run-8 weights
+kept at D:/hwk-models/aali-sft-4k (run 7 at aali-sft-4k.run7-soupshape).
+NEXT LEVERS (owner decision, honest): (a) keep checkpoint-3873 as the
+served brain and treat the scratch brain as research (current state);
+(b) distill the promoted teacher into scratch-shaped rows at larger scale
+with quality gates; (c) a much longer Phase C budget on sft_scratch
+(epochs help fluency less than pretraining tokens do). No auto-promotion.
+
+DECISION (2026-09-26, owner): lever (a) — checkpoint-3873 stays the served
+brain, model/scratch/final.pt stays untouched, and lever (b) distillation
+is GO as the research path (Phase C task closed; distillation work tracked
+in tasks/distill-teacher-scratch.md).
+
+## Run-8 day incident trail (same morning)
+- Watchdog fight resolved: the brain watchdog revived :20129 every 120s
+  while the chain waited for the GPU (I killed the server twice; it came
+  back). Order learned: STOP the watchdog first, then the server pair
+  (shim python.exe -> soup.exe child holds the CUDA context — both PIDs).
+- :5055 revival race: two app.py processes raced the port after the
+  aali_server_watchdog revived one in LOCAL mode while the tunnel was up
+  (the 09-25 hazard pattern: an unauthenticated ask served through
+  aali.dpdns.org). Fixed per convention: both server watchdogs stopped,
+  one app.py relaunched via launch_detached with AALI_API_KEY=<master
+  key>; verified honest 404 on /api/ask without a key, locally AND via
+  the edge. NOTE: /api/health's mode field reflects the BRAIN config, not
+  the auth mode — key gating is proven by the 404, not by mode:"multi-user".
+- Brain watchdog relaunched THROUGH the key-mode env (AALI_API_KEY +
+  AALI_OWN_MODEL=0 AALI_OLLAMA=0) so its spawn_serve child inherits key
+  mode; aali_server_watchdog intentionally left stopped (its local-mode
+  revival is what raced the port; revival duty stays with the brain
+  watchdog).
 
 ## Night 2 (2026-09-14 ~07:00-08:30) — ROOT CAUSE found + fixed
 The first Phase C SFT "passed" (loss 0.0009) but the served brain output an
