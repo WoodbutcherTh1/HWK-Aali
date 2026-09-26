@@ -553,6 +553,25 @@ def run_training() -> bool:
                             toolbelt_tool_counts(written).items())))
     except ImportError:
         log("toolbelt floors gate skipped (build_aali_sft_v2 not importable)")
+    # Refusal-discourse gate (2026-09-26 audit): the mix must carry clean
+    # refusal rows per language (AR + EN) or the brain keeps fabricating
+    # fake env dumps instead of refusing. Same stale-file contract as above.
+    try:
+        from build_aali_sft_v2 import (refusal_floor_failures,
+                                       refusal_row_counts)
+        with SFT_V2.open("r", encoding="utf-8") as handle:
+            written = [json.loads(line) for line in handle if line.strip()]
+        ref_failures = refusal_floor_failures(refusal_row_counts(written))
+        if ref_failures:
+            log("refusal floors gate FAILED: " + "; ".join(ref_failures))
+            log("rebuild with scripts/build_aali_sft_v2.py before training")
+            return False
+        log("refusal floors gate passed: "
+            + ", ".join(f"{lang}={count}"
+                        for lang, count in sorted(
+                            refusal_row_counts(written).items())))
+    except ImportError:
+        log("refusal floors gate skipped (build_aali_sft_v2 not importable)")
     log(f"starting soup train on {SFT_V2.name}")
     # Stream the trainer's output to a live log (the old capture-to-buffer
     # died with subprocess.run); on exit the tail goes to last_stage.txt.

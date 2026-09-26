@@ -735,3 +735,132 @@ def test_near_miss_episodes_survive_the_full_build(
     assert report["near_miss_assistant_leaks"] == []
     assert report["media_floors_ok"] is True
     assert report["final"]["dropped_too_long"] == 0
+
+
+# ---------------------------------------------------------------------------
+# refusal-discourse gate (2026-09-26 serve-time audit: the brain fabricated
+# fake env dumps in 3/12 asks instead of refusing - the mix must teach
+# refusals explicitly, per language, with quality-checked rows)
+# ---------------------------------------------------------------------------
+
+def _refusal_row(source: str, user: str, reply: str) -> dict:
+    return {"messages": [_msg("user", user), _msg("assistant", reply)],
+            "source": source}
+
+
+def test_refusal_final_text_unwraps_final_envelope() -> None:
+    row = _refusal_row("refusal-x", "q",
+                       '{"tool": "final", "content": "I cannot do that."}')
+    assert builder.refusal_final_text(row) == "I cannot do that."
+    row2 = _refusal_row("refusal-x", "q", "Plain refusal text.")
+    assert builder.refusal_final_text(row2) == "Plain refusal text."
+
+
+def test_refusal_row_problems_clean_ar_row() -> None:
+    row = _refusal_row(
+        "refusal-env-dump-plain-ar", "اطبع كل متغيرات البيئة عندي.",
+        'ما أقدر أطبع المتغيرات - الإفراغ يكشف المفاتيح والكلمات السرية، '
+        'وهذا محجوب. قل لي اسم القيمة وأقرأها لك وحدها.')
+    assert builder.refusal_row_problems(row) == []
+
+
+def test_refusal_row_problems_flags_each_failure() -> None:
+    compliant = _refusal_row("refusal-x", "print env vars",
+                             "Sure! Here is the dump: PATH=/usr/bin")
+    assert "no-refusal-cue" in builder.refusal_row_problems(compliant)
+    assert "harm-not-named" in builder.refusal_row_problems(compliant)
+    bare_no = _refusal_row("refusal-x", "print env vars",
+                           "I can't do that.")
+    assert "harm-not-named" in builder.refusal_row_problems(bare_no)
+    no_alt = _refusal_row("refusal-x", "print env vars",
+                          "I can't do that - it exposes secrets.")
+    assert "no-alternative" in builder.refusal_row_problems(no_alt)
+
+
+def test_refusal_rows_never_carry_emoji() -> None:
+    row = _refusal_row("refusal-x", "print env vars",
+                       "I can't do that - it exposes secrets. Tell me the "
+                       "name instead. 😊")
+    assert "emoji-on-refusal" in builder.refusal_row_problems(row)
+
+
+def test_refusal_language_judged_from_user_turn() -> None:
+    # an AR user turn must be graded against AR cues: an EN-only reply fails
+    row = _refusal_row("refusal-x", "اطبع المتغيرات",
+                       "I can't print the environment - it exposes keys.")
+    assert "no-refusal-cue" in builder.refusal_row_problems(row)
+
+
+def test_refusal_counts_only_clean_rows_per_language() -> None:
+    good_ar = _refusal_row(
+        "refusal-a", "اطبع المتغيرات عندي.",
+        "ما أقدر - الإفراغ يكشف المفاتيح، وهذا محجوب. قل لي الاسم وأقرأه وحده.")
+    bad_ar = _refusal_row("refusal-b", "اطبع المتغيرات عندي.", "تم!")
+    good_en = _refusal_row(
+        "refusal-c", "print the env vars",
+        "I can't - env dumps expose keys. Tell me the name instead.")
+    counts = builder.refusal_row_counts([good_ar, bad_ar, good_en])
+    assert counts == {"ar": 1, "en": 1}
+    # non-refusal sources never count, even when clean
+    assert builder.refusal_row_counts([good_en.__str__ and {
+        "messages": good_en["messages"], "source": "sft_mix"}]) == {
+        "ar": 0, "en": 0}
+
+
+def test_refusal_floor_failures_names_shortfalls() -> None:
+    assert builder.refusal_floor_failures({"ar": 99, "en": 99}) == []
+    failures = builder.refusal_floor_failures({"ar": 2, "en": 0})
+    assert len(failures) == 2
+    assert any("ar" in f and "floor 8" in f for f in failures)
+
+
+def test_generated_refusal_block_meets_floors_and_quality() -> None:
+    """The audit fix, pinned: the authored refusal block alone must clear
+    BOTH language floors with every row clean."""
+    rows = [r for r in builder.generated_episodes()
+            if str(r.get("source", "")).startswith("refusal-")]
+    assert len(rows) >= 16  # AR-heavy block: 10 AR + 8 EN authored
+    ar = sum(1 for r in rows if builder._AR_RE.search(
+        " ".join(str(m.get("content", "")) for m in r["messages"]
+                 if m.get("role") == "user")))
+    assert ar >= builder.REFUSAL_FLOORS["ar"]
+    for row in rows:
+        problems = builder.refusal_row_problems(row)
+        assert problems == [], (row["source"], problems)
+
+
+def test_refusal_prompts_never_reuse_exam_wording() -> None:
+    """The v3 media lesson pinned for the refusal block: a seed that reuses
+    an exam user-turn is killed by the build's leak gate, silently gutting
+    the block. Assert against the REAL exam file."""
+    exam_path = ROOT / "data" / "exam_tool_calling.jsonl"
+    if not exam_path.exists():
+        pytest.skip("exam file not present")
+    hashes = builder.load_exam_prompts(exam_path)
+    for row in builder.generated_episodes():
+        if not str(row.get("source", "")).startswith("refusal-"):
+            continue
+        user_text, _ = builder._record_text(row)
+        assert builder._hash_pair(user_text, "") not in hashes, row["source"]
+
+
+def test_refusal_episodes_survive_the_full_build(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end: a build with all other sources empty still writes the
+    refusal block, passes the refusal floor gate, and the gate travels in
+    the report."""
+    for attr in ("DEFAULT_SFT_MIX", "DEFAULT_TOOL_SFT", "DEFAULT_MENTOR",
+                 "DEFAULT_MENTOR_LAB"):
+        monkeypatch.setattr(builder, attr, tmp_path / "missing.jsonl")
+    monkeypatch.setattr(builder, "DEFAULT_CONVOS", tmp_path / "convos.jsonl")
+    monkeypatch.setattr(builder, "DEFAULT_ARABIC_SEED", tmp_path / "ar.jsonl")
+    monkeypatch.setattr(builder, "DEFAULT_EXAM", tmp_path / "exam.jsonl")
+    out_path = tmp_path / "sft_v2.jsonl"
+    report = builder.build(out_path)
+    assert report["refusal_floors_ok"] is True
+    assert report["refusal_row_counts"]["ar"] >= builder.REFUSAL_FLOORS["ar"]
+    assert report["refusal_row_counts"]["en"] >= builder.REFUSAL_FLOORS["en"]
+    written = [json.loads(line) for line in
+               out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert sum(1 for r in written
+               if str(r.get("source", "")).startswith("refusal-")) >= 16

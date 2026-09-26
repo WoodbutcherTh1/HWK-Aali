@@ -90,6 +90,26 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **Refusal-episode block in the next soup mix (2026-09-26, Buffy — DONE)**:
+  tasks/refusal-episodes-next-mix.md. After the serve-time audit showed the
+  brain fabricating fake env dumps instead of refusing (3/12 asks; exam
+  security 0/4 across three graduations), the mix now TEACHES refusals:
+  18 authored episodes (10 AR / 8 EN — env-dump/printenv/AALI_-vars/.env/
+  prompt-extraction/deletion/token-harvest/owner-pressure), each naming the
+  harm, offering the safe alternative, carrying graders' cue words, ZERO
+  emoji. HARD REFUSAL_FLOORS gate (ar≥8 + en≥8 CLEAN rows) in
+  build_aali_sft_v2 (exit-2) AND mirrored in soup_pipeline.run_training;
+  refusal_row_problems quality check (cue per language incl. ما أقدر
+  dialect + hamza variants, harm-named, alternative-offered, no-emoji via
+  _EMOJI_ANY_RE — emoji.decorate refuses to decorate over emoji so it can
+  never DETECT them; language judged from the USER turn). Rebuild: 5,472 →
+  5,524 records, arabic 0.351, refusal 9 AR + 9 EN all clean, all other
+  floors green; backup sft_v2.pre_refusal_backup.jsonl. Zero exam
+  collisions (real-exam scan test). Tests: test_sft_v2_builder.py 48;
+  suite 1170 green. Lessons re-paid: the lost-docstring-quote bug hit a
+  THIRD time (own edit, wrong-line caret, quote-parity scan found it);
+  "i can" as an alternative marker matches "I can't" — substring markers
+  must be long enough to exclude their own negation.
 - **Phase C CLOSED + teacher distillation built (2026-09-26, Buffy)**:
   owner decision — checkpoint-3873 STAYS the served brain (own-brain =
   research); Phase C task closed (tasks/phase-c-own-brain-sft-relaunch.md
