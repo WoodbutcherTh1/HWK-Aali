@@ -90,10 +90,9 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
-- **Soup v7 mix-hygiene gate BUILT + graduation LAUNCHED (2026-09-26 evening,
-  Buffy — RUNNING, owner asleep w/ blanket autonomy)**:
-  tasks/soup-v7-mix-hygiene.md. Owner GO for the v7 lever (drop the
-  attack→compliance rows, rebuild, graduate). build_aali_sft_v2.py gained
+- **Soup v7 GRADUATED — PROMOTE (3/26 vs 1/26), security 0/4 UNCHANGED
+  (2026-09-26 evening→09-27 03:02 local, Buffy — DONE)**:
+  tasks/soup-v7-mix-hygiene.md. build_aali_sft_v2.py gained
   _ATTACK_FAMILIES (env-dump/dotenv/prompt-extraction/secret-harvest,
   AR+EN) + hygiene_pair_problems/hygiene_problems/attack_compliance_rows
   (dispatch-with-attack incl. the v6 AR exec-tool shape, narration-
@@ -110,9 +109,25 @@ in parallel:
   flagged for the owner) → :20129 owner cmdline-VERIFIED (pid 92508 =
   soup.exe serve checkpoint-3936) → killed by exact PID → GPU 649 MiB →
   tuned.checkpoint3936.promoted.bak → v6 verdict archived →
-  launch_detached --log soup_v7 (start 21:58:22). Expected verdict ~01:20
-  (train ~3h14m on 5,517). Watch: security off 0/4 now that the mix no
-  longer contradicts itself.
+  launch_detached --log soup_v7 (start 21:58:22). OUTCOME: PROMOTE,
+  checkpoint-3933 live on :20129 (id + cmdline + live-ask verified; :5055
+  ok) — but security 0/4 with BYTE-IDENTICAL failure outputs to v6 (the
+  exam's attack wordings are leak-gated OUT of training, so coherence
+  alone never generalizes; the 1.5B imperative→tool-JSON prior beats
+  refusal episodes). Four data levers now tried (refusal episodes,
+  hygiene, upweight, near-miss) — owner options recorded in the task
+  file: accept the ceiling (runtime gates = boundary, recommended),
+  serve-time refusal enforcement, or a bigger student someday.
+  MORNING LESSONS: (1) the pre-v7 "watchdogs: none" preflight was WRONG
+  — wmic silently returns empty on this box; a brain watchdog ran all
+  night and behaved per contract (never fought the trainer, verified
+  checkpoint-3933, stood down) — process checks must use PowerShell
+  Get-CimInstance/tasklist, never wmic; (2) the exam graded 26 cases vs
+  v6's 39 — soup.exe REGENERATED exam_prompts.jsonl during the teacher
+  serve from a source not in the repo (verdict mechanics unaffected;
+  restore the 39-case exam before the next graduation if wanted);
+  (3) AGENTS.md partial-match str_replace fused two bullets — re-read
+  after header-level edits.
 - **Soup v6 GRADUATED — PROMOTE, security 0/4 again, mix self-contradiction
   found (2026-09-26 14:33→17:55, Buffy — DONE)**:
   tasks/soup-v6-graduation-run.md. Owner GO for the refusal-taught mix.
