@@ -90,6 +90,39 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **Pi WoL sentinel LIVE — the PC no longer needs to stay on 24/7
+  (2026-09-27 evening, Buffy — DONE)**: tasks/pi-wol-sentinel.md +
+  docs/pi_wol_sentinel.md. Pi 3 B+ verdict re-confirmed (it can never
+  host the brain: torch SIGILL, 1 GB), but it now owns the INTERNET
+  PATH: cloudflared linux-arm64 2025.6.1 + a stdlib catcher
+  (scripts/pi_sentinel_catcher.py on 127.0.0.1:8766) run as the aalici
+  user on the Pi (NO root: @reboot + minute-cron pgrep-gated revives in
+  user crontab, deployed idempotently by
+  scripts/pi_sentinel/deploy_to_pi.sh). Catcher = streaming reverse
+  proxy → PC:5055 + local 409 "waking" health when the PC sleeps + WoL
+  magic packet (directed + .255 broadcast, 45 s cooldown) +
+  /_sentinel/ping local probe; content-free logs (log_request
+  overridden — the framework default leaks raw query strings).
+  PC-side: scripts/wol_enable_pc.bat (ADMIN one-time: WoL re-arm +
+  LAN-only UDP 9 rule; NIC already had magic-packet wake enabled, S3
+  available) and scripts/idle_sleep_guard.py — a sleep DECISION check
+  (exit 0/1, never sleeps by itself; owner's power plan does the
+  sleeping) that blocks on training.log heartbeat, training machinery,
+  unexpected GPU compute PIDs (always-on stack recognized by cmdline OR
+  shim→child ancestry — the brain's real python is a BARE python.exe
+  child; bash-started cmdlines carry forward slashes, normalize both),
+  and user-session processes. CUT OVER: HWK TunnelAutoStart disabled +
+  PC cloudflared killed by exact PID 16300 — aali.dpdns.org now
+  terminates on the Pi. VERIFIED LIVE: Pi→PC health 200; edge through
+  Pi-only path 200 after the kill; real master-key ask through
+  edge→Pi→catcher→PC→brain; SSE events flow; real magic packet emitted
+  (throwaway catcher aimed at a dead port). Tests: test_pi_sentinel_catcher.py
+  (15, in-process real servers, wake_fn recorded) +
+  test_idle_sleep_guard.py (12). Owner next steps: one real S3
+  sleep→wake test (needs his go), then opt-in idle-sleep via
+  idle_sleep_guard --loop + standby-timeout. HWK NightCaretaker task
+  DISABLED same session (owner-approved; it had nothing pending and
+  was looping on the live brain holding the GPU).
 - **Soup v7 GRADUATED — PROMOTE (3/26 vs 1/26), security 0/4 UNCHANGED
   (2026-09-26 evening→09-27 03:02 local, Buffy — DONE)**:
   tasks/soup-v7-mix-hygiene.md. build_aali_sft_v2.py gained
