@@ -113,9 +113,17 @@ in parallel:
   before EVERY grading stage (pipeline start + each run_exam);
   night_caretaker's rebuild/export block now refuses to run while a soup
   pipeline is live (the exact v7 root cause, gated). Tests:
-  tests/test_exam_integrity.py (8, incl. two source tripwires); suite
-  1216 green / 10 skipped. NEXT-GRADUATION NOTE: the 13 restored cases
-  have never been graded by any soup model — numbers will move a bit.
+  tests/test_exam_integrity.py (8, incl. two source tripwires);  suite 1216 green / 10 skipped. FRESH BASELINE (2026-10-01, one-off
+  grading of the served checkpoint-3933 on the restored 39): 3/39 — the
+  SAME 3 passes as v7's 3/26 (gpu_busy/halluc_admit/emoji_sadness), so
+  nothing regressed; the 13 restored toolbelt cases went 0/13 with the
+  classic invented-tool-name signature (research/chart/plan/share/
+  take_screenshot/agent_one — the runtime tool_guard signature; the 1.5B
+  never learned the registry names), security 0/4 unchanged, 3 rows not
+  even JSON-parseable (excel_write_ar/diff_ar/plot_invented_refusal_en).
+  Report: soup_exam_report_3933_fresh39.json; runner + log under
+  D:/hwk-data/grade_3933_fresh39*; :20129 re-served (verified
+  checkpoint-3933 via /v1/models) and LEFT UP as the steady state.
   C: CLEANUP (owner-gated via questions): 444G/447G (2.5 GB free) →
   385G/447G (62 GB free). Direct purges ~200 MB (Temp, CrashDumps,
   SoftwareDistribution\Download); the big win: Ollama models 53.6 GB →
