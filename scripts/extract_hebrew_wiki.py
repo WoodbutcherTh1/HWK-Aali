@@ -1,20 +1,20 @@
-"""Extract Hebrew Wikipedia dumps to JSON with wikiextractor (Phase 2.2).
+"""Extract Hebrew Wikimedia dumps to JSON with wikiextractor (Phase 2/3).
 
 Runs the D:/hwk-tools/hebrew-venv wikiextractor per verified dump part into
-D:/hwk-data/hebrew/extracted/hewiki/part<N>/ (separate dirs = collision-free
+D:/hwk-data/hebrew/extracted/<wiki>/part<N>/ (separate dirs = collision-free
 and re-runnable per part). Content-free progress lines go to
 D:/hwk-data/hebrew/EXTRACT_LOG.md. CPU-only.
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 import time
 from pathlib import Path
 from datetime import datetime, timezone
 
-RAW = Path("D:/hwk-data/hebrew/raw/hewiki")
-OUT = Path("D:/hwk-data/hebrew/extracted/hewiki")
+HEBREW_ROOT = Path("D:/hwk-data/hebrew")
 LOG = Path("D:/hwk-data/hebrew/EXTRACT_LOG.md")
 VENV_PY = Path("D:/hwk-tools/hebrew-venv/Scripts/python.exe")
 
@@ -30,14 +30,22 @@ def log(message: str) -> None:
 
 
 def main() -> None:
-    parts = sorted(RAW.glob("*.xml-*.bz2"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--wiki", default="hewiki")
+    args = parser.parse_args()
+    raw = HEBREW_ROOT / "raw" / args.wiki
+    out = HEBREW_ROOT / "extracted" / args.wiki
+
+    # pages-articles parts carry an index (…-pages-articles1.xml-pNN.bz2),
+    # but a small wiki is ONE file (…-pages-articles.xml.bz2) — match both.
+    parts = sorted(raw.glob("*pages-articles*.bz2"))
     if not parts:
-        raise SystemExit("no verified dump parts found under raw/hewiki/")
-    OUT.mkdir(parents=True, exist_ok=True)
-    log(f"extraction start: {len(parts)} parts")
+        raise SystemExit(f"no verified dump parts found under raw/{args.wiki}/")
+    out.mkdir(parents=True, exist_ok=True)
+    log(f"extraction start [{args.wiki}]: {len(parts)} parts")
 
     for index, part in enumerate(parts, 1):
-        part_out = OUT / f"part{index}"
+        part_out = out / f"part{index}"
         marker = part_out / "_done.marker"
         if marker.exists():
             log(f"part{index}: already extracted (marker present) - skipping")
@@ -58,10 +66,9 @@ def main() -> None:
             log(f"part{index}: stderr tail: {tail}")
             raise SystemExit(1)
         marker.write_text("ok\n", encoding="utf-8")
-        files = sorted(part_out.rglob("*.json")) if not any(part_out.rglob("*")) else None
         log(f"part{index}: done in {minutes:.1f} min")
 
-    log("extraction DONE: all parts")
+    log(f"extraction DONE [{args.wiki}]: all parts")
 
 
 if __name__ == "__main__":

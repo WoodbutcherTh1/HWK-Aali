@@ -36,6 +36,10 @@ def script_share(text: str) -> tuple[int, int, int]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--extracted", default=str(EXTRACTED))
+    parser.add_argument("--pattern", default="wiki_*",
+                        help="glob under --extracted (wiki_* for wikiextractor output, *.jsonl for benyehuda)")
+    parser.add_argument("--label", default="Phase 2 — Hebrew Wikipedia extraction stats",
+                        help="STATS.md section label")
     args = parser.parse_args()
 
     articles = 0
@@ -43,7 +47,7 @@ def main() -> None:
     hebrew_chars = 0
     latin_chars = 0
     per_part: dict[str, int] = {}
-    for json_file in sorted(Path(args.extracted).rglob("wiki_*")):
+    for json_file in sorted(Path(args.extracted).rglob(args.pattern)):
         part = json_file.parent.name
         with json_file.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -68,7 +72,7 @@ def main() -> None:
 
     report = [
         "",
-        "## Phase 2 — Hebrew Wikipedia extraction stats",
+        f"## {args.label}",
         f"_generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_",
         "",
         f"- articles extracted: **{articles}**",

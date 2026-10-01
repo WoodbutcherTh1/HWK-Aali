@@ -40,6 +40,24 @@ tokenized shards → Phase D continuation + future SFT. Target 5–10B tokens
 - 2026-10-01: phase-d-8k confirmed FINISHED (final.pt + checkpoint.pt +
   trainer-state.pt on D:/hwk-models/phase-d-8k/) — Hebrew becomes a
   natural stage-6 continuation corpus when tokenized.
+- 2026-10-01 PHASE 3 COMPLETE (owner GO received): hewikisource-20261001
+  downloaded (1 part, 463.9 MB, SHA1-verified vs dumpstatus manifest) +
+  extracted: 243,261 docs, 0.812 GB chars, 75.8% Hebrew, ~203M tokens.
+  Ben-Yehuda fetched from the RIGHTS-HOLDER's own GitHub dump repo
+  (LICENSE = public domain, credit requested; the HF dataset is just a
+  loader script streaming the same txt files) via git clone --depth 1
+  --filter=blob:limit=400k (git fsck exit 0 = all objects SHA1-verified);
+  extracted 26,455 works, 0.472 GB chars, 76.8% Hebrew, ~118M tokens.
+  DECISIONS: hewiktionary SKIPPED (thin prose, revisit on token
+  shortfall); hewikinews SKIPPED (owner-approved; no dated dumps).
+  CUMULATIVE pre-cleaning: 675,581 docs, 2.40 GB text, ~600M tokens.
+  LESSONS: single-part wikis have NO part index in the filename (extractor
+  glob fixed to *pages-articles*.bz2); GitHub raw 404s on guessed zip
+  paths — verify repo tree via API before assuming a bundle exists; long
+  CPU loops never run in the foreground console (timeout killed one
+  Ben-Yehuda pass mid-run — relaunched detached per house convention).
+  fetch_benyehuda.py kept as a documented dead-end (zip path 404s; clone
+  is the working path).
 - 2026-10-01 PHASE 2 COMPLETE (owner GO received): hewiki-20261001 dump
   downloaded as 6 parts (1.151 GB), every part SHA1-verified against the
   official dumpstatus.json manifest — scripts/fetch_hebrew_wiki.py
