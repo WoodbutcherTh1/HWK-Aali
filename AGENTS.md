@@ -90,6 +90,40 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **39-case exam RESTORED + unclobberable; C: 100%→87% (2026-10-01, Buffy
+  — DONE)**: tasks/restore-39case-exam.md + tasks/c-drive-cleanup.md,
+  commit 84d6482. ROOT CAUSE of v7's 26-vs-39 (morning note's "soup.exe
+  regenerated it" blame was WRONG — serve.py has no exam writers): the
+  night caretaker was STILL ALIVE during the v7 launch (broken wmic
+  preflight missed it), saw the GPU "free" in the window before the
+  teacher serve grabbed VRAM, and ran its rebuild+export step —
+  soup_export_sft.py reset the deployed exam to the repo's 26-case file
+  mid-run. The 13 toolbelt cases (2026-09-23) had only ever lived in the
+  DEPLOYED file (commit message said "exam extended 26 → 39" but data/
+  was never touched), so they were unrecoverable — re-authored 13 fresh
+  cases per the toolbelt spec (spawn ×3, excel ×2, plot call +
+  invented-data refusal, diff AR, todo, recall, artifact, screenshot
+  explicit + proactive refusal), verified leak-free with the builder's
+  own detector over the whole 5,517-row mix (only pre-existing hit:
+  video_ad_followup_ar_turn2's generic reply, correctly dropped at next
+  rebuild); data/exam_tool_calling.jsonl committed at 39 cases (never
+  again deployed-only). DEFENSE: soup_pipeline.ensure_exam_integrity()
+  re-syncs the deployed exam from the repo exam (count+ids+rendered
+  prompts, re-render on mismatch, fail-open on an unreadable repo exam)
+  before EVERY grading stage (pipeline start + each run_exam);
+  night_caretaker's rebuild/export block now refuses to run while a soup
+  pipeline is live (the exact v7 root cause, gated). Tests:
+  tests/test_exam_integrity.py (8, incl. two source tripwires); suite
+  1216 green / 10 skipped. NEXT-GRADUATION NOTE: the 13 restored cases
+  have never been graded by any soup model — numbers will move a bit.
+  C: CLEANUP (owner-gated via questions): 444G/447G (2.5 GB free) →
+  385G/447G (62 GB free). Direct purges ~200 MB (Temp, CrashDumps,
+  SoftwareDistribution\Download); the big win: Ollama models 53.6 GB →
+  deleted all EXCEPT glm-low-ram (owner's explicit choice; glm-4.7-flash
+  was the SAME blob as glm-low-ram — same ID — so it freed nothing
+  alone). Owner kept pagefile.sys (15 GB) + hiberfil.sys (6.8 GB) and
+  ~/Videos (25.4 GB) untouched. Known levers if C: tightens again:
+  pagefile→D:, hibernation off, OLLAMA_MODELS→D:, ~/Videos review.
 - **Pi WoL sentinel LIVE — the PC no longer needs to stay on 24/7
   (2026-09-27 evening, Buffy — DONE)**: tasks/pi-wol-sentinel.md +
   docs/pi_wol_sentinel.md. Pi 3 B+ verdict re-confirmed (it can never
