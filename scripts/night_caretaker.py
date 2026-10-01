@@ -246,21 +246,30 @@ def main() -> int:
         # 1) Phase B finished (or crashed)?
         if gpu_really_free():
             decide("GPU free - training window over")
-            # 2a) audit + rebuild data with everything captured so far
-            audit = subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "audit_mentor_lab.py")],
-                capture_output=True, text=True, timeout=1800,
-            )
-            decide(f"lab audit done: {audit.stdout.strip().splitlines()[-1:] or 'see log'}")
-            subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "build_aali_sft_v2.py")],
-                capture_output=True, text=True, timeout=1800,
-            )
-            subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "soup_export_sft.py")],
-                capture_output=True, text=True, timeout=1800,
-            )
-            decide("sft_v2 + soup export rebuilt with lab + arabic data")
+            # 2a) audit + rebuild data with everything captured so far.
+            # 2026-09-27 v7 lesson: this rebuild ran while a graduation
+            # pipeline was LIVE (the broken wmic preflight missed it) and its
+            # soup_export_sft step reset the deployed exam to the repo's
+            # smaller file mid-run - v7 graded 26 cases instead of 39. Never
+            # rebuild/export while a pipeline is grading.
+            if process_running("soup_pipeline") is not None:
+                decide("soup pipeline is live - skipping the rebuild/export step "
+                       "(it would clobber the exam the run is grading)")
+            else:
+                audit = subprocess.run(
+                    [sys.executable, str(ROOT / "scripts" / "audit_mentor_lab.py")],
+                    capture_output=True, text=True, timeout=1800,
+                )
+                decide(f"lab audit done: {audit.stdout.strip().splitlines()[-1:] or 'see log'}")
+                subprocess.run(
+                    [sys.executable, str(ROOT / "scripts" / "build_aali_sft_v2.py")],
+                    capture_output=True, text=True, timeout=1800,
+                )
+                subprocess.run(
+                    [sys.executable, str(ROOT / "scripts" / "soup_export_sft.py")],
+                    capture_output=True, text=True, timeout=1800,
+                )
+                decide("sft_v2 + soup export rebuilt with lab + arabic data")
 
             # 2b) re-SFT pipeline (if not already handled). A verdict newer
             # than tonight's start means the pipeline already ran — skip it.

@@ -1,8 +1,9 @@
-"""Run the 12-case Aali tool-calling exam against a Soup-served model.
+"""Grade a Soup-served model on Aali's tool-calling exam.
 
 The Soup server (`soup serve`) exposes an OpenAI-compatible API; this script
 replays the exact prompts Aali's exam uses (exported by
-scripts/soup_export_sft.py to D:/hwk-data/soup/exam_prompts.jsonl) and grades
+scripts/soup_export_sft.py to D:/hwk-data/soup/exam_prompts.jsonl — kept in
+sync with the repo exam by soup_pipeline.ensure_exam_integrity) and grades
 them with the same rules as scripts/exam_tool_calling.py, so scores are
 directly comparable between Aali and any teacher/comparison model.
 

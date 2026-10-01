@@ -54,6 +54,7 @@ SOUP_EXE = Path(os.getenv("SOUP_EXE", "D:/hwk-tools/soup-venv/Scripts/soup.exe")
 TRAINING_LOG = Path("D:/hwk-data/training.log")
 PIPELINE_LOG = Path("D:/hwk-data/soup_pipeline.log")
 EXAM_PROMPTS = Path("D:/hwk-data/soup/exam_prompts.jsonl")
+REPO_EXAM = ROOT / "data" / "exam_tool_calling.jsonl"
 SFT_V2 = Path("D:/hwk-data/soup/sft_v2.jsonl")
 SOUP_CONFIG = ROOT / "soup.yaml"
 REPORTS = Path("D:/hwk-data/soup")
@@ -224,10 +225,72 @@ def serve_teacher() -> subprocess.Popen | None:
     return None
 
 
+def ensure_exam_integrity() -> bool:
+    """Keep the deployed exam in sync with the repo exam before grading.
+
+    The 2026-09-27 v7 lesson: the deployed 39-case exam was silently reset
+    to the repo's smaller file MID-RUN - the night caretaker's rebuild step
+    (believed disabled; the wmic preflight check was broken) ran
+    scripts/soup_export_sft.py while the pipeline was serving its teacher,
+    and v7 graded 26 cases instead of 39. The repo exam is the single
+    source of truth: before every grading stage, compare case count + ids
+    + rendered prompts and re-render the deployed file from the repo on
+    any mismatch. Cheap (two small files) and idempotent.
+    """
+    try:
+        from soup_export_sft import _exam_prompt
+        repo_cases = [
+            json.loads(line)
+            for line in REPO_EXAM.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except (OSError, ValueError, ImportError) as exc:
+        log(f"exam integrity: repo exam unreadable ({exc}) - keeping the deployed file")
+        return False
+    expected = []
+    for case in repo_cases:
+        prompt, case_id = _exam_prompt(case)
+        expected.append({
+            "id": case_id,
+            "prompt": prompt,
+            "expect_tool": case.get("expect_tool"),
+            "required_args": case.get("required_args", []),
+            "require_disclaimer": case.get("require_disclaimer", False),
+            "disclaimer_keywords": case.get("disclaimer_keywords", []),
+        })
+    deployed: list[dict] | None
+    try:
+        deployed = [
+            json.loads(line)
+            for line in EXAM_PROMPTS.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        matches = len(deployed) == len(expected) and all(
+            d.get("id") == e["id"] and d.get("prompt") == e["prompt"]
+            for d, e in zip(deployed, expected)
+        )
+    except (OSError, ValueError):
+        deployed, matches = None, False
+    if matches:
+        return True
+    EXAM_PROMPTS.parent.mkdir(parents=True, exist_ok=True)
+    EXAM_PROMPTS.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in expected) + "\n",
+        encoding="utf-8",
+    )
+    log(f"exam integrity: deployed exam did not match the repo exam "
+        f"({len(deployed) if deployed else 'absent/unreadable'} vs {len(expected)} cases) "
+        f"- re-rendered from {REPO_EXAM.name}")
+    return True
+
+
 def run_exam(stage: str, model: str, ids: list[str] | None = None) -> dict | None:
     """Grade `model` on the exam; writes soup_exam_report_<stage>.json.
-    ids=None runs the full 26-case exam; a subset probes only those cases."""
+    ids=None runs the full exam; a subset probes only those cases."""
     report_path = REPORTS / f"soup_exam_report_{stage}.json"
+    # 2026-09-27 v7 lesson: an external rebuild can clobber the deployed
+    # exam mid-run - re-sync from the repo before EVERY grading stage.
+    ensure_exam_integrity()
     log(f"exam [{stage}] model={model}")
     command = [
         sys.executable, str(ROOT / "scripts" / "soup_exam.py"),
@@ -820,6 +883,7 @@ def main() -> int:
             return 0
         log("previous run ended INCOMPLETE - retrying")
     log("=== soup pipeline start ===")
+    ensure_exam_integrity()
     if not _acquire_lock():
         log("another pipeline instance already holds the lock - exiting")
         return 3
