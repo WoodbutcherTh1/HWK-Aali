@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>آلي — محادثة صوتية</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span> آلي الصوتي <small>AR · HE · EN</small></div>
+  <div class="status"><span id="conn" class="pill off">غير متصل</span><span id="lang" class="pill">ar</span><span id="engine" class="pill">—</span></div>
+</header>
+
+<main>
+  <section id="talk">
+    <button id="mic" aria-label="تسجيل">🎙️</button>
+    <div id="hint">اضغط للتحدث — المساحة تعمل محليًا بالكامل</div>
+    <div id="level"><div id="levelbar"></div></div>
+  </section>
+
+  <section id="log" aria-live="polite"></section>
+</main>
+
+<footer>
+  <span id="latency">—</span>
+  <span class="muted">XTTS-v2 محلي · Whisper محلي · بلا سحابة</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

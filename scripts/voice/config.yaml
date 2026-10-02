@@ -1,0 +1,48 @@
+# Aali Voice Agent — Phase 1 configuration
+# Arabic-first. All local. CPU-first. Honest about limits.
+# Ports follow the house contract: 5080/5081 are NEW ports (brain 5055,
+# n8n 5678, soup 20129 stay untouched).
+
+server:
+  host: 127.0.0.1        # fail-safe: loopback unless AALI_VOICE_BIND overrides
+  ws_port: 5080          # WebSocket: client PCM in, events + PCM out
+  http_port: 5081        # serves web/voice/ static UI
+
+stt:
+  model: large-v3-turbo  # faster-whisper; AR/HE/EN
+  model_dir: D:/hwk-models/faster-whisper-large-v3-turbo  # local plain files
+  device: cpu
+  compute_type: int8     # CPU-friendly; swap to int8_float16 on GPU later
+
+tts:
+  engine: xtts                    # xtts | piper (fallback)
+  xtts_snapshot_dir: null         # null = HF cache; set to pin a local copy
+  references:
+    ar: D:/hwk-models/voice/references/arabic_male.wav
+    he: D:/hwk-models/voice/references/hebrew_male.wav    # optional (later)
+    en: D:/hwk-models/voice/references/english_male.wav   # optional (later)
+  fallback_ref_lang: ar           # clone from the AR voice until HE/EN exist
+  piper_voice: D:/hwk-models/piper/ar_JO-kareem-medium.onnx  # fallback engine
+  out_sample_rate: 24000          # XTTS native
+  max_chars_per_call: 240         # split longer replies into sentence calls
+
+vad:
+  threshold: 0.5
+  pre_roll_ms: 380
+  silence_ms_to_close: 700
+  min_speech_ms: 200
+
+barge_in:
+  threshold: 0.6
+  consecutive_frames: 3
+  cooldown_s: 0.8
+
+llm:
+  base_url: http://127.0.0.1:5055
+  ask_path: /api/ask              # key mode reads AALI_VOICE_API_KEY / AALI_API_KEY
+  timeout_s: 180
+  sid_prefix: voice-              # sessions appear in the sidebar as voice-*
+
+audio:
+  in_sample_rate: 16000           # client -> server: 16k mono int16 PCM
+  out_sample_rate: 24000          # server -> client: 24k mono int16 PCM (XTTS)

@@ -1,0 +1,39 @@
+/* آلي الصوتي — warm-black + gold, matches the house theme */
+:root {
+  --bg: #252523; --bg2: #2c2c29; --fg: #efece6; --muted: #9a958a;
+  --gold: #d4af37; --ok: #7fb069; --err: #c96f5a; --pill: #3a3a36;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: "Segoe UI", Tahoma, sans-serif;
+  background: var(--bg); color: var(--fg); height: 100vh;
+  display: flex; flex-direction: column;
+}
+header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px; background: var(--bg2); border-bottom: 1px solid #00000055;
+}
+.brand { font-weight: 700; letter-spacing: .3px; }
+.brand small { color: var(--muted); font-weight: 400; margin-inline-start: 8px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--gold); margin-inline-end: 8px; }
+.pill { background: var(--pill); border-radius: 999px; padding: 3px 10px; font-size: 12px; margin-inline-start: 6px; }
+.pill.off { color: var(--err); }
+.pill.on { color: var(--ok); }
+main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+#talk { text-align: center; padding: 22px 0 10px; }
+#mic {
+  width: 96px; height: 96px; border-radius: 50%; border: 3px solid var(--gold);
+  background: var(--bg2); font-size: 40px; cursor: pointer; transition: transform .12s ease;
+}
+#mic.rec { background: var(--gold); transform: scale(1.06); }
+#mic:disabled { opacity: .5; cursor: default; }
+#hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
+#level { width: 220px; height: 6px; background: var(--pill); border-radius: 999px; margin: 12px auto 0; overflow: hidden; }
+#levelbar { height: 100%; width: 0%; background: var(--gold); transition: width .08s linear; }
+#log { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 78%; padding: 9px 13px; border-radius: 14px; line-height: 1.55; white-space: pre-wrap; }
+.msg.user { align-self: flex-start; background: #34342f; }
+.msg.aali { align-self: flex-end; background: #3d3729; border: 1px solid #d4af3733; }
+.msg .meta { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.msg.err { background: #3a2a26; border: 1px solid var(--err); }
+footer { display: flex; justify-content: space-between; padding: 8px 16px; color: var(--muted); font-size: 12px; background: var(--bg2); }
