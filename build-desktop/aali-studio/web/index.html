@@ -30,6 +30,13 @@
   </div>
 </header>
 
+<!-- ————— brain reachability banner ————— -->
+<!-- The brain lives on the owner's Windows PC. On a MacBook 127.0.0.1 is the
+     MacBook, so every ask used to fail with an EMPTY answer: the server sent
+     an Arabic error event and the client then wiped it. This banner says it
+     out loud, with the address that was tried and the fix. -->
+<div id="brain-banner" class="brain-banner" hidden></div>
+
 <main id="panes">
 
   <!-- ————— pane 1: the file tree + history ————— -->
@@ -126,6 +133,11 @@
     إلا مزوّد النموذج المختار.
   </p>
   <div id="key-rows"></div>
+  <label class="custom-row">
+    <span>عنوان العقل (جهاز ويندوز)</span>
+    <input id="brain-url" placeholder="http://192.168.1.13:5055" />
+  </label>
+  <p class="note" id="brain-state">—</p>
   <label class="custom-row">
     <span>نقطة وصول مخصصة</span>
     <input id="custom-url" placeholder="https://my-endpoint/v1" />

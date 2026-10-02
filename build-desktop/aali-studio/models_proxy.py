@@ -199,6 +199,16 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
     current.update(clean)
     if "model" in clean and clean["model"] not in _BY_ID:
         raise StudioError(f"نموذج غير معروف: {clean['model']}")
+    if "brain_url" in clean and clean["brain_url"]:
+        # The brain key travels in an X-API-Key header to this address, so the
+        # scheme is a security boundary, not a formatting nit: file:// and
+        # javascript: have no business receiving a credential.
+        from urllib.parse import urlparse
+        parsed = urlparse(clean["brain_url"])
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise StudioError(
+                "عنوان العقل يجب أن يبدأ بـ http:// أو https:// "
+                "(مثال: http://192.168.1.13:5055)")
     _save_json(settings_file(), current)
     return settings()
 

@@ -63,16 +63,26 @@ python3 -m venv .venv-studio
 .venv-studio/bin/python build-desktop/aali-studio/studio_app.py
 ```
 
-## 5. The brain still lives on the Windows PC
+## 5. The brain still lives on the Windows PC — set it once
 
-Studio on the Mac is a **client**. The model needs the GPU and the
-checkpoint. Point it at the PC instead of waiting for one:
+Studio on the Mac is a **client**. `127.0.0.1` on a MacBook is the MacBook,
+so the chat panel would stay empty. In the app:
+
+1. click **🔑 المفاتيح**
+2. **عنوان العقل (جهاز ويندوز)** → `http://192.168.1.13:5055`
+   (find your PC's address with `ipconfig`; both machines on the same Wi-Fi)
+3. **العقل المحلي (HWK-AZiZA)** → paste the master key
+   (on Windows it is in `D:\hwk-data\aali_master_key.txt`)
+
+A gold banner appears the moment the brain cannot be reached, so you never
+type into a dead panel again. The same address can be set from a shell:
 
 ```bash
-export AALI_BRAIN_URL=http://<ip-of-the-PC>:5055
+export AALI_BRAIN_URL=http://192.168.1.13:5055
 ```
 
-Full details: `docs/PORTING.md` (Arabic, honest per-OS matrix).
+Full details: `docs/PORTING.md` (Arabic, honest per-OS matrix) and
+`docs/features/aali_studio.md` §3b.
 
 ## 6. What is NOT in this archive
 

@@ -56,7 +56,7 @@ for _extra in (_REPO / "file-agent", HERE):
 from flask import Flask, Response, jsonify, request  # noqa: E402
 
 import models_proxy as mp  # noqa: E402
-from file_agent import file_tools  # noqa: E402
+from file_agent import file_tools, hwk_paths  # noqa: E402
 
 DEFAULT_PORT = int(os.getenv("AALI_STUDIO_PORT", "5070") or 5070)
 HOST = "127.0.0.1"  # NEVER 0.0.0.0 — this endpoint can read/write files
@@ -133,6 +133,51 @@ def create_app() -> Flask:
             "brain_url": conf.get("brain_url", mp.DEFAULT_BRAIN_URL),
             "config_dir": mp.cfg_dir(),
         })
+
+    @app.get("/api/brain/status")
+    def api_brain_status() -> Response:
+        """Can this machine actually REACH the brain? (the macOS story)
+
+        On the owner's PC the brain is a loopback service, so 127.0.0.1:5055
+        is right by default. On a MacBook it is not: 127.0.0.1 is the MacBook,
+        the brain is on the Windows PC, and every ask fails. The failure used
+        to be invisible — the panel showed an empty answer — so this endpoint
+        exists to say it out loud, with the URL that was tried and the fix.
+        """
+        conf = mp.settings()
+        base = str(conf.get("brain_url") or mp.DEFAULT_BRAIN_URL).strip().rstrip("/")
+        loopback = base.startswith("http://127.0.0.1") or base.startswith("http://localhost")
+        out: dict[str, Any] = {
+            "ok": False, "url": base, "loopback": loopback,
+            "host_is_windows": hwk_paths.is_windows(),
+            "reachable": False, "detail": "", "hint": "",
+            "key_set": bool(mp.get_key(mp.BRAIN_KEY_FIELD)),
+        }
+        try:
+            with urllib.request.urlopen(base + "/api/health", timeout=4) as resp:
+                health = json.loads(resp.read())
+            out["reachable"] = True
+            out["ok"] = bool(health.get("ok"))
+            out["detail"] = json.dumps(health, ensure_ascii=False)[:160]
+        except urllib.error.HTTPError as exc:
+            out["reachable"] = True
+            out["detail"] = f"HTTP {exc.code}"
+            out["hint"] = ("العقل يردّ，但它 في وضع المفتاح — أضف المفتاح الرئيسي "
+                           "من زر 🔑.")
+        except Exception as exc:  # noqa: BLE001 - diagnostics must never crash
+            out["detail"] = f"{type(exc).__name__}: {exc}"
+        if not out["reachable"] and loopback and not out["host_is_windows"]:
+            out["hint"] = (
+                "العقل يعيش على جهاز ويندوز، وهذا عنوان هذا الجهاز (127.0.0.1). "
+                "ضع عنوان الحاسب في زر 🔑 → «عنوان العقل»، مثل "
+                "http://192.168.1.13:5055، ثم أضف المفتاح الرئيسي.")
+        elif not out["reachable"]:
+            out["hint"] = ("تأكد أن خادم آلي يعمل على " + base +
+                           " وأن الحاسبان على نفس الشبكة.")
+        elif out["reachable"] and not out["key_set"]:
+            out["hint"] = ("العقل موجود لكن بدون مفتاح — وضع المفتاح سيرفض الطلب. "
+                           "أضف المفتاح الرئيسي من زر 🔑.")
+        return jsonify(out)
 
     @app.post("/api/workspace")
     def api_set_workspace() -> Response:

@@ -491,7 +491,7 @@ function newTurn(question) {
     turn, files,
     thinking: thinking.querySelector(".th-body"),
     label: thinking.querySelector(".th-label"),
-    answer, meta, retry, toolEls: [], answerSoFar: "",
+    answer, meta, retry, toolEls: [], answerSoFar: "", hadError: false,
   };
 }
 
@@ -644,9 +644,20 @@ async function ask(question) {
         break;
       case "error":
         view.answer.classList.add("failed");
+        view.hadError = true;
         view.answer.innerHTML += "<p>⚠️ " + escapeHtml(data.error || "خطأ") + "</p>";
         break;
       case "done": {
+        /* A failed turn still emits `done` with an empty reply. Rendering it
+           wiped the error the previous event had just written, so a dead brain
+           looked like a silent, empty answer — exactly what the MacBook
+           showed. Never clobber a message we already showed the owner. */
+        if (view.hadError && !(data.reply || answerSoFar)) {
+          view.answer.querySelector(".cursor")?.remove();
+          view.meta.textContent = "العقل لم يرد";
+          view.retry.hidden = false;
+          break;
+        }
         view.answer.innerHTML = renderMarkdown(data.reply || answerSoFar);
         if (data.stopped) {
           view.meta.textContent = "أُوقف قبل النهاية";
@@ -800,6 +811,46 @@ function showModelNote(data) {
   note.textContent = "يحتاج مفتاح — اضغط 🔑 لإضافته";
 }
 
+/* ————— brain reachability —————
+   The brain is a loopback service ON THE OWNER'S PC. On a MacBook
+   127.0.0.1 is the MacBook, so the ask reaches nothing — and until the
+   client stopped erasing its own error event, the panel just stayed blank.
+   Now the failure is stated before the owner types anything. */
+async function checkBrain() {
+  let status;
+  try {
+    status = await api("/api/brain/status");
+  } catch (err) {
+    status = { ok: false, url: "?", reachable: false,
+               hint: "تعذر قراءة حالة العقل: " + err.message };
+  }
+  const banner = $("brain-banner");
+  const state = $("brain-state");
+  const url = status.url || "";
+  const urlInput = $("brain-url");
+  if (urlInput && !urlInput.value && url) urlInput.value = url;
+  if (state) {
+    state.textContent = status.reachable
+      ? "العقل يستجيب على " + url + (status.key_set ? " (المفتاح مضبوط)" : " (بلا مفتاح)")
+      : "لا يستجيب على " + url + " — " + (status.detail || "");
+  }
+  if (status.ok) {
+    banner.hidden = true;
+    banner.classList.add("ok");
+    return status;
+  }
+  banner.hidden = false;
+  banner.classList.remove("ok");
+  banner.replaceChildren();
+  const text = el("span");
+  text.append(el("b", null, "⚠️ العقل غير متصل — "),
+              url + " · " + (status.hint || status.detail || ""));
+  const fix = el("button", null, "🔑 اضبط العنوان والمفتاح");
+  fix.onclick = () => openKeys().catch((e) => toast(e.message));
+  banner.append(text, fix);
+  return status;
+}
+
 async function openKeys() {
   const data = await api("/api/keys/status");
   $("cfg-dir").textContent = data.config_dir;
@@ -829,6 +880,7 @@ async function openKeys() {
   const settings = await api("/api/models");
   $("custom-url").value = (settings.custom && settings.custom.base_url) || "";
   $("custom-model").value = (settings.custom && settings.custom.model) || "";
+  await checkBrain();
   $("keys-dialog").showModal();
 }
 
@@ -843,10 +895,12 @@ async function saveKeys() {
   await api("/api/settings", { method: "POST", body: {
     custom_base_url: $("custom-url").value.trim(),
     custom_model: $("custom-model").value.trim(),
+    brain_url: $("brain-url").value.trim(),
   }});
   $("keys-dialog").close();
   await loadModels();
-  toast("حُفظت الإعدادات");
+  const brain = await checkBrain();
+  toast(brain.ok ? "حُفظت الإعدادات" : "حُفظت — لكن العقل ما زال غير متصل");
 }
 
 /* ————— quick open (Ctrl+P) + @mention ————— */
@@ -1122,6 +1176,7 @@ function wire() {
   renderTabs();
   await loadModels().catch((e) => toast(e.message));
   await loadWorkspace().catch((e) => toast(e.message));
+  await checkBrain().catch(() => {});
   await loadHistory().catch(() => {});
   await initMonaco();
   setContent("", "");

@@ -938,3 +938,55 @@ def test_spec_bundles_the_web_assets_and_the_sandbox_module():
     # PyInstaller resolves the script path relative to the SPEC dir, so a
     # relative 'build-desktop/...' script path doubles up and never builds.
     assert "SPECPATH" in spec
+
+
+# ————— the brain is on ANOTHER machine (the owner's MacBook run) —————
+
+def test_brain_status_route_exists_and_says_whether_the_brain_answers(client):
+    """On a Mac, 127.0.0.1 IS the MacBook. The panel must be able to say so."""
+    response = client.get("/api/brain/status")
+    assert response.status_code == 200
+    body = response.get_json()
+    for field in ("ok", "url", "reachable", "hint", "loopback", "key_set"):
+        assert field in body, field
+    # The verdict must come from a REAL probe of the configured URL, not a
+    # hardcoded "fine" — the next test kills the port to prove it.
+    assert body["url"].startswith("http")
+
+
+def test_brain_status_reports_an_unreachable_brain_with_the_url_it_tried(client):
+    client.post("/api/settings", json={"brain_url": "http://127.0.0.1:9"})
+    body = client.get("/api/brain/status").get_json()
+    assert body["reachable"] is False
+    assert body["ok"] is False
+    assert "127.0.0.1:9" in body["url"]
+    assert body["hint"], "an unreachable brain must come with a fix"
+
+
+def test_brain_url_must_be_a_real_http_address(client):
+    """The brain key rides in an X-API-Key header — the scheme is a boundary."""
+    for bad in ("file:///etc/passwd", "javascript:alert(1)", "not-a-url"):
+        response = client.post("/api/settings", json={"brain_url": bad})
+        assert response.status_code == 400, bad
+    ok = client.post("/api/settings", json={"brain_url": "http://192.168.1.13:5055"})
+    assert ok.status_code == 200
+    assert ok.get_json()["settings"]["brain_url"] == "http://192.168.1.13:5055"
+
+
+def test_the_client_never_erases_its_own_error_on_a_failed_turn():
+    """The MacBook showed an EMPTY answer: the server sent an Arabic error
+    event and the very next `done` (ok=false, reply='') overwrote it."""
+    source = (STUDIO_DIR / "web" / "app.js").read_text(encoding="utf-8")
+    assert "hadError" in source, "the turn must remember that it failed"
+    done_case = source.split('case "done"', 1)[1]
+    assert "hadError" in done_case, (
+        "case 'done' must bail out before re-rendering when the turn failed")
+
+
+def test_the_ui_exposes_the_brain_address_and_a_reachability_banner():
+    html = (STUDIO_DIR / "web" / "index.html").read_text(encoding="utf-8")
+    script = (STUDIO_DIR / "web" / "app.js").read_text(encoding="utf-8")
+    assert 'id="brain-url"' in html, "the brain address must be editable"
+    assert 'id="brain-banner"' in html, "an unreachable brain must be announced"
+    assert "/api/brain/status" in script
+    assert 'brain_url: $("brain-url").value.trim()' in script
