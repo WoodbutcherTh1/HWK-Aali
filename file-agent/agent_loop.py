@@ -933,6 +933,14 @@ def _ollama_core_tools() -> list[dict[str, Any]]:
         tool("make_n8n_workflow", "إنشاء سير عمل n8n جاهز للاستيراد من وصف بالعربية أو الإنجليزية",
              {"description": {"type": "string", "description": "وصف السير المطلوب: ما الذي يشغّله وماذا يفعل"}},
              ["description"]),
+        # read_link joined the curated core on 2026-10-03 because it REPLACES
+        # fetch_url for the case the owner actually hits: a link whose text is
+        # built in JavaScript. One tool added, not twenty - the core stays small
+        # on purpose (a small catalogue keeps tool-calling sharp), and this is
+        # the single tool that earns its place by superseding a weaker one.
+        tool("read_link", "قراءة رابط عامم في متصفح حقيقيًا ويعطي نصه الصفحة كما يرهاه المتصفح (قراءة فقط: لا ينشر ولا يتابع ولا يدخل الدخول، وترفض عنوان الجهاز الداخلي)",
+             {"url": {"type": "string", "description": "رابط المنشور أو المقال"}},
+             ["url"]),
     ]
 
 

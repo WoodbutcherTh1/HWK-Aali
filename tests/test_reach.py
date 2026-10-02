@@ -393,6 +393,23 @@ def test_the_bridge_never_borrows_the_pythonpath():
 
 # ————— 6. the tool the agent actually calls —————
 
+def test_a_refusal_is_never_replaced_by_a_downstream_symptom(monkeypatch):
+    """The live run caught this: a private address came back as "the reading venv
+    is not installed" because `auto` escalated to the browser after the fence
+    had already refused. The REAL reason must survive."""
+    monkeypatch.setattr(reach, "AUDIT_PATH", Path(os.environ.get("TEMP", ".")) / "reach-test-audit.jsonl")
+    for bad, why in (("http://127.0.0.1:5055/api/ask", "loopback"),
+                     ("http://169.254.169.254/latest/", "link-local"),
+                     ("http://192.168.1.13:5055/", "RFC1918")):
+        record = reach.read_link(bad, engine="auto")
+        assert record["ok"] is False
+        assert why in str(record.get("error")), (bad, record.get("error"))
+        assert "venv" not in str(record.get("error")).lower(), (
+            "the browser symptom must not hide the fence's refusal")
+        # and it must be FAST: a refusal never waits on a browser install
+        assert record.get("elapsed_ms", 0) < 5000
+
+
 def test_read_link_is_registered_with_the_right_shape():
     assert "read_link" in file_tools._FUNCTIONS
     assert "read_link" in file_tools.TOOL_EXECUTION
@@ -407,6 +424,15 @@ def test_read_link_is_registered_with_the_right_shape():
     assert "READ-ONLY" in definition["description"]
 
 
+def test_the_tool_reports_the_fence_not_the_symptom(tmp_path):
+    from file_agent.file_tools import FileAgentError
+
+    with pytest.raises(FileAgentError) as excinfo:
+        file_tools.read_link("http://192.168.1.13:5055/", tmp_path)
+    assert "RFC1918" in str(excinfo.value)
+    assert "venv" not in str(excinfo.value).lower()
+
+
 def test_the_tool_refuses_a_private_address_instead_of_returning_something(tmp_path):
     from file_agent.file_tools import FileAgentError
 
@@ -416,6 +442,23 @@ def test_the_tool_refuses_a_private_address_instead_of_returning_something(tmp_p
         file_tools.read_link("http://192.168.1.13:5055/", tmp_path)
     with pytest.raises(FileAgentError):
         file_tools.read_link("file:///C:/Windows/win.ini", tmp_path)
+
+
+def test_read_link_is_offered_to_the_brain_itself():
+    """The curated core is what the 1.5B student actually sees (13 entries).
+
+    A tool that is not in that list cannot be called at all — which is how a
+    perfectly good tool stays invisible. read_link earns its slot by replacing
+    fetch_url for JS-rendered links, and the catalogue stays small on purpose.
+    """
+    import agent_loop
+
+    specs = agent_loop.tool_specs()
+    names = [s["name"] for s in specs]
+    assert "read_link" in names
+    description = next(s["description"] for s in specs if s["name"] == "read_link")
+    assert description.strip(), "the core catalogue is Arabic-described"
+    assert len(specs) <= 16, "the core must stay small or tool-calling degrades"
 
 
 def test_the_tool_rejects_an_unknown_engine(tmp_path):

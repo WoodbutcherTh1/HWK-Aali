@@ -488,6 +488,7 @@ def read_link(url: str, engine: str = "auto",
     record: dict[str, Any] = {"ok": False, "url": safe_url, "engine": "static",
                               "attempts": []}
     result: dict[str, Any] | None = None
+    refused = False
     if engine in ("static", "auto"):
         try:
             fetched = _open(safe_url, timeout)
@@ -497,12 +498,19 @@ def read_link(url: str, engine: str = "auto",
         except ReachError as exc:
             record["attempts"].append({"engine": "static", "ok": False,
                                        "error": str(exc)})
+            refused = True
             if engine == "static":
                 record["error"] = str(exc)
                 audit(record, result=None)
                 return record
-    thin = result is None or len(result.get("text", "")) < 200
-    if engine == "browser" or (engine == "auto" and thin):
+    # Escalate on a THIN page, never on a refusal. A URL the fence refused
+    # (loopback, private, a name that resolves inside) will be refused by the
+    # browser bridge too - it runs the same fence - so escalating would replace
+    # the honest reason with whatever the browser happened to say last. The
+    # live run proved it: a private address came back as "the reading venv is
+    # not installed", which is both wrong and hides the real refusal.
+    thin = result is not None and len(result.get("text", "")) < 200
+    if engine == "browser" or (engine == "auto" and thin and not refused):
         try:
             rendered = fetch_rendered(safe_url, timeout)
             record["attempts"].append({"engine": rendered.get("engine", "browser"),
@@ -518,7 +526,14 @@ def read_link(url: str, engine: str = "auto",
             if result is None:
                 record["error"] = str(exc)
     if result is None:
-        record.setdefault("error", "nothing could be read from this link")
+        if refused:
+            # The fence already said why; say THAT, not a downstream symptom.
+            static_error = next((a["error"] for a in record["attempts"]
+                                 if a.get("engine") == "static"), "")
+            record["error"] = static_error or record.get("error") or \
+                "nothing could be read from this link"
+        else:
+            record.setdefault("error", "nothing could be read from this link")
         record["elapsed_ms"] = int((time.time() - started) * 1000)
         audit(record, result=None)
         return record
