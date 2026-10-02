@@ -896,31 +896,48 @@ def business():
 
 
 def test_business_answers_hours_location_and_prices(business):
-    import time as _time
-
     p, _ = business
     hours_reply = p.on_turn_start("شو الدوام اليوم؟", "ar", {})
-    # the fixture closes on Friday, so the answer must follow TODAY
-    if _time.localtime().tm_wday == 4:
+    # The fixture defines hours for MONDAY and marks FRIDAY closed. Every
+    # other weekday is simply NOT DEFINED, and the plugin must say so
+    # honestly instead of inventing hours. (The old test branched on Friday
+    # only, so it passed by luck on Mon/Fri and failed on every other day —
+    # it broke the morning after the calendar rolled past Friday.)
+    wday = time.localtime().tm_wday
+    if wday == 4:
         assert "مغلق" in hours_reply
-    else:
+    elif wday == 0:
         assert "09:00" in hours_reply and "18:00" in hours_reply
+    else:
+        assert "مُسجّل" in hours_reply or "مسجل" in hours_reply
     assert "شارع الملك حسين" in p.on_turn_start("وين الموقع؟", "ar", {})
     assert "قهوة" in p.on_turn_start("بكم القهوة؟", "ar", {})
     assert "+962" in p.on_turn_start("شو رقم التلفون؟", "ar", {})
 
 
 def test_business_answers_in_hebrew_and_english(business):
-    import time as _time
-
     p, _ = business
-    friday = _time.localtime().tm_wday == 4
+    wday = time.localtime().tm_wday
+    closed = wday == 4
+    undefined = wday not in (0, 4)
     he = p.on_turn_start("מתי אתם פתוחים?", "he", {})
     en = p.on_turn_start("what are your hours?", "en", {})
     ar = p.on_turn_start("شو الدوام اليوم؟", "ar", {})
-    assert ("09:00" in he and "18:00" in he) if not friday else ("סגור" in he)
-    assert en.startswith("Today") and (("09:00" in en) if not friday else ("closed" in en))
-    assert ("09:00" in ar) if not friday else ("مغلق" in ar)
+    if closed:
+        assert "סגור" in he
+        assert en.startswith("Today") and "closed" in en
+        assert "مغلق" in ar
+    elif undefined:
+        # No hours for today: each language must SAY SO (the honest-unknown
+        # path), never invent a time. The English string here does not start
+        # with "Today" — it is a different sentence on purpose.
+        assert he and en and ar
+        for reply in (he, en, ar):
+            assert "09:00" not in reply and "18:00" not in reply
+    else:
+        assert "09:00" in he and "18:00" in he
+        assert en.startswith("Today") and "09:00" in en
+        assert "09:00" in ar
 
 
 def test_business_never_invents_a_booking(business):

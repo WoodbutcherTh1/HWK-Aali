@@ -90,6 +90,166 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **macOS/Linux: every client is now portable + a build + a self-test
+  (2026-10-03, Buffy — DONE, awaiting the owner's Mac run)**: docs/PORTING.md.
+  AUDIT FIRST, guess never: آلي CLI was ALREADY cross-platform (afplay/aplay,
+  `clear`, per-platform bidi trust) and needed only a build target. آلي Desktop
+  had two hard Windows-only calls — `os.startfile` (crashed the open-link
+  button on a Mac) and a `cloudflared.exe`-only lookup (the share button
+  silently VANISHED on macOS/Linux). آلي Studio hardcoded `%APPDATA%`, which on
+  a Mac scatters `~/AaliStudio` instead of Application Support. Its macOS spec
+  was EXE+BUNDLE **with no COLLECT** — a .app with no WebView backend, i.e. a
+  window that never opens. FIXES: `file-agent/file_agent/hwk_paths.py` — the
+  module AGENTS.md always promised ("never hardcode absolute user paths; use
+  hwk_paths.py") — stdlib-only, `config_dir()` follows each OS's own
+  convention, `data_root()` never invents a missing D:, `open_external()`
+  picks startfile/open/xdg-open, `cloudflared_name()` picks the suffix; Desktop
+  and Studio now both go through it (each bootstraps `file-agent` on sys.path
+  itself, so the frozen exes keep working); the Studio spec became
+  EXE -> COLLECT -> BUNDLE with a real bundle_identifier. BUILDS:
+  `scripts/build_all_macos.sh [all|studio|desktop|cli|check]` +
+  `build-desktop/aali-studio/build-mac.sh` — each client into its OWN venv
+  (never the training one). SELF-TEST: `scripts/portability_check.py` (also
+  `build_all_macos.sh check`) probes the machine it RUNS ON — host, platform
+  config dirs, a real sandbox round-trip + 6 refused escapes, the Studio
+  backend booting on a free port (health/tree/search/write/escape-refusal/all
+  7 agent-panel events), the CLI bidi renderer, and the brain's reachability
+  with a reason when it fails. Windows run: every core check passes. The macOS
+  answers can only come from the owner's MacBook — that is the point.
+  Tests: tests/test_portability.py (32, incl. the self-test itself as a
+  subprocess and a token-level scan that strips comments/strings so a docstring
+  mentioning `os.startfile` cannot fake a violation); suite **1410 green / 15
+  skipped`. ALSO FIXED en route: a date-boundary bug in two voice business
+  tests — they branched on Friday only, so they passed by luck on Mon/Fri and
+  broke the minute the calendar rolled to Saturday; the plugin's honest
+  "hours not set" path is now asserted. PHONES, stated plainly in PORTING.md
+  §5: an iPhone cannot run a pywebview+Flask IDE (no processes, no arbitrary
+  file access) — the phone client is the WEB app over LAN or the tunnel, plus
+  the existing SwiftUI project in ios/; an iPad IDE would be a WKWebView shell
+  around the same web/ client, a separate day's work, not a promise.
+
+- **Aali Studio — IDE LAYER built (the owner called v1 “weak app”; all five
+  upgrades he ranked are in, 2026-10-02 late, Buffy — DONE)**:
+  tasks/aali-studio.md + docs/features/aali_studio.md §1b. Same 3 panes,
+  same exe path; what changed is everything between the panels and the model.
+  (1) **FILE CONTEXT** — the open file (and any selection inside it) rides
+  along with every ask as removable gold chips; `@` adds more. The CLIENT sends
+  paths only — the SERVER reads the files, so a hostile page cannot smuggle one
+  in from outside the workspace, and the caps (6 files / 24k chars) live
+  server-side. (2) **ACCEPT / REVERT on every diff** — and the naming is the
+  honest part: the agent's write already hit the disk, so «قبول» is a
+  VERIFICATION (the file must really hold `after`) and the client reloads;
+  only «تراجع» writes, and it is conflict-guarded (409, never a clobber). A
+  sandbox breach stays a plain 400 instead of hiding behind a «conflict».
+  (3) **TABS + LIVE WATCHER** — one Monaco model per tab (undo + cursor
+  survive switching); `GET /api/watch` SSE compares CONTENT, not mtime, so a
+  touch that changes nothing never reloads the buffer, and a dirty tab is only
+  warned about, never overwritten. (4) **HISTORY** — every finished turn is
+  appended to `%APPDATA%\AaliStudio\turns.jsonl` (outside the repo) with its
+  block summary; the sidebar reopens the whole story with live buttons.
+  (5) **MARKDOWN + Ctrl+P** — replies render as markdown (headings, lists,
+  quotes, coloured fences, links) with the text HTML-ESCAPED FIRST (a model
+  reply is untrusted text and must never become live HTML); Ctrl+P fuzzy-opens
+  any file, Ctrl+W closes a tab, Ctrl+S saves. Tests: test_aali_studio.py
+  **84** (context attached to the real prompt, selection beats whole file,
+  sandbox-proof context, caps, accept-vs-revert semantics, the 409 conflict,
+  fuzzy search rejects a non-subsequence, watcher only on real changes,
+  history round-trip + outside the repo, UI contracts); suite **1377 green /
+  14 skipped**. DEFECTS the tests caught in my own new code, all fixed:
+  a request body read TWICE in the fake-brain fixture hung the client (an
+  assert in the handler thread killed the response) — the fixture now reads
+  once via an `on_request` hook; the conflict check ran BEFORE the sandbox
+  resolve, so an escape attempt returned «409 conflict» instead of a refusal;
+  `write_file` needs `overwrite=True` (the brain's guard) which is correct for
+  an owner-confirmed revert and only there; and a literal NUL byte I typed as
+  a markdown sentinel made app.js «binary» to grep/diff — the renderer now
+  keeps fenced code aside without sentinels at all. LESSON: a marker
+  character like NUL inside source is worse than any clever hack it buys.
+
+- **The brain was SERVING THE FALLBACK CARD to every ask — root-caused and
+  fixed (2026-10-02 late, Buffy — DONE)**: while building PART 2, every ask on
+  :5055 answered with `_local_agent_loop`'s deterministic "direct-command
+  mode" card and the SSE said `provider: scratch_model` with an empty model.
+  NOTHING in the server was broken — the **launcher** had stopped declaring
+  the runtime config and a 2026-09-14 debug shell's environment had been
+  inherited down the whole chain (server watchdog → aali_autostart.bat →
+  start_app.bat → app.py). agent_loop's provider order for mode=local:
+  `_remote_brain_available()` → `promoted_own_model()` → `_ollama_available()`
+  → scratch checkpoint → deterministic commands. (1) a stale
+  `AALI_REMOTE_BRAIN_URL` pointing at a dead host (and, after the 09-27 tunnel
+  cut-over, one that would resolve back to THIS box = a self-loop), (2)
+  **`AALI_OWN_MODEL=0`** → `promoted_own_model()` returned None, so the LIVE
+  promoted brain on :20129 (checkpoint-3933) was skipped SILENTLY,
+  (3) Ollama's models were deleted on 10-01 so `_ollama_available()` is false,
+  (4) `model/scratch/final.pt` does not exist → the fallback card, for
+  everything. `GET /api/system/models` was the tell all along: it reports
+  `own_model_enabled`. FIX: `scripts/start_app.bat` now restores the config
+  FROM FILES instead of trusting the inherited environment —
+  `AALI_OWN_MODEL=1`, `AALI_REMOTE_BRAIN_URL=` cleared +
+  `AALI_REMOTE_BRAIN=0`, and `AALI_API_KEY` read from
+  `D:\hwk-data\aali_master_key.txt` with `set /p` (never echoed; the key mode
+  the tunnel needs was ALSO only coming from that stale shell). Restarted by
+  exact netstat PID with the cmdline verified first; `scripts\aali_autostart.bat`
+  rebooted it and revived both watchdogs (neither was running). VERIFIED LIVE:
+  `own_model_enabled=true`, `serving.provider=aali_own` →
+  `D:\hwk-data\soup\tuned\checkpoint-3933`, real answers (EN + AR), the
+  deterministic identity card in both languages, and Aali Studio's live SSE now
+  shows `provider: aali_own` with the honest HWK answer. Tests:
+  tests/test_brain_launcher_config.py (7, incl. a LIVE canary that fails if the
+  running server ever reports `own_model_enabled: false` again); suite
+  **1346 green / 14 skipped**. LESSON (new, and it generalises): **a launcher
+  that inherits its whole config from "whatever shell started it" is an
+  undeclared dependency** — a debug `set` there silently disables a whole
+  provider tier with no log line. Every serving-critical env var now has one
+  authoritative declaration in the .bat, with the reason in a comment.
+  QUALITY NOTE (honest, unchanged): checkpoint-3933 is a 1.5B adapter scoring
+  3/39 on the exam — it now ANSWERS instead of shrugging, but it is a small
+  brain; the toolbelt cases still fail (0/13). That is a training ceiling,
+  not a wiring fault.
+
+- **PART 2: Aali Studio — the desktop IDE is BUILT, tested and shipped as an
+  exe (2026-10-02, Buffy — DONE)**: tasks/aali-studio.md +
+  docs/features/aali_studio.md. build-desktop/aali-studio/{studio_app.py
+  (pywebview window), studio_server.py (Flask on 127.0.0.1:5070 ONLY +
+  anti-DNS-rebinding Host check), models_proxy.py (registry + adapters +
+  %APPDATA%/AaliStudio key store), web/{index.html,style.css,app.js}} +
+  build.bat + Aali-Studio.spec + scripts/aali_studio.bat; isolated
+  .venv-studio (flask/pywebview/pyinstaller, CPU-only, torch excluded);
+  output build-desktop/dist/Aali-Studio.exe (13.3 MB, WebView2 + web assets
+  verified inside the archive, FROZEN exe proven live on :5070). UI: three
+  Arabic-first RTL panes (file tree | Monaco+terminal | AGENT PANEL) with the
+  brief's blocks — 💭 thinking (from the brain's real cot/scratchpad), 🔧
+  tool_call+tool_result, ▶️ terminal lines, ✏️ before/after diff, ✅ answer,
+  ⏹️ STOP, ▶️ RETRY. Default model HWK-AZiZA (local :5055, named after the
+  owner's grandmother عزيزة — the About box says so); switcher with GLM-4
+  Flash/Plus, DeepSeek-V3/R1, Groq Llama 3.3, OpenRouter + Together free,
+  Custom — API ONLY, no downloads, keys in %APPDATA% and never echoed back
+  (status returns a gsk…23 hint). DESIGN: the brain is PROXIED over HTTP
+  (never imported — the studio venv stays 2 deps and there is one brain on
+  this box); the sandbox is REUSED (every file op goes through the pentested
+  file_tools._resolve, the terminal keeps the brain's allow-list + env-dump
+  and destructive-git refusals); diffs are computed studio-side because
+  tool_requested always arrives BEFORE the write (snapshot then read back).
+  Tests: tests/test_aali_studio.py 53 — suite 1338 green / 14 skipped.
+  DEFECTS the live run exposed (all pinned): (1) `stream.read(1024)` on
+  http.client BLOCKS until 1024 bytes, buffering a whole turn so every file
+  was snapshotted after the agent rewrote it and NO diff could ever fire —
+  the iterator reads LINES now; (2) the brain runs in KEY MODE, so every
+  gated :5055 route 404s — Studio now carries a brain key and says so
+  instead of failing silently; (3) a module-constant CFG_DIR let tests write
+  into the owner's real %APPDATA% — paths now resolve per call; (4)
+  PyInstaller doubles spec-relative script paths — the spec resolves from
+  SPECPATH. HONEST LIMITS (docs + About): text tokens are truly streamed
+  only by API providers (the local brain answers in one message; Studio
+  reveals it word by word — verbatim, cosmetic pacing), STOP closes the
+  stream and a local turn may still finish (no cancel endpoint), Monaco
+  needs the CDN and falls back to a LABELLED plain editor. Live tool calls
+  could not be demonstrated because the brain itself is degraded right now
+  (answers every ask with the "direct-command mode" card, provider
+  scratch_model with no weights) — the full translation is proven against a
+  fake brain speaking :5055's exact vocabulary and really writing files.
+  PART 3 (Aali Reach) awaits the owner's go.
+
 - **39-case exam RESTORED + unclobberable; C: 100%→87% (2026-10-01, Buffy
   — DONE)**: tasks/restore-39case-exam.md + tasks/c-drive-cleanup.md,
   commit 84d6482. ROOT CAUSE of v7's 26-vs-39 (morning note's "soup.exe

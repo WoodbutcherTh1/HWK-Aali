@@ -1,11 +1,15 @@
-"""آلي Desktop — standalone Windows client (single .exe, no install).
+"""آلي Desktop — standalone desktop client (single binary, no install).
 
-pywebview (WebView2) window around Aali's web UI + native extras:
-- First run: pick the server (saved to %APPDATA%\\AaliDesktop\\url.txt).
+pywebview window around Aali's web UI + native extras:
+- First run: pick the server (saved to the platform's own config dir).
 - SHARE: one-click Cloudflare quick-tunnel (cloudflared bundled) → a public
   URL the owner can send to friends; friends open it and create a key.
 - UPDATE: on start, asks the server /api/desktop-version — if the served
   build is newer, a banner offers the download.
+
+Runs on Windows (WebView2 / .exe), macOS (WKWebView / .app) and Linux
+(GTK/WebKit2). Platform differences live in file_agent.hwk_paths and are
+guarded here; no os.startfile / netsh / .exe assumptions survive.
 """
 
 from __future__ import annotations
@@ -18,11 +22,19 @@ import sys
 import threading
 import time
 import urllib.request
+from pathlib import Path
 from urllib.parse import urlparse
+
+_HERE = Path(__file__).resolve().parent
+for _extra in (_HERE / "file-agent", _HERE):
+    if _extra.is_dir() and str(_extra) not in sys.path:
+        sys.path.insert(0, str(_extra))
+
+from file_agent import hwk_paths  # noqa: E402
 
 APP_VERSION = "1.0.3"
 
-CFG_DIR = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "AaliDesktop")
+CFG_DIR = str(hwk_paths.config_dir("AaliDesktop"))
 CFG_FILE = os.path.join(CFG_DIR, "url.txt")
 DEFAULT_URL = "http://127.0.0.1:5055"
 SERVER = ""  # resolved in main()
@@ -68,16 +80,22 @@ def _pick_url() -> str:
 
 
 def _find_cloudflared() -> str:
-    """Bundled copy first, then next to the exe, then scripts/ fallback."""
+    """Bundled copy first, then next to the binary, then scripts/ fallback.
+
+    The name is platform-correct (cloudflared.exe on Windows, plain
+    cloudflared elsewhere) — hardcoding .exe made the share button silently
+    disappear on macOS/Linux.
+    """
     here = os.path.dirname(os.path.abspath(__file__))
     exe_dir = (
         os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else here
     )
+    name = hwk_paths.cloudflared_name()
     candidates = [
-        _resource("cloudflared.exe"),
-        os.path.join(exe_dir, "cloudflared.exe"),
-        os.path.join(here, "cloudflared.exe"),
-        os.path.join(here, "scripts", "cloudflared.exe"),
+        _resource(name),
+        os.path.join(exe_dir, name),
+        os.path.join(here, name),
+        os.path.join(here, "scripts", name),
     ]
     for cand in candidates:
         if cand and os.path.isfile(cand):
@@ -249,10 +267,7 @@ class Bridge:
         return APP_VERSION
 
     def open_external(self, url: str) -> str:
-        if not re.match(r"^https?://", url or ""):
-            return "bad-url"
-        os.startfile(url)  # type: ignore[attr-defined]  # noqa: S606
-        return "opened"
+        return hwk_paths.open_external(url)
 
 
 EXTRAS_JS = """

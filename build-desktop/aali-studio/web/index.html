@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>آلي ستوديو — Aali Studio</title>
+<link rel="stylesheet" href="/static/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✦</text></svg>" />
+</head>
+<body>
+
+<header id="topbar">
+  <div class="brand">
+    <span class="logo">✦</span>
+    <span class="names">آلي ستوديو <em>Aali Studio</em></span>
+  </div>
+
+  <div class="model-switcher">
+    <label for="model">النموذج</label>
+    <select id="model" title="العقل الذي يعمل عليه آلي ستوديو"></select>
+    <span id="model-note" class="note"></span>
+  </div>
+
+  <div class="actions">
+    <button id="btn-ask" class="primary" title="أرسل الطلب إلى الوكيل">إرسال ⏎</button>
+    <button id="btn-stop" class="danger" hidden title="أوقف العمل الجاري">⏹️ إيقاف</button>
+    <button id="btn-retry" class="warn" hidden title="أعد آخر طلب بعد الفشل">▶️ إعادة المحاولة</button>
+    <button id="btn-keys" title="مفاتيح النماذج الخارجية">🔑 المفاتيح</button>
+    <button id="btn-about" title="عن آلي ستوديو">ℹ️</button>
+  </div>
+</header>
+
+<main id="panes">
+
+  <!-- ————— pane 1: the file tree + history ————— -->
+  <aside id="tree-pane" class="pane">
+    <div class="pane-head">
+      <span>الملفات</span>
+      <span class="spacer"></span>
+      <button id="btn-refresh" title="تحديث الشجرة">⟳</button>
+      <button id="btn-folder" title="افتح مجلداً آخر">📂</button>
+    </div>
+    <div class="pathbar"><span id="root-label" class="path">—</span></div>
+    <ul id="tree" class="tree" role="tree"></ul>
+    <div class="pane-foot">
+      <button id="btn-save" class="ghost" title="احفظ الملف (Ctrl+S)">💾 حفظ</button>
+      <button id="btn-newfile" class="ghost" title="ملف جديد">＋ ملف</button>
+      <button id="btn-delete" class="ghost danger-ghost" title="احذف الملف">🗑</button>
+    </div>
+
+    <div class="pane-head history-head">
+      <span>المحادثات</span>
+      <span class="spacer"></span>
+      <button id="btn-history-clear" class="ghost" title="امسح السجل">🧹</button>
+    </div>
+    <ul id="history" class="history" role="list"></ul>
+  </aside>
+
+  <!-- ————— pane 2: tabs + Monaco + terminal ————— -->
+  <section id="editor-pane" class="pane">
+    <div id="tabs" class="tabs" role="tablist"></div>
+    <div class="pane-head">
+      <span id="tab-name" class="tab">لم يُفتح ملف</span>
+      <span id="tab-dirty" class="dirty" hidden>●</span>
+      <span class="spacer"></span>
+      <button id="btn-addcontext" class="ghost" title="أرفق الملف المفتوح للطلب (@)">📎 سياق</button>
+      <button id="btn-run" class="ghost" title="شغّل الأمر في الطرفية">▶️ تشغيل</button>
+      <button id="btn-panel-toggle" class="ghost" title="إظهار/إخفاء الطرفية">▾</button>
+    </div>
+    <div id="editor"></div>
+    <div id="editor-fallback" hidden>
+      <textarea id="plain-editor" spellcheck="false"
+        placeholder="المحرر النصي"></textarea>
+      <p class="fallback-note" id="fallback-note"></p>
+    </div>
+
+    <div id="terminal-pane" class="pane" hidden>
+      <div class="pane-head">
+        <span>الطرفية</span>
+        <span class="spacer"></span>
+        <input id="cmd" placeholder="python --version" spellcheck="false" />
+        <button id="btn-cmd" class="ghost">⏎</button>
+        <button id="btn-cmd-stop" class="ghost danger-ghost" hidden>⏹️</button>
+        <button id="btn-term-toggle" class="ghost">▴</button>
+      </div>
+      <pre id="terminal" class="terminal" dir="ltr"></pre>
+    </div>
+  </section>
+
+  <!-- ————— pane 3: THE AGENT PANEL ————— -->
+  <aside id="agent-pane" class="pane">
+    <div class="pane-head">
+      <span>الوكيل آلي</span>
+      <span class="spacer"></span>
+      <button id="btn-clear" class="ghost" title="امسح اللوحة">🧹</button>
+    </div>
+
+    <div class="composer">
+      <div id="context-chips" class="chips" title="الملفات التي يراها آلي"></div>
+      <textarea id="ask" rows="3" spellcheck="false"
+        placeholder="اطلب من آلي أن يفعل شيئاً… اكتب @ لملف، وCtrl+Enter للإرسال"></textarea>
+      <div class="composer-hint">
+        <span class="hint" id="composer-hint">Ctrl+Enter للإرسال · @ ملف · Ctrl+P فتح سريع</span>
+      </div>
+    </div>
+
+    <div id="panel" class="panel" aria-live="polite">
+      <div id="turns"></div>
+    </div>
+  </aside>
+</main>
+
+<!-- ————— quick open (Ctrl+P) + @mention palette ————— -->
+<div id="palette" class="palette" hidden>
+  <input id="palette-input" placeholder="اكتب اسم ملف… (Ctrl+P)" spellcheck="false" />
+  <ul id="palette-list" class="palette-list"></ul>
+  <div class="palette-hint">↑↓ للتنقل · Enter للفتح · Esc للإغلاق</div>
+</div>
+
+<!-- ————— keys dialog ————— -->
+<dialog id="keys-dialog" class="dialog">
+  <h2>🔑 مفاتيح النماذج</h2>
+  <p class="note">
+    تُحفظ المفاتيح في <code id="cfg-dir">%APPDATA%/AaliStudio</code> — خارج المستودع
+    تماماً. HWK-AZiZA يعمل محلياً ولا يحتاج مفتاحاً. لا يُرسل أي مفتاح إلى أي مكان
+    إلا مزوّد النموذج المختار.
+  </p>
+  <div id="key-rows"></div>
+  <label class="custom-row">
+    <span>نقطة وصول مخصصة</span>
+    <input id="custom-url" placeholder="https://my-endpoint/v1" />
+    <input id="custom-model" placeholder="اسم النموذج" />
+  </label>
+  <div class="dialog-actions">
+    <button id="btn-keys-close" class="ghost">إغلاق</button>
+    <button id="btn-keys-save" class="primary">حفظ</button>
+  </div>
+</dialog>
+
+<!-- ————— about dialog ————— -->
+<dialog id="about-dialog" class="dialog">
+  <h2>عن آلي ستوديو</h2>
+  <p id="about-ar"></p>
+  <p class="about-en" id="about-en"></p>
+  <p class="note" id="about-limits"></p>
+  <div class="dialog-actions">
+    <button id="btn-about-close" class="ghost">إغلاق</button>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

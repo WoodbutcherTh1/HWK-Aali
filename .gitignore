@@ -29,7 +29,10 @@ _scratch/
 
 # Desktop exe build artifacts (rebuilt via scripts\build_desktop.bat)
 .venv-desktop/
+# Aali Studio (desktop IDE) — dedicated venv, CPU-only, never commit
+.venv-studio/
 build-desktop/work/
+build-desktop/work-studio/
 build-desktop/dist/
 build-desktop/installer/
 build-desktop/cloudflared.exe
