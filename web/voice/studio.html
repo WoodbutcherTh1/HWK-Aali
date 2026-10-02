@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>استوديو الصوت — آلي</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  :root {
+    --bg: #252523;
+    --panel: #2e2e2b;
+    --panel-2: #35352f;
+    --line: #43433d;
+    --ink: #f0ece3;
+    --muted: #a8a296;
+    --gold: #d4af6a;
+    --bad: #d98b7a;
+    --good: #8fbf87;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", Tahoma, sans-serif; line-height: 1.7;
+  }
+  header {
+    padding: 18px 26px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 22px 26px 60px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px 20px; margin-bottom: 18px;
+  }
+  .card h2 { font-size: 16px; margin: 0 0 4px; color: var(--gold); }
+  .card p.hint { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .col { flex: 1 1 220px; min-width: 200px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+  textarea, input[type=text], select, input[type=file] {
+    width: 100%; background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px;
+    font: inherit; font-size: 14px;
+  }
+  textarea { min-height: 120px; resize: vertical; line-height: 1.8; }
+  button {
+    background: var(--gold); color: #241f16; border: 0; border-radius: 9px;
+    padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--gold); border: 1px solid var(--gold); }
+  button:disabled { opacity: .5; cursor: default; }
+  .langs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .lang {
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+    min-width: 150px; background: var(--panel-2);
+  }
+  .lang b { display: block; font-size: 14px; }
+  .lang span { font-size: 12px; color: var(--muted); }
+  .lang .ok { color: var(--good); } .lang .no { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--line); color: var(--muted); }
+  .status { margin-top: 12px; font-size: 13px; color: var(--muted); min-height: 20px; }
+  .status.bad { color: var(--bad); } .status.good { color: var(--good); }
+  audio { width: 100%; margin-top: 12px; }
+  .items { margin-top: 10px; font-size: 13px; }
+  .items div { padding: 4px 0; border-bottom: 1px dashed var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>استوديو الصوت</h1>
+  <span class="sub">everything local · العربية أولاً</span>
+  <span class="sub" style="margin-inline-start:auto"><a href="/index.html" style="color:var(--gold)">المحادثة الصوتية ←</a></span>
+</header>
+
+<div class="wrap">
+
+  <!-- languages -->
+  <div class="card">
+    <h2>ما الذي يتكلم الآن؟</h2>
+    <p class="hint">الحقيقة كما هي: محرك XTTS لا يدعم العبرية، فالعبرية تذهب إلى صوت Piper مثبّت.</p>
+    <div class="langs" id="langs"></div>
+  </div>
+
+  <!-- synthesize -->
+  <div class="card">
+    <h2>اكتب نصاً واسمعوه</h2>
+    <p class="hint">يُقطَّع النص حسب لغته تلقائياً، فيُتكلَّم كل مقطع بلغة صاحبه.</p>
+    <div class="row">
+      <div class="col" style="flex:3 1 340px">
+        <label for="text">النص</label>
+        <textarea id="text" placeholder="اكتب هنا…"></textarea>
+      </div>
+      <div class="col" style="flex:1 1 150px">
+        <label for="voice">الصوت</label>
+        <select id="voice"></select>
+        <label for="lang" style="margin-top:10px">اللغة</label>
+        <select id="lang">
+          <option value="">تلقائي</option>
+          <option value="ar">العربية</option>
+          <option value="he">עברית</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button id="go">ولّد الصوت</button>
+      <button class="ghost" id="save">تنزيل الملف</button>
+      <span class="status" id="s1"></span>
+    </div>
+    <audio id="player" controls></audio>
+  </div>
+
+  <!-- batch -->
+  <div class="card">
+    <h2>سكربت كامل → ملفات</h2>
+    <p class="hint">السطر الفارغ يفصل بين الجُمل. يُحفظ كل مقطع كملف مرقّم.</p>
+    <label for="script">السكربت</label>
+    <textarea id="script" style="min-height:150px"></textarea>
+    <div class="row" style="margin-top:14px">
+      <button id="batch">ولّد السكربت</button>
+      <span class="status" id="s2"></span>
+    </div>
+    <div class="items" id="items"></div>
+  </div>
+
+  <!-- library -->
+  <div class="card">
+    <h2>مكتبة الأصوات</h2>
+    <p class="hint">المقطع المرجعي يُتحقَّق منه قبل القبول: أحادي، 16-bit، 4–30 ثانية، مستوى سليم.</p>
+    <table>
+      <thead><tr><th>الاسم</th><th>اللغة</th><th>الحالة</th><th>ملاحظة</th><th></th></tr></thead>
+      <tbody id="voices"></tbody>
+    </table>
+    <div class="row" style="margin-top:16px; border-top:1px solid var(--line); padding-top:16px">
+      <div class="col"><label for="vfile">مقطع مرجعي (wav)</label><input type="file" id="vfile" accept="audio/wav"></div>
+      <div class="col"><label for="vname">اسم الصوت</label><input type="text" id="vname" placeholder="مثلاً: صوت_المالك"></div>
+      <div class="col"><label for="vlang">اللغة</label>
+        <select id="vlang"><option value="ar">العربية</option><option value="he">עברית</option><option value="en">English</option></select>
+      </div>
+      <div class="col" style="flex:0 0 auto">
+        <button class="ghost" id="check">تحقّق</button>
+        <button id="add" style="margin-inline-start:8px">أضف</button>
+      </div>
+    </div>
+    <div class="status" id="s3"></div>
+  </div>
+
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LANGS = { ar: "العربية", he: "עברית", en: "English" };
+
+async function loadVoices() {
+  const r = await fetch("/api/voices");
+  const d = await r.json();
+  if (!d.ok) { $("s3").textContent = d.error || "تعذّر تحميل المكتبة"; return; }
+
+  $("langs").innerHTML = Object.entries(d.languages).map(([code, i]) => {
+    const ready = i.available;
+    const what = i.voice ? i.voice : (i.engine === "piper" ? "صوت Piper" : "لا يوجد صوت");
+    return `<div class="lang"><b>${LANGS[code] || code}</b>
+      <span class="${ready ? "ok" : "no"}">${ready ? "● متاح" : "○ غير متاح"}</span>
+      <span>${what} · ${i.count || 0} مقطع</span></div>`;
+  }).join("");
+
+  $("voice").innerHTML = `<option value="">(افتراضي)</option>` +
+    d.voices.map(v => `<option value="${v.name}">${v.name} — ${LANGS[v.lang] || v.lang}</option>`).join("");
+
+  $("voices").innerHTML = d.voices.length ? d.voices.map(v => `
+    <tr>
+      <td>${v.name}${v.is_default ? ' <span class="tag">افتراضي</span>' : ""}</td>
+      <td>${LANGS[v.lang] || v.lang}</td>
+      <td class="${v.has_ref ? "" : "status bad"}">${v.has_ref ? "جاهز" : "الملف مفقود"}</td>
+      <td style="color:var(--muted)">${v.note || ""}</td>
+      <td style="text-align:left">
+        ${v.has_ref ? "" : ""}
+        <button class="ghost" data-del="${v.name}" style="padding:4px 10px;font-size:12px">حذف</button>
+      </td>
+    </tr>`).join("") : `<tr><td colspan="5" style="color:var(--muted)">لا توجد أصوات بعد.</td></tr>`;
+
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    await fetch("/api/voices/" + encodeURIComponent(b.dataset.del), { method: "DELETE" });
+    loadVoices();
+  });
+}
+
+let lastAudioUrl = null, lastMeta = null;
+
+$("go").onclick = async () => {
+  const text = $("text").value.trim();
+  if (!text) { $("s1").textContent = "اكتب نصاً أولاً"; $("s1").className = "status bad"; return; }
+  $("go").disabled = true;
+  $("s1").className = "status";
+  $("s1").textContent = "جارٍ التوليد… (قد يستغرق دقيقة على المعالج)";
+  try {
+    const body = { text, lang: $("lang").value || undefined, voice: $("voice").value || undefined };
+    const r = await fetch("/api/synthesize", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const chunks = r.headers.get("X-Aali-Chunks");
+    const engine = r.headers.get("X-Aali-Engine");
+    const cached = r.headers.get("X-Aali-Cached") === "1";
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: r.statusText }));
+      $("s1").className = "status bad"; $("s1").textContent = "خطأ: " + (err.error || r.status);
+      return;
+    }
+    if (lastAudioUrl) URL.revokeObjectURL(lastAudioUrl);
+    lastAudioUrl = URL.createObjectURL(await r.blob());
+    $("player").src = lastAudioUrl;
+    lastMeta = { lang: r.headers.get("X-Aali-Lang"), engine, file: r.headers.get("X-Aali-File") };
+    $("s1").className = "status good";
+    $("s1").textContent = `تم · ${LANGS[lastMeta.lang] || lastMeta.lang} · ${engine}` +
+      (cached ? " · من الذاكرة المؤقتة" : "") + (chunks > 1 ? ` · ${chunks} مقاطع (فُرِع الأول — استخدم السكربت للملف الكامل)` : "");
+  } catch (e) {
+    $("s1").className = "status bad"; $("s1").textContent = "خطأ: " + e.message;
+  } finally { $("go").disabled = false; }
+};
+
+$("save").onclick = () => {
+  if (!lastAudioUrl) { $("s1").className = "status bad"; $("s1").textContent = "ولّد مقطعاً أولاً"; return; }
+  const a = document.createElement("a");
+  a.href = lastAudioUrl;
+  a.download = (lastMeta?.file) || `aali_${lastMeta?.lang || "ar"}.wav`;
+  a.click();
+};
+
+$("batch").onclick = async () => {
+  const script = $("script").value.trim();
+  if (!script) { $("s2").textContent = "اكتب السكربت أولاً"; $("s2").className = "status bad"; return; }
+  $("batch").disabled = true;
+  $("s2").className = "status"; $("s2").textContent = "جارٍ توليد السكربت…";
+  try {
+    const r = await fetch("/api/batch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ script, lang: $("lang").value || "ar", voice: $("voice").value || undefined })
+    });
+    const d = await r.json();
+    if (!d.ok) { $("s2").className = "status bad"; $("s2").textContent = "خطأ: " + (d.error || ""); return; }
+    $("s2").className = d.failed ? "status" : "status good";
+    $("s2").textContent = `جاهز: ${d.made} من ${d.items.length} · ${d.dir}`;
+    $("items").innerHTML = d.items.map(i => `<div>
+      ${i.ok ? "✓" : "✗"} [${i.lang}] ${i.text}
+      ${i.ok ? `· <a href="${i.url}" style="color:var(--gold)">استماع</a>` : "· " + (i.error || "")}
+    </div>`).join("");
+  } catch (e) {
+    $("s2").className = "status bad"; $("s2").textContent = "خطأ: " + e.message;
+  } finally { $("batch").disabled = false; }
+};
+
+function upload(register) {
+  const file = $("vfile").files[0];
+  if (!file) { $("s3").textContent = "اختر ملف wav أولاً"; $("s3").className = "status bad"; return; }
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("name", $("vname").value.trim() || Pathless(file.name));
+  fd.append("lang", $("vlang").value);
+  $("s3").className = "status"; $("s3").textContent = "جارٍ الفحص…";
+  fetch(register ? "/api/voices" : "/api/voices/check", { method: "POST", body: fd })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok) {
+        $("s3").className = "status bad";
+        const c = d.check;
+        $("s3").textContent = (c && c.reasons && c.reasons.length)
+          ? "مرفوض: " + c.reasons.join(" · ") : ("خطأ: " + (d.error || ""));
+        return;
+      }
+      if (!register) {
+        const c = d.check;
+        $("s3").className = "status good";
+        $("s3").textContent = `المقطع صالح · ${c.seconds}s · ${c.sr}Hz · rms ${c.rms}`;
+        return;
+      }
+      $("s3").className = "status good";
+      $("s3").textContent = "أُضيف الصوت ✓";
+      loadVoices();
+    })
+    .catch(e => { $("s3").className = "status bad"; $("s3").textContent = "خطأ: " + e.message; });
+}
+const Pathless = (n) => n.replace(/\.[^.]+$/, "");
+
+$("check").onclick = () => upload(false);
+$("add").onclick = () => upload(true);
+
+loadVoices();
+</script>
+</body>
+</html>

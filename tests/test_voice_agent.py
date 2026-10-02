@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import socket
+import urllib.error
 import sys
 import threading
 import time
@@ -655,6 +656,168 @@ def test_corrupt_store_reads_as_empty_not_a_crash(lib):
     voice_lib, store, _ = lib
     store.write_text("{not json", encoding="utf-8")
     assert voice_lib.load_store(store)["voices"] == {}
+
+
+# --------------------------------------------------------------------------
+# studio API (fake engine, hermetic tmp dirs)
+# --------------------------------------------------------------------------
+
+@pytest.fixture()
+def studio(tmp_path, monkeypatch):
+    """The console API with the fake engine and every data dir in tmp_path."""
+    import urllib.request as ur
+
+    from voice.core import voices as voice_lib
+    from voice.studio_api import make_server
+
+    monkeypatch.setenv("AALI_VOICE_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("AALI_VOICE_BATCH_DIR", str(tmp_path / "batch"))
+    monkeypatch.setenv("AALI_VOICE_UPLOADS", str(tmp_path / "uploads"))
+    monkeypatch.setattr(voice_lib, "STORE_PATH", tmp_path / "voices.json")
+    monkeypatch.setattr(voice_lib, "REFERENCES_DIR", tmp_path / "refs")
+    monkeypatch.setattr(voice_lib, "_piper_list", lambda: (True, []))
+
+    httpd = make_server(_free_port(), fake=True)
+    th = threading.Thread(target=httpd.serve_forever, daemon=True)
+    th.start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    time.sleep(0.2)
+
+    def request(path, data=None, method=None, ctype="application/json"):
+        req = ur.Request(base + path, data=data, method=method,
+                         headers={"Content-Type": ctype} if data is not None else {})
+        try:
+            with ur.urlopen(req, timeout=30) as resp:
+                body = resp.read()
+                return resp.status, dict(resp.headers), body
+        except urllib.error.HTTPError as exc:      # 4xx/5xx carry the reason
+            return exc.code, dict(exc.headers), exc.read()
+
+    def request_json(path, obj, method="POST"):
+        status, headers, body = request(path, json.dumps(obj).encode("utf-8"), method)
+        return status, json.loads(body.decode("utf-8"))
+
+    try:
+        yield types.SimpleNamespace(request=request, request_json=request_json, base=base,
+                                    tmp=tmp_path,
+                                    cache=tmp_path / "cache", batch=tmp_path / "batch")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def _multipart(name, filename, blob, fields=None):
+    boundary = "----aalistudio"
+    parts = []
+    for k, v in (fields or {}).items():
+        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode())
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; "
+        f"filename=\"{filename}\"\r\nContent-Type: audio/wav\r\n\r\n".encode()
+        + blob + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def test_voice_entrypoints_are_runnable_as_plain_scripts():
+    """Tripwire: every voice entrypoint must bootstrap its own sys.path.
+
+    The suite sets PYTHONPATH, which MASKS a missing bootstrap — so this
+    runs each entrypoint as a subprocess with PYTHONPATH stripped (the live
+    `python scripts/voice/studio_api.py` case that failed with
+    "No module named 'voice'").
+    """
+    import os
+    import subprocess
+    from pathlib import Path
+
+    voice_dir = Path(__file__).resolve().parents[1] / "scripts" / "voice"
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    # chain_e2e.py is excluded on purpose: it has no --help (it runs the real
+    # chain and needs the voice venv's silero/whisper), and its bootstrap is
+    # proven by the live chain run instead.
+    for name in ("studio_api.py", "studio.py"):
+        r = subprocess.run([sys.executable, str(voice_dir / name), "--help"],
+                           capture_output=True, text=True, timeout=180, env=env)
+        assert r.returncode == 0, f"{name} failed without PYTHONPATH:\n{r.stderr[-800:]}"
+
+
+def test_studio_api_serves_the_arabic_console(studio):
+    status, headers, body = studio.request("/")
+    assert status == 200 and b"dir=\"rtl\"" in body
+    assert "text/html" in headers["Content-Type"]
+
+
+def test_studio_api_lists_languages_honestly(studio):
+    status, _h, body = studio.request("/api/voices")
+    d = json.loads(body.decode("utf-8"))
+    assert status == 200 and d["ok"]
+    assert set(d["languages"]) == {"ar", "he", "en"}
+    assert d["languages"]["he"]["available"] is False   # no piper voices here
+
+
+def test_studio_synthesize_returns_real_audio_and_metadata(studio):
+    status, headers, body = studio.request(
+        "/api/synthesize", json.dumps({"text": "مرحبا من الاستوديو"}).encode("utf-8"))
+    assert status == 200 and headers["Content-Type"] == "audio/wav"
+    assert headers["X-Aali-Lang"] == "ar" and headers["X-Aali-Chunks"] == "1"
+    with wave.open(io_bytes(body), "rb") as wf:          # a playable wav
+        assert wf.getframerate() == 24000 and wf.getnframes() > 1000
+
+
+def io_bytes(b: bytes):
+    import io
+
+    return io.BytesIO(b)
+
+
+def test_studio_unknown_voice_is_an_error_not_a_silent_fallback(studio):
+    status, _h, body = studio.request(
+        "/api/synthesize", json.dumps({"text": "مرحبا", "voice": "ghost"}).encode("utf-8"))
+    assert status == 400
+    assert "ghost" in json.loads(body.decode("utf-8"))["error"]
+
+
+def test_studio_check_refuses_a_bad_clip_and_add_accepts_a_good_one(studio):
+    bad = _ref_wav(studio.tmp / "x.wav", seconds=1.0).read_bytes()
+    blob, ctype = _multipart("file", "short.wav", bad, {"name": "short", "lang": "ar"})
+    status, _h, body = studio.request("/api/voices/check", blob, ctype=ctype)
+    d = json.loads(body.decode("utf-8"))
+    assert status == 200 and d["ok"] is False and d["check"]["reasons"]
+
+    good = _ref_wav(studio.tmp / "y.wav", seconds=9.0)
+    blob, ctype = _multipart("file", "ok.wav", good.read_bytes(),
+                             {"name": "صوت_جديد", "lang": "ar"})
+    status, _h, body = studio.request("/api/voices", blob, ctype=ctype)
+    d = json.loads(body.decode("utf-8"))
+    assert status == 200 and d["ok"] and any(v["name"] == "صوت_جديد" for v in d["voices"])
+
+
+def test_studio_batch_returns_a_manifest(studio):
+    status, d = studio.request_json("/api/batch", {
+        "script": "جملة أولى.\n\nשלום עולם.\n\nHello there."})
+    assert status == 200 and d["ok"] and len(d["items"]) == 3
+    assert [i["lang"] for i in d["items"]] == ["ar", "he", "en"]
+    assert d["made"] == 3 and d["failed"] == 0
+    assert all((Path(d["dir"]) / i["file"]).exists() for i in d["items"])
+
+
+def test_studio_audio_route_refuses_traversal(studio):
+    for bad in ("../../secret.txt", "..%2fvoices.json", "notasha.wav"):
+        status, _h, _b = studio.request("/api/audio/" + bad)
+        assert status in (400, 404), bad
+
+
+def test_studio_delete_voice_updates_the_board(studio):
+    from voice.core import voices as voice_lib
+
+    _ref = _ref_wav(studio.tmp / "z.wav", seconds=9.0)
+    blob, ctype = _multipart("file", "ok.wav", _ref.read_bytes(),
+                             {"name": "temp_voice", "lang": "ar"})
+    studio.request("/api/voices", blob, ctype=ctype)
+    status, _h, body = studio.request("/api/voices/temp_voice", method="DELETE")
+    d = json.loads(body.decode("utf-8"))
+    assert status == 200 and d["ok"] and not any(v["name"] == "temp_voice" for v in d["voices"])
 
 
 # --------------------------------------------------------------------------

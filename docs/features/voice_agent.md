@@ -55,6 +55,26 @@ which would read English/Hebrew in the Arabic voice. Measured: 2.7s per
 Hebrew line vs 20–160s for an XTTS line on this CPU.
 `engine_report().lang_support` states the truth per language.
 
+### Console (Arabic-first, :5082)
+`scripts\voice_studio_server.bat` → http://127.0.0.1:5082/
+Write text → pick a voice → hear it → download it; or turn a whole script
+into numbered files. Also the voice library with drag-in clip validation.
+Server: `scripts/voice/studio_api.py` (stdlib HTTP, loopback unless
+`AALI_VOICE_BIND`, `AALI_VOICE_FAKE=1` for a model-free wiring check).
+
+| route | what it does |
+|---|---|
+| `GET /api/voices` | library + which engine carries each language |
+| `POST /api/voices/check` | validate an uploaded clip (never registers) |
+| `POST /api/voices` | register a validated clip |
+| `POST /api/voices/default` · `DELETE /api/voices/<name>` | set/remove |
+| `POST /api/synthesize` | text → `audio/wav` (+ language/engine/chunks headers) |
+| `POST /api/batch` | script → manifest of numbered clips |
+| `GET /api/audio/<sha1>.wav` | play/download a clip (sha1-only, no traversal) |
+
+An unknown voice name is refused at the API boundary (400) whatever engine
+is loaded — the console never returns audio the caller did not ask for.
+
 ## Voice cloning
 XTTS-v2 in D:/hwk-models/xtts-v2 (plain files, CCCPML license accepted by
 the owner's brief). AR ref `arabic_male.wav` exists; HE/EN refs are
@@ -93,6 +113,8 @@ scripts\voice_studio.bat voices check clip.wav                      # validate a
 scripts\voice_studio.bat voices add my_voice --lang ar --file clip.wav
 scripts\voice_studio.bat audition --lang he
 scripts\voice_studio.bat batch my_script.txt                        # -> D:/hwk-data/voice_out/<name>/
+
+scripts\voice_studio_server.bat     # the console: http://127.0.0.1:5082/
 ```
 **AALI_VOICE_API_KEY is required when :5055 runs in key mode** (it does —
 master key in D:/hwk-data/aali_master_key.txt). Without it the house
@@ -125,14 +147,17 @@ voice, 39.4s turn wall cold (0s cached). Cold XTTS synth ≈ 26s (49 chars)
 / 63s (180 chars) on CPU — hence the engine char cap above.
 
 ## Tests
-tests/test_voice_agent.py — 42 tests: language detect/chunking (incl. the
+tests/test_voice_agent.py — 51 tests: language detect/chunking (incl. the
 engine char cap), tracker, segmenter state machine, barge-in gate, STT
 gating (fake whisper), TTS seams + cache + XTTS language set + Hebrew
 routing + language-matched Piper voice, the voice library (validation of
-every real defect, CRUD, defaults, named-voice isolation), pipeline turn
-e2e (fakes) + honest ask failure, ask_aali contract + key-mode 404
+every real defect, CRUD, defaults, named-voice isolation), the studio API
+(fake engine, hermetic tmp dirs: console page, voices, real wav back,
+unknown-voice refusal, clip upload, batch manifest, audio-route traversal),
+entrypoints runnable as plain scripts with PYTHONPATH stripped, pipeline
+turn e2e (fakes) + honest ask failure, ask_aali contract + key-mode 404
 (hermetic HTTP server), UTF-8 stdio guards, WS e2e with the FAKE pipeline
 (skips where websockets is absent).
 Models are NEVER loaded by the suite; the real-model gate is probe_xtts.py,
-the CLI --file run and `studio batch` (see D:/hwk-data/voice_e2e.log and
-D:/hwk-data/voice_out/).
+the CLI --file run, `studio batch` and the console over HTTP (see
+D:/hwk-data/voice_e2e.log and D:/hwk-data/voice_out/).

@@ -1,8 +1,8 @@
 # Aali Voice — Phase 2 (Studio → Console → Quality → Verticals)
 
 - owner: buffy (this PC, Freebuff session)
-- status: in-progress — slice 1 (voice asset studio) DONE and verified live;
-  slices 2-4 open
+- status: in-progress — slices 1 (voice assets) and 2 (console) DONE and
+  verified live; slices 3-4 open
 - started: 2026-10-02
 - owner GO: "Start Part 2 of the voice package (Studio)" with ALL FOUR
   areas selected (voice assets, script-to-voice console, voice quality,
@@ -78,11 +78,39 @@ validation of every real defect, named-voice isolation, corrupt store.
 
 ---
 
-## Slice 2 — script-to-voice console (web, Arabic-first)
-Not started. Plan: HTTP endpoints over the same library (list voices,
-validate+upload a clip, audition, synthesize, download), served next to the
-existing :5081 voice UI; UI = write text, pick voice/language, preview,
-export. Arabic-first RTL per the house rule.
+## Slice 2 — script-to-voice console (DONE 2026-10-02)
+
+`scripts/voice/studio_api.py` (stdlib HTTP :5082) + `web/voice/studio.html`
+(Arabic-first RTL console) + `scripts/voice_studio_server.bat`.
+
+The console: write text → pick voice/language → hear it → download it; or
+turn a whole script into numbered files; plus the library with clip upload,
+validation and deletion. The language board states the truth per language
+(ar→xtts, he→piper, en→xtts).
+
+Honesty kept at the BOUNDARY: an unknown voice name is refused with 400
+whatever engine is loaded — the first fake-engine test caught the console
+answering 200 with audio the caller never asked for. The audio route serves
+only sha1-named files from the cache/batch dirs (traversal pinned).
+
+### Verified live against the REAL engines (not the fake seam)
+- console page 200 (13.3 KB); `/api/voices` reports ar→xtts, he→piper,
+  and the installed Piper list.
+- AR synth over HTTP: real XTTS, 2.7s audio, 119s wall cold; headers carry
+  lang/engine/chunks/file.
+- HE synth over HTTP: real Piper (he_IL), 1.4s audio, 7.5s wall.
+- unknown voice → `{"ok": false, "error": "unknown voice: ghost"}` 400.
+- batch over HTTP with a UTF-8 body: 3/3 (ar/he/en), correct per-line
+  language. (An earlier inline-curl run "mis-detected" Hebrew — that was
+  Git Bash mangling the bytes, not the server; the same request from a file
+  is correct.)
+
+Two defects fixed on the way: `studio_api.py` had no `sys.path` bootstrap
+(the live `python scripts/voice/studio_api.py` died with "No module named
+'voice'") — now pinned by a test that runs every entrypoint as a subprocess
+with PYTHONPATH STRIPPED, because the suite's own PYTHONPATH masks exactly
+this bug; and the .bat launchers are ASCII+CRLF per the repo bat-hygiene
+rule.
 
 ## Slice 3 — voice quality
 Not started. Echo cancellation (today barge-in can trip on Aali's own
