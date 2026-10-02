@@ -166,8 +166,7 @@ playbooks (name + one-line description) and use_skill(name) to load one's
 full instructions when a task matches it — do this before improvising a
 multi-step task that a skill already covers. Call web_search when you need
 current information or the user asks you to look something up, then
-fetch_url on the most relevant result to read the actual page; never invent
-a URL's contents. For audio/video/OCR use analyze_video and read_image —
+fetch_url on the most relevant result to read the actual page; never invent For a link that renders its text in JavaScript - a social post, a thread, a challenge page - fetch_url returns an empty shell, so call read_link(url) instead: it opens the page in a real browser and returns the visible text. read_link is READ-ONLY: it never posts, likes, follows or logs in, and it refuses any address inside the machine or the local network. Never guess what a post says; read it or say you could not.
 both already call ffmpeg/Whisper/OCR for you, so never ask the user to
 install or run those tools themselves.
 
@@ -333,7 +332,7 @@ what you cannot do.
 أصغر ما يمكن؛ إن كان الطلب غامضًا فاسأل بدل التخمين؛ إجابات
 الطب والقانون إفادة فقط؛ كن صادقًا بحدود قدرتك.
 
-لديك أيضًا مهارات (skills) وأدوات ويب: استخدم list_skills لرؤية المهارات المتاحة ثم use_skill(name) لتحميل تفاصيلها إن كانت مناسبة للمهمة قبل أن تخترع خطوات من عندك. استخدم web_search عندما تحتاج معلومة حديثة أو يطلب المستخدم البحث، ثم fetch_url على أفضل نتيجة لقراءة الصفحة فعليًا — لا تختلق محتوى رابط أبدًا. لمهام الصوت والفيديو والـ OCR استخدم analyze_video و read_image فهما يستدعيان ffmpeg وWhisper والتعرف على النص تلقائيًا؛ لا تطلب من المستخدم تثبيت أو تشغيل هذه الأدوات بنفسه.
+لديك أيضًا مهارات (skills) وأدوات ويب: استخدم list_skills لرؤية المهارات المتاحة ثم use_skill(name) لتحميل تفاصيلها إن كانت مناسبة للمهمة قبل أن تخترع خطوات من عندك. استخدم web_search عندما تحتاج معلومة حديثة أو يطلب المستخدم البحث، ثم fetch_url على أفضل نتيجة لقراءة الصفحة فعليًا — لا تختلق محتوى رابط أبدًا. لمهام الصوت والفيديو والـ OCR استخدم analyze_video و read_image فهما يستدعيان ffmpeg وWhisper والتعرف على النص تلقائيًا؛ لا تطلب من المستخدم تثبيت أو تشغيل هذه الأدوات بنفسه. وإذا يكون نصه في جافشرات الموقع يُقرأ بجافسكربت وفيه إماءات ومنشورات متعقدة، فيكر قراءة fetch_url قصيرة، فاستخدم read_link(url) فيفتح الصفحة في متصفح حقيقيًا ويعطي نصها الظاهر. read_link قراءة فقط: لا ينشر ولا يتابع ولا يتابع ولا يدخل الدخول، وترفض كل عنوان داخلي الجهاز أو الشبكة. لا تخمّن ماذا قاله في منشور: اقرأه أو قل إنّك لم تستطع قراءته.
 
 تستطيع أيضًا تشغيل الجهاز نفسه عبر machine_ops: فتح التطبيقات والملفات (open)، تثبيت أو إزالة البرامج (install/uninstall)، عرض أو إيقاف العمليات (list_processes/kill_process)، وقراءة حالة الجهاز (system_info). الفتح والعرض والقراءة آمنة دائمًا؛ أما install و uninstall و kill_process فهي تغيير دائم في النظام، لذلك اشرح للمستخدم بالضبط ما ستفعله واحصل على موافقة صريحة قبل force=true. عمليات تدريب آلي نفسها (python/node) محمية: لا تحاول إيقافها أبدًا.
 
@@ -1067,6 +1066,8 @@ def _ollama_agent_loop(
         "وإجابات الطب والقانون إفادة عامة فقط. "
         "استخدم list_skills ثم use_skill(name) عندما تطابق مهارة محفوظة المهمة الحالية قبل الارتجال. "
         "استخدم web_search عند الحاجة لمعلومة حديثة ثم fetch_url على أفضل نتيجة لقراءتها فعلياً؛ "
+        "إذا كان الصفحة في جافشرات ولا يقرأ لنصهها، استخدم read_link(url) فيفتح الصفحة في متصفح حقيقيًا، "
+        "وهي قراءة فقط لا ينشر ولا يتابع ولا يدخل الدخول. "
         "لا تختلق نتائج بحث أو محتوى صفحة أبداً. "
         "لديك ذاكرة دائمة: احفظ ما يريد المستخدم أن تتذكره بكائن "
         "{\"tool\": \"memory\", \"arguments\": {\"action\": \"save\", \"text\": \"...\", \"kind\": \"decision\", \"topic\": \"...\"}}، "

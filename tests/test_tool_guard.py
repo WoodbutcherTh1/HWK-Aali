@@ -26,7 +26,9 @@ def test_aliases_point_at_real_registry_tools() -> None:
 
 def test_registry_names_match_file_tools() -> None:
     # 2026-09-23: agent toolbelt joins the registry -> 34.
-    assert len(tool_guard.registry_names()) == 35  # 26 built-ins + 8 toolbelt + spawn_agents
+    # 2026-10-03: read_link (Aali Reach) -> 36. A stale count here is a
+    # deliberate tripwire: the registry grew and nobody updated it.
+    assert len(tool_guard.registry_names()) == 36
 
 
 # ---------------------------------------------------------------------------

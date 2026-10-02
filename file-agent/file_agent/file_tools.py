@@ -1069,6 +1069,47 @@ def fetch_url(url: str, workspace_root: str | Path, *,
     return _web_tools.fetch_url(url, workspace_root, max_chars=max_chars)
 
 
+def read_link(url: str, workspace_root: str | Path, *,
+              engine: str = "auto", max_chars: int = 20000,
+              timeout_seconds: int = 30) -> dict[str, Any]:
+    """Read a PUBLIC link the way a browser sees it - READ-ONLY.
+
+    Use this for social posts, threads and pages that render their text in
+    JavaScript, where ``fetch_url`` returns an empty shell. It never posts,
+    never likes, never follows and never logs in; it only reads.
+
+    The fence lives in ``file_agent.reach``: http(s) only, no credentials in
+    the URL, and every resolved address must be public - re-checked on every
+    redirect hop. Local and private addresses (including this machine and the
+    cloud metadata address) are refused.
+    """
+    del workspace_root  # reads the network, never the filesystem
+    from file_agent import reach as _reach
+
+    engine = (engine or "auto").lower()
+    if engine not in ("auto", "static", "browser"):
+        raise FileAgentError("engine must be auto, static or browser")
+    try:
+        record = _reach.read_link(url, engine=engine,
+                                  timeout=min(max(int(timeout_seconds), 5), 90))
+    except _reach.ReachError as exc:
+        # A refusal is a real answer for the model to explain, not a crash:
+        # "this link points inside your own network" is something the user
+        # needs to hear in their own words.
+        raise FileAgentError(str(exc)) from None
+    if not record.get("ok"):
+        raise FileAgentError(record.get("error") or "the link could not be read")
+    result = dict(record["result"])
+    text = str(result.get("text") or "")
+    if len(text) > max_chars:
+        text = text[:max_chars]
+        result["text"] = text
+        result["caps"] = list(result.get("caps") or []) + ["text_capped"]
+    result["summary"] = _reach.summary(record)
+    result["attempts"] = record.get("attempts")
+    return result
+
+
 def web_search(query: str, workspace_root: str | Path, *,
                max_results: int = 6) -> dict[str, Any]:
     """Keyless web search (DuckDuckGo HTML endpoint); no API key needed."""
@@ -1230,6 +1271,7 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "use_skill": use_skill,
     "fetch_url": fetch_url,
     "web_search": web_search,
+    "read_link": read_link,
     "generate_image": generate_image,
     "generate_video": generate_video,
     "edit_image": edit_image,
@@ -1270,6 +1312,7 @@ TOOL_EXECUTION: dict[str, str] = {
     # server-side (brain)
     "web_search": "server",
     "fetch_url": "server",
+    "read_link": "server",
     "generate_image": "server",
     "generate_video": "server",
     "edit_image": "server",
@@ -1465,6 +1508,11 @@ _DEFINITIONS = [
                 {"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["url"]),
     _definition("web_search", "Search the web (no API key needed) and return titles/URLs/snippets. Use when the user asks to look something up or you need current information; follow up with fetch_url on the best result.",
                 {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}}, ["query"]),
+    _definition("read_link", "Read a PUBLIC link the way a browser renders it (social posts, threads, JS pages) and return its real text - READ-ONLY, it never posts, likes, follows or logs in. The RIGHT way: use fetch_url for ordinary pages and THIS when fetch_url returned almost nothing, or when the user hands you a social post URL and wants its content. Refuses local/private addresses and non-http(s) links.",
+                {"url": {"type": "string"},
+                 "engine": {"type": "string", "enum": ["auto", "static", "browser"], "default": "auto"},
+                 "max_chars": {"type": "integer", "default": 20000},
+                 "timeout_seconds": {"type": "integer", "default": 30}}, ["url"]),
     # --- agent toolbelt extensions (2026-09-23) ----------------------------
     _definition("create_artifact", "Create a polished, shareable single-file output in the workspace: a styled HTML page (RTL-aware, opens in any browser — use for reports, CVs, dashboards, interactive demos) or a Markdown document. The RIGHT way: build it AFTER gathering the real content, write it in one call, then tell the user the exact file path.",
                 {"title": {"type": "string"}, "content": {"type": "string"},

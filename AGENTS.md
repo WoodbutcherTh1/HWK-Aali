@@ -250,6 +250,42 @@ in parallel:
   fake brain speaking :5055's exact vocabulary and really writing files.
   PART 3 (Aali Reach) awaits the owner's go.
 
+- **PART 3 Aali Reach — read-only link reading, fenced like a bank vault
+  (2026-10-03, Buffy)**: tasks/aali-reach.md. `file_agent/reach.py` (STDLIB
+  ONLY) reads a public link: `read_link(url)` returns the visible text, title,
+  author, date and description. WHY THE FENCE IS THE FEATURE: it sits next to
+  `run_command` in an agent that owns the owner's machine, so it is an SSRF
+  machine and an exfiltration channel unless it is not one. (1) http/https
+  only, no credentials in the URL, and EVERY resolved A/AAAA record must be
+  public - loopback, RFC1918, link-local (169.254.169.254 is named
+  link-local, not RFC1918: a wrong label on the exact address that leaks cloud
+  metadata), CGNAT, multicast, reserved all refused, and a name with ONE
+  private answer among public ones is refused whole (DNS rebinding). (2)
+  urllib's redirect follower is DISABLED and the loop is ours, because urllib
+  follows a 302 before the caller can see the new host - a public host
+  answering `302 -> http://127.0.0.1:5055` is the whole attack. (3)
+  `scripts/reach_fetch.py` is the browser bridge and runs as a SUBPROCESS in
+  `D:/hwk-tools/reach-venv` (scripts/setup_reach.bat) so playwright never
+  enters the training venv and page JS can never reach the agent runtime; at
+  the Playwright route layer it issues GET/HEAD only, blocks
+  javascript:/data:/file: navigation, and re-fences EVERY request - without
+  that a hostile page just does `fetch('http://127.0.0.1:5055/api/ask')`,
+  which is the attack a "read-only" reader most obviously invites. (4) caps on
+  bytes/text/redirects/time, every cap REPORTED in `caps`, never silent.
+  (5) content-free audit (host + status + bytes + sha16 of the text; never the
+  path, never the query string - a link can carry a token). Static-first:
+  engine=auto reads without a browser and only escalates when the text came
+  back thin, because a 400 MB browser is not a reasonable price for most
+  reads. Registry 35 -> 36 tools (test_tool_guard + test_tool_orchestrator
+  counts are deliberate tripwires). SYSTEM_PROMPT teaches EN+AR WHEN to use it
+  and that it never posts/likes/follows/logs-in. Tests: tests/test_reach.py 59
+  (most about REFUSALS; a real loopback HTTP server proves the 302-to-loopback
+  re-guard); suite 1484 green / 15 skipped. NOT DONE, and said so in the
+  docs: not yet measured against a real social site, and camoufox's value is
+  unproven; no login wall is ever bypassed - that is a deliberate red line.
+  OBSERVED FLAKE, not fixed: test_a_404_brain_asks_for_the_key_instead_of_
+  guessing failed once in five full runs and passed in the other four; the
+  cause was not captured, so it is recorded rather than papered over.
 - **macOS VERIFIED by the owner's MacBook + two real bugs fixed (2026-10-03,
   Buffy)**: the first honest cross-OS run (MacBook Air, Darwin 25.6.0 arm64,
   Python 3.13.7) came back through `scripts/portability_check.py`. PASSED on
