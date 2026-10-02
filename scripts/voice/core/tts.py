@@ -3,13 +3,20 @@
 existing Piper stack fallback.
 
 - XTTS loads from a LOCAL plain-file dir (D:/hwk-models/xtts-v2) or the HF
-  cache — never assumes network at serve time.
+  cache — never assumes network at serve time. XTTS-v2 speaks 17 languages
+  and HEBREW IS NOT AMONG THEM: `he` routes to the Piper fallback, which
+  needs an installed he_IL voice; without one the studio says so instead of
+  reading Hebrew in the Arabic voice.
 - Per-language reference wavs from D:/hwk-models/voice/references/ (AR
   exists; HE/EN refs clone the AR voice until recorded — honest note).
+- Phase 2: a NAMED voice (voice.core.voices library profile) can be requested
+  per call; an unknown name fails loudly rather than falling back to the
+  per-language reference.
 - Fallback: file_agent.tts synthesize() (vision-venv piper subprocess) —
-  zero new deps in any other venv, and Piper voices are per-language: if
-  no voice exists for the requested language the fallback reports
-  unavailable instead of speaking Arabic over an English sentence.
+  zero new deps in any other venv. The voice is chosen by the requested
+  LANGUAGE (`_piper_voice_for`), never the house default: if no voice
+  matches, the fallback reports unavailable instead of speaking Arabic over
+  an English or Hebrew sentence.
 - Cache: D:/hwk-data/voice_tts/sha1(engine|lang|ref|text).wav
 - Injectable `synth_fn` for tests (the suite never loads the 1.8 GB model).
 """
@@ -32,8 +39,22 @@ DEFAULT_XTTS_DIR = r"D:/hwk-models/xtts-v2"
 CACHE_DIR = Path(r"D:/hwk-data/voice_tts")
 LOG_FILE = Path(r"D:/hwk-data/voice_tts.log")
 
-# XTTS supports these exactly (coqui docs); map our codes 1:1
-XTTS_LANGS = {"ar", "he", "en"}
+# XTTS-v2 speaks EXACTLY these (read from the local config.json at
+# probe time, 2026-10-02: en es fr de it pt pl tr ru nl cs ar zh-cn hu ko
+# ja hi). HEBREW IS NOT ONE OF THEM — routing he to XTTS raised
+# NotImplementedError mid-batch. Hebrew needs the Piper fallback with a
+# he_IL voice installed, or the studio reports it as unavailable.
+XTTS_LANGS = {
+    "en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl", "cs",
+    "ar", "zh-cn", "hu", "ko", "ja", "hi",
+}
+# our codes -> piper language-code prefixes (ar_JO / he_IL / en_US ...)
+PIPER_LANG_PREFIX = {"ar": "ar", "he": "he", "en": "en"}
+
+
+def engine_langs() -> Dict[str, object]:
+    """Per-language engine availability — what the studio UI shows."""
+    return {"xtts": sorted(XTTS_LANGS), "hebrew_in_xtts": False}
 
 
 def _log(line: str) -> None:
@@ -77,6 +98,13 @@ class VoiceTTS:
             "xtts": self.xtts_ready(),
             "piper": piper_ok,
             "refs": {k: str(Path(v).exists()) for k, v in self.refs.items()},
+            "xtts_langs": sorted(XTTS_LANGS),
+            # honest per-language routing: Hebrew has no XTTS voice
+            "lang_support": {
+                lang: ("xtts" if lang in XTTS_LANGS
+                       else ("piper" if self._piper_voice_for(lang) else None))
+                for lang in ("ar", "he", "en")
+            },
         }
 
     # -- XTTS ------------------------------------------------------------
@@ -110,17 +138,43 @@ class VoiceTTS:
                 return ref
         return None
 
-    # -- public API --------------------------------------------------------
-    def synthesize(self, text: str, lang: str = "ar") -> Dict[str, object]:
-        """text chunk -> {ok, path?, sr?, engine?, cached?, error?}.
+    def _ref_for_named(self, name: str) -> Optional[str]:
+        """Reference wav of a LIBRARY voice (Phase 2 studio).
 
+        A named voice that does not exist is an honest failure, never a
+        silent fall-through to some other voice — a caller asking for
+        "hebrew_male" must never get the Arabic one.
+        """
+        if not name:
+            return None
+        from voice.core import voices as voice_lib
+
+        v = voice_lib.get_voice(name)
+        if v is None:
+            raise KeyError(f"unknown voice: {name}")
+        ref = v.get("ref")
+        if not ref or not Path(ref).exists():
+            raise FileNotFoundError(f"voice {name} has no reference wav on disk")
+        return ref
+
+    # -- public API --------------------------------------------------------
+    def synthesize(
+        self, text: str, lang: str = "ar", voice: Optional[str] = None
+    ) -> Dict[str, object]:
+        """text chunk -> {ok, path?, sr?, engine?, cached?, error?, voice?}.
+
+        `voice` selects a named library voice (studio / console); without it
+        the per-language reference is used as in Phase 1.
         Never fabricates: a missing engine/ref/voice is an honest error.
         """
         text = (text or "").strip()
         if not text:
             return {"ok": False, "error": "empty text"}
         lang = lang if lang in ("ar", "he", "en") else "ar"
-        ref = self._ref_for(lang)
+        try:
+            ref = self._ref_for_named(voice) if voice else self._ref_for(lang)
+        except (KeyError, FileNotFoundError) as exc:
+            return {"ok": False, "error": str(exc).strip("'")}
 
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         ref_key = ref or "none"
@@ -135,6 +189,8 @@ class VoiceTTS:
         if self._synth_fn is not None:
             try:
                 r = self._synth_fn(text, lang, ref or "")
+                if isinstance(r, dict) and r.get("ok") and voice:
+                    r.setdefault("voice", voice)
                 if r and r.get("ok"):
                     return r
                 return {"ok": False, "error": r.get("error", "synth_fn failed")} if r else {
@@ -144,7 +200,7 @@ class VoiceTTS:
                 _log(f"synth_fn error={type(exc).__name__}")
                 return {"ok": False, "error": f"synth_fn: {type(exc).__name__}"}
 
-        if self.xtts_ready() and ref:
+        if self.xtts_ready() and ref and lang in XTTS_LANGS:
             try:
                 self.ensure_xtts()
                 import torch
@@ -181,24 +237,50 @@ class VoiceTTS:
             except Exception as exc:
                 _log(f"xtts fail lang={lang} err={type(exc).__name__}: {exc}")
 
-        # fallback: piper (per-language voices; honest when absent)
+        # fallback: piper (language-matched voice; honest when absent)
         return self._piper(text, lang)
+
+    def _piper_voice_for(self, lang: str) -> Optional[str]:
+        """A Piper voice whose OWN language matches — never the default one.
+
+        Phase 1 passed voice_id=None, so every non-Arabic fallback line was
+        read in the Arabic voice while the docstring claimed the opposite.
+        """
+        try:
+            from file_agent import tts as piper_tts
+
+            voices = piper_tts.list_voices()
+        except Exception:
+            return None
+        want = PIPER_LANG_PREFIX.get(lang, lang)
+        for v in voices:
+            code = str(v.get("language") or "").lower()
+            if code.startswith(want) or str(v.get("id", "")).lower().startswith(want):
+                return v.get("id")
+        return None
 
     def _piper(self, text: str, lang: str) -> Dict[str, object]:
         try:
             from file_agent import tts as piper_tts
         except Exception:
             return {"ok": False, "error": "no TTS engine available (xtts down, piper import failed)"}
-        digest = hashlib.sha1(f"piper|{lang}|".encode("utf-8") + text.encode("utf-8")).hexdigest()
+        voice_id = self._piper_voice_for(lang)
+        if not voice_id:
+            return {"ok": False, "error":
+                    f"no voice for {lang}: XTTS does not speak it and no matching Piper "
+                    f"voice is installed (install a {PIPER_LANG_PREFIX.get(lang, lang)}_* voice)"}
+        digest = hashlib.sha1(
+            f"piper|{lang}|{voice_id}|".encode("utf-8") + text.encode("utf-8")
+        ).hexdigest()
         out = CACHE_DIR / f"{digest}.wav"
         if out.exists() and out.stat().st_size > 1000:
             return {"ok": True, "path": str(out), "sr": 22050, "engine": "piper", "cached": True}
-        r = piper_tts.synthesize(text, voice_id=None, fmt="wav")
+        r = piper_tts.synthesize(text, voice_id=voice_id, fmt="wav")
         if not r.get("ok"):
             _log(f"piper fail lang={lang} err={r.get('error')}")
             return {"ok": False, "error": f"piper: {r.get('error')}"}
         src = Path(r["audio"])
         if src.resolve() != out.resolve():
             os.replace(src, out)
-        _log(f"piper ok lang={lang} chars={len(text)}")
+        _log(f"piper ok lang={lang} voice={voice_id} chars={len(text)}")
         return {"ok": True, "path": str(out), "sr": 22050, "engine": "piper", "cached": False}

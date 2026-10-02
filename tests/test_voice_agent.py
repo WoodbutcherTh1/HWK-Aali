@@ -14,6 +14,7 @@ import threading
 import time
 import types
 import wave
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
@@ -430,6 +431,230 @@ def test_voice_entrypoints_force_utf8_before_printing():
     for name in ("cli.py", "chain_e2e.py"):
         src = (voice_dir / name).read_text(encoding="utf-8")
         assert "force_utf8_stdio" in src, f"{name} never forces utf-8 stdio"
+
+
+def test_xtts_language_set_excludes_hebrew():
+    """Hebrew is NOT an XTTS-v2 language (verified against the local
+    config.json) — routing it to XTTS only produces a mid-run failure."""
+    from voice.core.tts import XTTS_LANGS
+
+    assert "ar" in XTTS_LANGS and "en" in XTTS_LANGS
+    assert "he" not in XTTS_LANGS
+
+
+def test_hebrew_never_reaches_xtts_and_never_borrows_the_arabic_voice(monkeypatch):
+    from voice.core.tts import VoiceTTS
+
+    calls = []
+
+    class FakeXtts:
+        def inference(self, **kw):
+            calls.append(kw)
+            return {"wav": [0.0] * 2400}
+
+    t = VoiceTTS()
+    monkeypatch.setattr(t, "xtts_ready", lambda: True)
+    monkeypatch.setattr(t, "_ref_for", lambda lang: "ref.wav")
+    monkeypatch.setattr(t, "ensure_xtts", lambda: None)
+    monkeypatch.setattr(t, "_xtts", FakeXtts())
+    monkeypatch.setattr(t, "_piper_voice_for", lambda lang: None)
+
+    r = t.synthesize("שלום", "he")
+    assert calls == []                       # XTTS never asked
+    assert not r["ok"] and "he" in r["error"] and "Piper" in r["error"]
+
+
+def test_piper_fallback_picks_a_matching_language_voice(monkeypatch):
+    """The fallback must never speak English/Hebrew in the Arabic voice."""
+    import sys
+    import types as _types
+
+    from voice.core.tts import VoiceTTS
+
+    seen = {}
+    fake = _types.ModuleType("file_agent.tts")
+    fake.list_voices = lambda: [
+        {"id": "ar_JO-kareem-medium", "language": "ar"},
+        {"id": "en_US-lessac-medium", "language": "en"},
+    ]
+
+    def synthesize(text, voice_id=None, fmt="wav"):
+        seen["voice_id"] = voice_id
+        return {"ok": False, "error": "no piper binary in tests"}   # stop here
+
+    fake.synthesize = synthesize
+    pkg = _types.ModuleType("file_agent")
+    pkg.tts = fake
+    monkeypatch.setitem(sys.modules, "file_agent", pkg)
+    monkeypatch.setitem(sys.modules, "file_agent.tts", fake)
+
+    t = VoiceTTS()
+    assert t._piper_voice_for("en") == "en_US-lessac-medium"
+    assert t._piper_voice_for("ar") == "ar_JO-kareem-medium"
+    assert t._piper_voice_for("he") is None      # nothing installed -> honest
+    t._piper("hello", "en")
+    assert seen["voice_id"] == "en_US-lessac-medium"
+
+
+# --------------------------------------------------------------------------
+# voice library (Phase 2 studio)
+# --------------------------------------------------------------------------
+
+def _ref_wav(path, seconds=6.0, sr=24000, amp=0.3):
+    n = int(sr * seconds)
+    t = np.linspace(0, seconds, n, endpoint=False)
+    tone = (np.sin(2 * np.pi * 180 * t) * amp * 32767).astype("<i2")
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sr)
+        wf.writeframes(tone.tobytes())
+    return path
+
+
+@pytest.fixture()
+def lib(tmp_path):
+    """An isolated library: its own store dir and its own refs dir."""
+    from voice.core import voices as voice_lib
+
+    store = tmp_path / "voices.json"
+    refs = tmp_path / "refs"
+    return voice_lib, store, refs
+
+
+def test_validate_accepts_a_clean_mono_clip(lib, tmp_path):
+    voice_lib, _, _ = lib
+    clip = _ref_wav(tmp_path / "ok.wav", seconds=8.0, amp=0.3)
+    v = voice_lib.validate_reference_wav(clip)
+    assert v["ok"] and v["sr"] == 24000 and v["channels"] == 1
+    assert 7.9 <= v["seconds"] <= 8.1 and v["reasons"] == []
+
+
+def test_validate_names_every_real_defect(lib, tmp_path):
+    voice_lib, _, _ = lib
+    short = _ref_wav(tmp_path / "short.wav", seconds=1.0, amp=0.3)
+    v = voice_lib.validate_reference_wav(short)
+    assert not v["ok"] and any("قصير" in r for r in v["reasons"])
+
+    quiet = _ref_wav(tmp_path / "quiet.wav", seconds=8.0, amp=0.0005)
+    v2 = voice_lib.validate_reference_wav(quiet)
+    assert not v2["ok"] and any("منخفض" in r for r in v2["reasons"])
+
+    stereo = tmp_path / "stereo.wav"
+    with wave.open(str(stereo), "wb") as wf:
+        wf.setnchannels(2); wf.setsampwidth(2); wf.setframerate(24000)
+        wf.writeframes(np.zeros(24000 * 8 * 2, dtype="<i2").tobytes())
+    v3 = voice_lib.validate_reference_wav(stereo)
+    assert not v3["ok"] and any("mono" in r for r in v3["reasons"])
+
+    v4 = voice_lib.validate_reference_wav(tmp_path / "nope.wav")
+    assert not v4["ok"] and v4["error"] == "missing file"
+
+
+def test_add_voice_refuses_a_bad_clip_and_registers_a_good_one(lib, tmp_path):
+    voice_lib, store, refs = lib
+    bad = _ref_wav(tmp_path / "bad.wav", seconds=1.0)
+    r = voice_lib.add_voice("shorty", "ar", bad, store_path=store, refs_dir=refs)
+    assert not r["ok"] and "قصير" in r["error"]
+    assert voice_lib.list_voices(voice_lib.load_store(store)) == []   # nothing registered
+
+    good = _ref_wav(tmp_path / "good.wav", seconds=9.0)
+    ok = voice_lib.add_voice("صوت_عربي", "ar", good, note="صوت المالك",
+                             store_path=store, refs_dir=refs)
+    assert ok["ok"] and Path(ok["ref"]).exists()
+    listed = voice_lib.list_voices(voice_lib.load_store(store))
+    assert len(listed) == 1 and listed[0]["name"] == "صوت_عربي"
+    assert listed[0]["is_default"] is True and listed[0]["has_ref"] is True
+
+
+def test_default_voice_per_language_and_fallthrough(lib, tmp_path, monkeypatch):
+    voice_lib, store, refs = lib
+    # hermetic: no host Piper voices leaking into the verdict
+    monkeypatch.setattr(voice_lib, "_piper_list", lambda: (True, []))
+    ar = _ref_wav(tmp_path / "ar.wav", seconds=8.0)
+    voice_lib.add_voice("ar1", "ar", ar, store_path=store, refs_dir=refs)
+    assert voice_lib.default_voice("ar", voice_lib.load_store(store))["name"] == "ar1"
+
+    # Hebrew exists as a PROFILE but its clip is gone -> not available, and
+    # the studio must not pretend a voice exists.
+    he = _ref_wav(tmp_path / "he.wav", seconds=8.0)
+    voice_lib.add_voice("he1", "he", he, store_path=store, refs_dir=refs)
+    Path(voice_lib.get_voice("he1", voice_lib.load_store(store))["ref"]).unlink()
+    assert voice_lib.default_voice("he", voice_lib.load_store(store)) is None
+    rep = voice_lib.library_report(store)
+    assert rep["languages"]["he"]["recorded"] is True
+    assert rep["languages"]["he"]["available"] is False
+    assert rep["languages"]["en"]["recorded"] is False
+
+
+def test_delete_voice_repoints_or_clears_the_default(lib, tmp_path):
+    voice_lib, store, refs = lib
+    for name in ("ar1", "ar2"):
+        voice_lib.add_voice(name, "ar", _ref_wav(tmp_path / f"{name}.wav", 8.0),
+                            store_path=store, refs_dir=refs)
+    voice_lib.set_default("ar", "ar2", store_path=store)
+    r = voice_lib.delete_voice("ar2", store_path=store)
+    assert r["ok"]
+    st = voice_lib.load_store(store)
+    assert st["defaults"]["ar"] == "ar1"          # never dangles
+    voice_lib.delete_voice("ar1", store_path=store)
+    assert "ar" not in voice_lib.load_store(store)["defaults"]
+
+
+def test_set_default_rejects_a_language_mismatch(lib, tmp_path):
+    voice_lib, store, refs = lib
+    voice_lib.add_voice("en1", "en", _ref_wav(tmp_path / "en.wav", 8.0),
+                        store_path=store, refs_dir=refs)
+    r = voice_lib.set_default("ar", "en1", store_path=store)
+    assert not r["ok"] and "en" in r["error"]
+
+
+def test_named_voice_synthesis_is_honest_and_isolated(lib, tmp_path, monkeypatch):
+    """A named voice that does not exist must fail loudly, NOT silently speak
+    with the per-language reference (the Arabic-accent trap)."""
+    import voice.core.tts as ttsmod
+    from voice.core.tts import VoiceTTS
+
+    voice_lib, store, refs = lib
+    monkeypatch.setattr(voice_lib, "STORE_PATH", store)
+    seen = []
+
+    def synth_fn(text, lang, ref):
+        seen.append((text, lang, ref))
+        return {"ok": True, "path": "fake://x", "sr": 24000, "engine": "fake"}
+
+    t = VoiceTTS(synth_fn=synth_fn)
+    missing = t.synthesize("مرحبا", "ar", voice="ghost")
+    assert not missing["ok"] and "ghost" in missing["error"]
+    assert seen == []                       # nothing was synthesized at all
+
+    voice_lib.add_voice("he_voice", "he", _ref_wav(tmp_path / "he.wav", 8.0),
+                        store_path=store, refs_dir=refs)
+    ok = t.synthesize("שלום", "he", voice="he_voice")
+    assert ok["ok"] and ok["voice"] == "he_voice"
+    assert seen and seen[-1][2].endswith("he_voice.wav")   # the NAMED ref
+
+
+def test_library_report_names_the_engine_per_language(lib, tmp_path, monkeypatch):
+    """Hebrew has no XTTS voice: the board must say Piper, not 'ready'."""
+    from voice.core import voices as voice_lib
+
+    voice_lib, store, refs = lib
+    monkeypatch.setattr(voice_lib, "_piper_list", lambda: (True, [
+        {"id": "ar_JO-kareem-medium", "language": "ar_JO"},
+        {"id": "he_IL-saspeech-medium", "language": "he_IL"},
+    ]))
+    voice_lib.add_voice("ar1", "ar", _ref_wav(tmp_path / "a.wav", 8.0),
+                        store_path=store, refs_dir=refs)
+    rep = voice_lib.library_report(store)
+    assert rep["languages"]["ar"]["engine"] == "xtts"     # has a clone ref
+    assert rep["languages"]["he"]["engine"] == "piper"    # no XTTS he -> piper
+    assert rep["languages"]["he"]["available"] is True
+    assert rep["languages"]["en"]["engine"] is None and rep["languages"]["en"]["available"] is False
+
+
+def test_corrupt_store_reads_as_empty_not_a_crash(lib):
+    voice_lib, store, _ = lib
+    store.write_text("{not json", encoding="utf-8")
+    assert voice_lib.load_store(store)["voices"] == {}
 
 
 # --------------------------------------------------------------------------

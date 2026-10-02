@@ -28,6 +28,33 @@ web/voice/               # Arabic-first RTL mic UI (mic → WS → playback)
 | LLM | Aali :5055 (`/api/ask`) | key from AALI_VOICE_API_KEY / AALI_API_KEY; sessions `voice-*` |
 | TTS | XTTS-v2 (voice-clone) + Piper fallback | refs in D:/hwk-models/voice/references/ |
 
+## Phase 2 — voice asset studio (2026-10-02)
+```
+scripts/voice/core/voices.py   # voice library: profiles + validation
+scripts/voice/studio.py        # CLI: voices | audition | batch
+scripts/voice_studio.bat       # double-click launcher
+```
+- **Profiles**: name / language / reference wav / note, stored at
+  D:/hwk-data/voice/voices.json; the clip is copied into the managed
+  references dir, and each language has one default voice.
+- **Validation before admission**: mono, 16-bit, ≥16kHz, 4–30s, level,
+  clipping — refused with the real reason, because a bad clip clones into
+  a robotic voice.
+- **Audition** a voice; **batch** a plain text script (blank line =
+  utterance) into numbered wavs + `manifest.jsonl`, resuming a partial run.
+
+### Hebrew is not an XTTS language (verified, not assumed)
+XTTS-v2 ships 17 languages (en es fr de it pt pl tr ru nl cs ar zh-cn hu ko
+ja hi) — **no Hebrew**. The first real batch failed with
+`NotImplementedError: Language 'he' is not supported.`; Phase 1's claim of
+AR/HE/EN XTTS support was wrong.
+
+Hebrew now routes to Piper with the installed `he_IL-saspeech-medium`
+voice, matched by language (`_piper_voice_for`) — never the house default,
+which would read English/Hebrew in the Arabic voice. Measured: 2.7s per
+Hebrew line vs 20–160s for an XTTS line on this CPU.
+`engine_report().lang_support` states the truth per language.
+
 ## Voice cloning
 XTTS-v2 in D:/hwk-models/xtts-v2 (plain files, CCCPML license accepted by
 the owner's brief). AR ref `arabic_male.wav` exists; HE/EN refs are
@@ -60,6 +87,12 @@ no fabrication of a "native" voice).
 D:/hwk-tools/voice-venv/Scripts/python.exe scripts/voice/server.py   # servers
 D:/hwk-tools/voice-venv/Scripts/python.exe scripts/voice/cli.py      # live mic
 D:/hwk-tools/voice-venv/Scripts/python.exe scripts/voice/cli.py --file x.wav --save out.wav
+
+scripts\voice_studio.bat voices                                    # what can speak what
+scripts\voice_studio.bat voices check clip.wav                      # validate a recording
+scripts\voice_studio.bat voices add my_voice --lang ar --file clip.wav
+scripts\voice_studio.bat audition --lang he
+scripts\voice_studio.bat batch my_script.txt                        # -> D:/hwk-data/voice_out/<name>/
 ```
 **AALI_VOICE_API_KEY is required when :5055 runs in key mode** (it does —
 master key in D:/hwk-data/aali_master_key.txt). Without it the house
@@ -73,6 +106,9 @@ voice_probe.log, voice_e2e.log (content-free).
 ## Honest limits (Phase 1)
 - CPU TTS first chunk ≈ 20-25s (RTF ~4-6x). Natural > fast per the brief;
   streaming + short first sentences mask part of it. GPU later = ~10x.
+- Hebrew is a PIPER voice, not a clone: it is a different, flatter voice
+  than the Arabic XTTS clone. Cloning a Hebrew reference would need an
+  engine that supports Hebrew — none is installed locally.
 - No echo cancellation: barge-in uses VAD gating; Aali's own playback may
   trigger it. Wired headphones recommended.
 - Whisper hallucinates on silence (classic whisper failure) — the VAD
@@ -89,11 +125,14 @@ voice, 39.4s turn wall cold (0s cached). Cold XTTS synth ≈ 26s (49 chars)
 / 63s (180 chars) on CPU — hence the engine char cap above.
 
 ## Tests
-tests/test_voice_agent.py — 30 tests: language detect/chunking (incl. the
+tests/test_voice_agent.py — 42 tests: language detect/chunking (incl. the
 engine char cap), tracker, segmenter state machine, barge-in gate, STT
-gating (fake whisper), TTS seams + cache, pipeline turn e2e (fakes) +
-honest ask failure, ask_aali contract + key-mode 404 (hermetic HTTP
-server), UTF-8 stdio guards, WS e2e with the FAKE pipeline (skips where
-websockets is absent).
-Models are NEVER loaded by the suite; the real-model gate is probe_xtts.py
-+ the CLI --file run (see D:/hwk-data/voice_e2e.log).
+gating (fake whisper), TTS seams + cache + XTTS language set + Hebrew
+routing + language-matched Piper voice, the voice library (validation of
+every real defect, CRUD, defaults, named-voice isolation), pipeline turn
+e2e (fakes) + honest ask failure, ask_aali contract + key-mode 404
+(hermetic HTTP server), UTF-8 stdio guards, WS e2e with the FAKE pipeline
+(skips where websockets is absent).
+Models are NEVER loaded by the suite; the real-model gate is probe_xtts.py,
+the CLI --file run and `studio batch` (see D:/hwk-data/voice_e2e.log and
+D:/hwk-data/voice_out/).
