@@ -1,7 +1,7 @@
 # Hebrew data collection — Aali's second language (AR + HE)
 
 - owner: buffy (this PC, Freebuff session)
-- status: in-progress — PHASE 1 (setup + license audit)
+- status: in-progress — PHASE 3.5 (source expansion; Sefaria first)
 - started: 2026-10-01
 - owner GO: "APPROVED: Hebrew Phase 1 — on my go. Do Phase 1 only"
   (2026-10-01). WAIT after each phase; nothing enters raw/ without a
@@ -27,6 +27,12 @@ tokenized shards → Phase D continuation + future SFT. Target 5–10B tokens
   niqqud stance, doc skeletons.
 - PHASE 2: Hebrew Wikipedia dump (download + extract) — after owner go.
 - PHASE 3: Wikisource, Wiktionary, Ben-Yehuda, PD books.
+- PHASE 3.5 (owner GO 2026-10-02): expand sources toward ~5-6B tokens
+  pre-cleaning — [3.5.1] Sefaria (PD+CC-BY religious corpus, THE BIG WIN),
+  [3.5.2] open-access academic Hebrew, [3.5.3] permissive code comments,
+  [3.5.4] Common Crawl Hebrew (CAUTION, last), [3.5.5] hewiktionary
+  re-eval on shortfall. License verified FIRST per source; checksums
+  mandatory; NO cleaning/tokenization yet; report after EACH source.
 - PHASE 4: clean + dedup (MinHash/near-dup, Unicode NFC, unniqqud).
 - PHASE 5: quality filter (language detect, length, toxicity).
 - PHASE 6: tokenize (per TOKENIZER_DECISION.md) → D:/hwk-data/tokens/hebrew/.
@@ -58,6 +64,41 @@ tokenized shards → Phase D continuation + future SFT. Target 5–10B tokens
   Ben-Yehuda pass mid-run — relaunched detached per house convention).
   fetch_benyehuda.py kept as a documented dead-end (zip path 404s; clone
   is the working path).
+- 2026-10-02 PHASE 3.5 IN PROGRESS (owner GO received; sources expanded):
+  [3.5.1] SEFARIA — the repo was restructured (Sept 2026) into a
+  lightweight index (books.json: 19,754 entries / 13,548 Hebrew) plus the
+  public GCS bucket gs://sefaria-export/ (~26 GB of texts; verified
+  live). LICENSE.md: NO overall license — per-text `license` field. EVERY
+  Hebrew entry was Range-probed (first 8 KB — the license field sits in
+  the metadata header, verified on real files) BEFORE any download:
+  allowed 6,005 rows (Public Domain 5,292 + PD 140 + CC-BY 295 +
+  CC-BY-SA 246 + CC0 32); excluded 6,257 with no license (6,214 merged
+  composites — merged files carry no license — + 43 specific versions),
+  931 "unknown", 354 CC-BY-NC, 1 probe failure. Excluded files were
+  NEVER downloaded. Fetch: one best-licensed version per title → 5,423
+  files, 1.90 GB, per-file sha256 (raw/sefaria/manifest.jsonl), 1
+  unsafe-path skip, 0 download errors. Extraction →
+  extracted/sefaria/sefaria_versions.jsonl. Script:
+  scripts/fetch_sefaria.py (probe/fetch/extract; recon left in
+  scripts/_probe_sefaria.py).
+  [3.5.2] ACADEMIC — the win is the KNESSET CORPUS
+  (huggingface.co/datasets/HaifaCLGroup/KnessetCorpus, CC-BY-SA-4.0
+  verified live on the card; University of Haifa/IAHLT/TAU-Yaffo; ~35M
+  sentences / 384M+ tokens of 1992-2024 parliamentary Hebrew): 120
+  no-morph sentence shards (plenary+committee), 3.67 GB, ALL
+  sha256-verified vs the LFS oid (raw/knesset/manifest.jsonl). Extraction
+  keeps ONLY sentence_text + public protocol metadata — NO speaker
+  names/genders/factions (privacy-first) — and skips is_ocr_output rows
+  (paper documents heavy OCR errors). Script: scripts/fetch_knesset.py.
+  Dead-ends documented: arXiv (no Hebrew full-text mass), TAU/HUJI/
+  Technion repositories (no license-clean bulk path; TAU library terms
+  prohibit systematic downloading), HeSum/HebDB/IsraParlTweet (news /
+  speech / tweets — rejected). PENDING OWNER: HPLT v2 Hebrew gated
+  (HTTP 401 without accepting terms), fineweb-2 heb_Hebr license =
+  odc-by (not in the owner's allowed list); raw Common Crawl NOT started
+  (riskiest, owner said do it last). [3.5.3] code comments: needs a
+  GitHub token (API auth) — awaiting owner decision. [3.5.5]
+  hewiktionary: still deferred to the Phase 5 shortfall check.
 - 2026-10-01 PHASE 2 COMPLETE (owner GO received): hewiki-20261001 dump
   downloaded as 6 parts (1.151 GB), every part SHA1-verified against the
   official dumpstatus.json manifest — scripts/fetch_hebrew_wiki.py
