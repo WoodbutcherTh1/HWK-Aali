@@ -48,8 +48,11 @@ bash scripts/build_all_macos.sh cli        # -> build-desktop/dist/aali-cli
   xattr -dr com.apple.quarantine build-desktop/dist/Aali-Studio.app
   ```
 - **التنفيذ**: `chmod +x build-desktop/dist/aali-cli`
-- **أيقونة `.icns`**: إن لم تكن `build-desktop/icon.icns` موجودة، سيأتي
-  التطبيق بأيقونة بايثون الافتراضية (بناء اختياري، لا يُفشل).
+- **أيقونة `.icns`**: مبنية الآن داخل المستودع (`build-desktop/icon.icns`)
+  ومولَّدة من صور PNG الموجودة بـ `python scripts/make_icon_icns.py`.
+  ولنسبة: PyInstaller لا يعود إلى أيقونة افتراضيةعند غياب الملف، بل يرمي `FileNotFoundError`، وقاصًا صار الփspec يقبل `icon=None` صراحةً: أيقونة مفقودة تعني أيقونة بلا هوية، ولا تعني فشل البناء.
+  بل يرمي `FileNotFoundError`، صار الـspec يقبل `icon=None` صراحةً: أيقونة
+  مفقودة تعني أيقونة بلا هوية، **ولا** تعني فشل البناء.
 - **بُني على Apple Silicon؟** `pyinstaller` ينتج ثنائياً لبنية الجهاز
   الذي بُني عليه. للبناء لأن معمارية Intel شغّله على Rosetta.
 
@@ -139,8 +142,15 @@ AGENTS.md أصلاً («لا ت hardcode مسارات المستخدمabsolute �
 
 ## 7. حدود صادقة
 
-1. **لم يُبنَ شيء على ماك بعد.** كل ما فوق مُختبر على ويندوز فقط؛ إجابات
-   الماك ستأتي من `portability_check.py` على جهازك لا مني.
+1. **أول تشغيل حقيقي على ماك تم فعلاً** (MacBook Air · Darwin 25.6.0 arm64 ·
+   Python 3.13.7 · 2026-10-03) وكشف عيبين عيبين حقيقيين لم يكن ليلاحظهما على ويندوز:
+   **(a)** البناء مات في خطوة `BUNDLE` بـ `FileNotFoundError: icon.icns` بعد
+   14 ثانية من تحليل ناجح — أيقونة مفقودة أوقفت بناءًا كاملاً.
+   **(b)** `build_all_macos.sh check` نزل إلى `python3` النظامي بلا flask، فقال
+   «studio_server imports: No module named 'flask'» — حكم على المفسّر ولا على ماك.
+   كلاهما مُصلَح ومُختبَر (انظر `scripts/make_icon_icns.py` وهمر الاختيار).
+   **ولما يزال macOS غير مُصدّق عليه بالكامل:** البناء الذي مات قبل
+   الإصلاح لم يكتملب، والحكم نهائي يأتي من `build_all_macos.sh check`.
 2. **حزمة `.app` غير موقّعة** → Gatekeeper سيزعجك مرة واحدة (الحل في §2).
 3. **آلة Brain تبقى على ويندوز.** بدونها لا يوجد نموذج؛ العملاء مجرد واجهات.
 4. **لينكس يحتاج WebKit2GTK** لتظهر النافذة:

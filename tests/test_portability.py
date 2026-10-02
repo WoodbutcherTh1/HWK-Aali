@@ -301,6 +301,107 @@ def test_portability_check_json_is_machine_readable():
     assert isinstance(data["results"], list) and data["results"]
 
 
+# ————— the MacBook's own report, turned into contract —————
+# The owner's first real macOS run (Darwin 25.6.0 arm64, Python 3.13.7) came
+# back with two genuine defects that every Windows-only test had missed:
+#   1. the build died at BUNDLE — FileNotFoundError: icon.icns not found —
+#      AFTER 14s of successful analysis, over a cosmetic asset, because the
+#      spec passed icon= unconditionally and PyInstaller has no fallback;
+#   2. `build_all_macos.sh check` fell through to the system python3, which has
+#      no flask, so the report said "studio_server imports: No module named
+#      'flask'" — a verdict about the wrong interpreter, not about macOS.
+# Both are pinned here so a Mac can never be blamed for them again.
+
+ICNS = REPO / "build-desktop" / "icon.icns"
+STUDIO_SPEC = STUDIO / "Aali-Studio.spec"
+
+
+def test_the_icns_is_committed_so_a_mac_clone_builds_first_try():
+    assert ICNS.is_file(), (
+        "build-desktop/icon.icns must be committed: a Mac clone has no way to "
+        "make one, and PyInstaller refuses to bundle without it")
+    data = ICNS.read_bytes()
+    assert data[:4] == b"icns"
+    total = int.from_bytes(data[4:8], "big")
+    assert total == len(data), f"ICNS header says {total}, file is {len(data)}"
+    assert len(data) > 1000, "an .icns this small is not an icon"
+
+
+def test_the_icns_generator_round_trips_the_committed_file():
+    sys.path.insert(0, str(REPO / "scripts"))
+    import make_icon_icns
+
+    entries = make_icon_icns.parse_icns(ICNS.read_bytes())
+    assert entries, "no icon slots in the committed .icns"
+    for ostype, payload_len in entries.items():
+        assert payload_len > 0, ostype
+    # every source PNG must really be the size its OSType means
+    for ostype, filename, declared in make_icon_icns.SLOTS:
+        source = REPO / "build-desktop" / filename
+        assert source.is_file(), filename
+        assert make_icon_icns.png_size(source.read_bytes()) == (declared, declared)
+
+
+def test_the_icon_generator_runs_as_a_script():
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "make_icon_icns.py"), "--check"],
+        capture_output=True, text=True, env=env, timeout=120)
+    assert result.returncode == 0, result.stdout[-600:] + result.stderr[-400:]
+    assert "OK" in result.stdout
+
+
+def test_the_spec_cannot_die_over_a_missing_icon():
+    source = _source(STUDIO_SPEC)
+    assert "def icon_or_none(" in source, (
+        "the spec must resolve its icon defensively — PyInstaller raises "
+        "FileNotFoundError instead of falling back to a default")
+    # no unconditional literal icon path may survive anywhere in the spec
+    assert 'icon=os.path.join(ROOT, "build-desktop", "icon' not in source
+    assert "icon=ICNS" in source and "icon=ICO" in source
+
+
+def test_the_mac_build_script_generates_the_icon_instead_of_excusing_itself():
+    source = _source(STUDIO / "build-mac.sh")
+    assert "make_icon_icns.py" in source, (
+        "build-mac.sh must BUILD the icon, not claim a missing one is harmless "
+        "— that claim is what made the Mac run fail at the last step")
+    assert "only costs the pretty icon" not in source
+
+
+def test_the_check_runs_on_an_interpreter_that_can_import_the_client():
+    source = _source(REPO / "scripts" / "build_all_macos.sh")
+    assert "check_python()" in source
+    assert 'import flask' in source, (
+        "the check must pick a venv that HAS flask; the system python3 verdict "
+        "was about the interpreter, not about macOS")
+    body = source.split("run_check()", 1)[1]
+    assert '"$check_py" scripts/portability_check.py' in body
+    assert '"$PY_BOOT" scripts/portability_check.py' not in body
+
+
+def test_a_missing_flask_says_what_to_do_about_it():
+    source = _source(REPO / "scripts" / "portability_check.py")
+    assert "sys.executable" in source, (
+        "the bare 'No module named flask' told the owner nothing; the report "
+        "must name the interpreter that failed and the command that fixes it")
+    assert "build_all_macos.sh check" in source
+
+
+def test_a_dead_brain_url_is_reported_with_the_url_that_was_tried():
+    """On a Mac, 127.0.0.1:5055 is the MacBook — 'connection refused' with no
+    URL is a riddle. The probe must print what it dialled."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    import portability_check
+
+    portability_check.RESULTS.clear()
+    portability_check.probe_brain("http://127.0.0.1:9")
+    brain = [r for r in portability_check.RESULTS if "brain" in r["name"]]
+    assert brain, "the brain probe recorded nothing"
+    assert "http://127.0.0.1:9" in brain[0]["detail"]
+    assert brain[0]["critical"] is False, "an unreachable brain is not a port failure"
+
+
 # ————— the phones, stated honestly —————
 
 def test_mobile_access_is_documented_as_web_not_a_desktop_app():

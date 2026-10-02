@@ -147,6 +147,15 @@ def probe_sandbox() -> None:
 def probe_studio() -> None:
     try:
         import studio_server
+    except ModuleNotFoundError as exc:
+        # The Mac's first run failed exactly here and the bare
+        # "No module named 'flask'" said nothing about what to DO about it.
+        # Name the interpreter and the one command that fixes it.
+        record("studio_server imports", False,
+               f"{exc} — this interpreter ({sys.executable}) cannot import the "
+               f"Studio backend. Run the check on a venv that has it: "
+               f"bash scripts/build_all_macos.sh check")
+        return
     except Exception as exc:  # noqa: BLE001
         record("studio_server imports", False, str(exc))
         return
@@ -228,15 +237,22 @@ def probe_cli() -> None:
 # ————— 7. the brain —————
 
 def probe_brain(url: str) -> None:
+    probe = url.rstrip("/") + "/api/health"
     try:
-        with urllib.request.urlopen(url.rstrip("/") + "/api/health", timeout=5) as r:
+        with urllib.request.urlopen(probe, timeout=5) as r:
             health = json.loads(r.read())
         record("brain /api/health reachable", bool(health.get("ok")),
-               json.dumps(health, ensure_ascii=False)[:110], critical=False)
+               f"{probe} -> {json.dumps(health, ensure_ascii=False)[:90]}",
+               critical=False)
     except Exception as exc:  # noqa: BLE001
+        # Always print the URL that was tried: "connection refused" on a Mac
+        # usually just means the default 127.0.0.1 pointed at the MacBook
+        # instead of the PC, and that is invisible without it.
         record("brain /api/health reachable", False,
-               f"{type(exc).__name__}: {exc} — is the PC server up, and is this "
-               f"URL the PC's LAN address?", critical=False)
+               f"{probe} -> {type(exc).__name__}: {exc} — the brain runs on the "
+               f"Windows PC. Re-run with the PC's address, e.g. "
+               f"--brain http://192.168.1.13:5055 (or set AALI_BRAIN_URL).",
+               critical=False)
         return
     key = ""
     key_file = Path("D:/hwk-data/aali_master_key.txt")
@@ -310,7 +326,9 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--brain", default=os.getenv("AALI_BRAIN_URL",
                                                     "http://127.0.0.1:5055"),
-                        help="the brain URL to probe (default 127.0.0.1:5055)")
+                        help="the brain URL to probe — on a Mac this must be the "
+                             "PC's LAN address, not 127.0.0.1 "
+                             "(e.g. --brain http://192.168.1.13:5055)")
     args = parser.parse_args()
     try:
         HOST = probe_host()

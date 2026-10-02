@@ -250,6 +250,37 @@ in parallel:
   fake brain speaking :5055's exact vocabulary and really writing files.
   PART 3 (Aali Reach) awaits the owner's go.
 
+- **macOS VERIFIED by the owner's MacBook + two real bugs fixed (2026-10-03,
+  Buffy)**: the first honest cross-OS run (MacBook Air, Darwin 25.6.0 arm64,
+  Python 3.13.7) came back through `scripts/portability_check.py`. PASSED on
+  macOS: config dir = `~/Library/Application Support/AaliStudio`, data root =
+  `~/hwk-data` (never a missing `D:`), sandbox read+write, **6/6 escape
+  attempts refused**, Arabic CLI shaping + bidi idempotence, non-http
+  `open_external` refused. TWO DEFECTS the Windows-only suite could not see:
+  **(1)** the Studio build died at `BUNDLE` with
+  `FileNotFoundError: build-desktop/icon.icns not found` AFTER 14s of
+  successful analysis and COLLECT — because the spec passed `icon=`
+  unconditionally and **PyInstaller raises instead of falling back to a
+  default**, while `build-mac.sh` printed the lie "a missing .icns only costs
+  the pretty icon". Fixed both sides: `scripts/make_icon_icns.py` (stdlib
+  ICNS writer, builds a real 5-slot `icon.icns` from the repo's PNGs and
+  round-trips it before writing) + the committed asset + a defensive
+  `icon_or_none()` in the spec. **(2)** `build_all_macos.sh check` fell
+  through to the system `python3` (no flask) and reported "studio_server
+  imports: No module named 'flask'" — a verdict about the INTERPRETER, not
+  about macOS; `check_python()` now prefers any repo venv that can import the
+  client and creates `.venv-studio` if none can, and prints which interpreter
+  it used. Both failure messages are now actionable (the flask one names
+  `sys.executable`, the brain one prints the URL it dialled — on a Mac the
+  default 127.0.0.1 IS the MacBook). EARLIER the same day: every `.sh` was
+  CRLF, which `read_text` hid from the shebang tests — `.gitattributes` now
+  pins `*.sh text eol=lf` (the `.bat` CRLF rule stays) with a blob-level
+  tripwire. LESSON: a Mac clone is the only place macOS answers can come
+  from, and **the docs are not evidence** — `docs/PORTING.md` asserted the
+  missing icon was harmless and it was not. Tests: tests/test_portability.py
+  42 (8 new, all from the Mac's report); suite 1419 green / 15 skipped.
+  STILL UNVERIFIED BY ME: the macOS build+check after these fixes — the
+  owner's next paste decides.
 - **39-case exam RESTORED + unclobberable; C: 100%→87% (2026-10-01, Buffy
   — DONE)**: tasks/restore-39case-exam.md + tasks/c-drive-cleanup.md,
   commit 84d6482. ROOT CAUSE of v7's 26-vs-39 (morning note's "soup.exe

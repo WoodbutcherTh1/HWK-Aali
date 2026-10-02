@@ -80,9 +80,40 @@ build_cli() {
 }
 
 # ----------------------------------------------------------------- check
+# The check MUST run on an interpreter that can actually import the clients.
+# The owner's first Mac run proved the trap: PY_BOOT fell through to the system
+# python3, which has no flask, and the report honestly said
+# "studio_server imports: No module named 'flask'" — a verdict about the wrong
+# interpreter, not about macOS. Any repo venv with flask wins over system python.
+VENV_STUDIO=".venv-studio"
+
+check_python() {
+  for candidate in "$VENV_STUDIO/bin/python" ".venv-desktop/bin/python" \
+                   ".venv/bin/python" ".venv/Scripts/python.exe"; do
+    [ -x "$candidate" ] || continue
+    if "$candidate" -c "import flask" >/dev/null 2>&1; then
+      printf '%s' "$candidate"; return 0
+    fi
+  done
+  # Nothing has flask yet. Build the studio venv rather than report a verdict
+  # from an interpreter that cannot import half the thing under test.
+  say "[check] no interpreter has flask — creating $VENV_STUDIO (one time)..."
+  if [ ! -d "$VENV_STUDIO" ]; then
+    "$PY_BOOT" -m venv "$VENV_STUDIO" >/dev/null
+  fi
+  "$VENV_STUDIO/bin/python" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+  "$VENV_STUDIO/bin/python" -m pip install --quiet flask pywebview >/dev/null 2>&1 || true
+  if "$VENV_STUDIO/bin/python" -c "import flask" >/dev/null 2>&1; then
+    printf '%s' "$VENV_STUDIO/bin/python"; return 0
+  fi
+  printf '%s' "$PY_BOOT"
+}
+
 run_check() {
   say ""; say "=== portability self-test (no build) ==="
-  "$PY_BOOT" scripts/portability_check.py "$@"
+  local check_py; check_py="$(check_python)"
+  say "[check] interpreter: $check_py  ($("$check_py" --version 2>&1))"
+  "$check_py" scripts/portability_check.py "$@"
 }
 
 case "$WHAT" in

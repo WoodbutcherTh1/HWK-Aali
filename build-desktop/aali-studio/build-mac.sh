@@ -33,11 +33,22 @@ if [ ! -d "$VENV" ]; then
 fi
 PY="$VENV/bin/python"
 
-# --- optional icon (a missing .icns only costs the pretty icon) -----------
+# --- icon ------------------------------------------------------------------
+# The owner's first Mac build died HERE, at BUNDLE, with
+#   FileNotFoundError: Icon input file .../build-desktop/icon.icns not found
+# after 14 seconds of successful analysis and collection — because the spec
+# passed icon= unconditionally and PyInstaller does NOT fall back to a default.
+# So the icon is now generated from the repo's own PNGs, and the spec is
+# defensive on top of that (icon=None when absent). A missing icon must never
+# cost the build again.
 if [ ! -f build-desktop/icon.icns ]; then
-  say "[studio] note: build-desktop/icon.icns is missing — the app gets the"
-  say "         default Python icon. (It is a binary asset; generate it on a"
-  say "         machine that has iconutil, or copy one in.)"
+  say "[studio] no icon.icns — generating it from the repo PNGs..."
+  if python3 scripts/make_icon_icns.py; then
+    say "[studio] icon ready"
+  else
+    say "[studio] WARNING: could not build icon.icns. The spec now tolerates a"
+    say "         missing icon, so the build continues without one."
+  fi
 fi
 
 # --- build -----------------------------------------------------------------
