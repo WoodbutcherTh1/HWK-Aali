@@ -33,6 +33,7 @@ from voice.core.language_detect import (
     detect_script_lang,
 )
 from voice.core.vad import SpeechSegmenter
+from voice.plugins import base as plugins
 
 DEFAULT_BASE_URL = "http://127.0.0.1:5055"
 
@@ -143,6 +144,44 @@ class VoicePipeline:
             return {"ok": False, "error": "empty transcription", "sid": state["sid"]}
         self.lang_tracker.update(stt_res.get("lang"), float(stt_res.get("confidence", 0.0)))
 
+        # Plugin hook: a VERTICAL may answer this turn from its own data
+        # without spending an LLM call. Absent/None -> normal path below.
+        meta: Dict[str, Any] = {"sid": state["sid"], "lang": stt_res.get("lang")}
+        direct = plugins.apply_turn_start(text, stt_res.get("lang") or "ar", meta)
+        if direct:
+            text = plugins.apply_transcript(text, stt_res.get("lang") or "ar", meta)
+            direct = plugins.apply_reply(direct, meta)
+            chunks = chunk_for_tts(direct)
+            items = []
+            state["tts_speaking"] = True
+            try:
+                for chunk in chunks:
+                    chunk_lang = detect_script_lang(chunk) or stt_res.get("lang") or "ar"
+                    r = self.tts.synthesize(chunk, chunk_lang)
+                    item = {"text": chunk, "lang": chunk_lang,
+                            "ok": bool(r.get("ok")), "path": r.get("path"),
+                            "sr": r.get("sr"), "engine": r.get("engine")}
+                    if not item["ok"]:
+                        item["error"] = r.get("error", "tts failed")
+                    items.append(item)
+                    if on_chunk:
+                        try:
+                            on_chunk(item)
+                        except Exception:
+                            pass
+            finally:
+                state["tts_speaking"] = False
+            items = plugins.apply_chunks(items)
+            result = {
+                "ok": all(c["ok"] for c in items) if items else False,
+                "sid": state["sid"], "user_text": text,
+                "user_lang": stt_res.get("lang"), "reply": direct,
+                "chunks": items, "partial": any(not c["ok"] for c in items),
+                "handled_by": meta.get("handled_by"),
+            }
+            plugins.apply_turn_done(result)
+            return result
+
         # Wake word: a turn that does not contain the phrase is heard but NOT
         # answered. Honest cost note: this is a FILTER over an utterance we
         # already transcribed, not a low-power wake engine — it saves the
@@ -166,6 +205,7 @@ class VoicePipeline:
             return {"ok": False, "error": str(exc) or type(exc).__name__,
                     "sid": state["sid"], "user_text": text}
         reply = (ask.get("reply") or "").strip()
+        reply = plugins.apply_reply(reply, meta) or reply
         if not reply:
             return {"ok": False, "error": "empty reply from Aali", "sid": state["sid"],
                     "user_text": text}
@@ -196,7 +236,8 @@ class VoicePipeline:
         finally:
             state["tts_speaking"] = False
         state["last_lang"] = self.lang_tracker.current
-        return {
+        out_chunks = plugins.apply_chunks(out_chunks)
+        result = {
             "ok": all(c["ok"] for c in out_chunks) if out_chunks else False,
             "sid": state["sid"],
             "user_text": text,
@@ -204,7 +245,10 @@ class VoicePipeline:
             "reply": reply,
             "chunks": out_chunks,
             "partial": any(not c["ok"] for c in out_chunks),
+            "handled_by": meta.get("handled_by"),
         }
+        plugins.apply_turn_done(result)
+        return result
 
     # -- status ---------------------------------------------------------------
     def status(self) -> Dict[str, Any]:

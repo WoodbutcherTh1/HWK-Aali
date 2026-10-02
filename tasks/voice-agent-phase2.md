@@ -1,8 +1,8 @@
 # Aali Voice — Phase 2 (Studio → Console → Quality → Verticals)
 
 - owner: buffy (this PC, Freebuff session)
-- status: in-progress — slices 1 (voice assets), 2 (console) and 3 (quality)
-  DONE and verified live; slice 4 open
+- status: DONE — all four slices built, verified live and committed.
+  Part 3 (“Reach”) is a separate package and still waits for the owner's go.
 - started: 2026-10-02
 - owner GO: "Start Part 2 of the voice package (Studio)" with ALL FOUR
   areas selected (voice assets, script-to-voice console, voice quality,
@@ -147,6 +147,31 @@ Echo cancellation itself is the browser's: the UI already requests
 `echoCancellation`/`noiseSuppression`/`autoGainControl`, which works because
 playback happens in the same Web Audio context. Headphones still advised.
 
-## Slice 4 — commercial verticals (local businesses)
-Not started. Built as voice PLUGINS over the existing interface
-(scripts/voice/plugins/base.py), not by forking the core loop.
+## Slice 4 — commercial verticals (DONE 2026-10-02)
+
+Built as PLUGINS over the Phase 1 interface — the core loop was not forked,
+and the interface that had been “interface only” since Phase 1 is now wired
+into the pipeline (apply_turn_start / apply_transcript / apply_reply /
+apply_chunks / apply_turn_done).
+
+`scripts/voice/plugins/business.py`: a local business answered on the phone
+from its OWN profile (hours per weekday, address, phone, prices, delivery,
+payment) in Arabic + Hebrew + English, **without an LLM call** — the result
+carries `handled_by: business`.
+
+What it refuses to do (each pinned by a test):
+- invent a field it does not have → answers “not set up yet”;
+- improvise an answer to a question it does not own → returns None and the
+  turn continues to Aali;
+- confirm a booking/order/payment → phone booking is not implemented, so it
+  says so and offers the person on duty IN THE CALLER'S LANGUAGE (an English
+  hand-off line inside an Arabic reply was caught by the live run);
+- speak the template's placeholder name → an unnamed shop gets a name-less
+  greeting instead of saying the literal string “business name”.
+
+Vertical integrity: a vertical that fails to load is NAMED in the log and
+skipped — it can never take the voice server down. Off unless enabled.
+
+Intent matching folds Arabic spelling variants; Arabic/Hebrew match by
+substring (they carry prefixes — השעות vs שעות) while Latin requires word
+boundaries, so “hi” never fires inside “this”.

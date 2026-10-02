@@ -872,6 +872,165 @@ def test_ws_barge_in_ignores_echo_but_honours_real_speech():
 
 
 # --------------------------------------------------------------------------
+# business vertical (Phase 2 slice 4)
+# --------------------------------------------------------------------------
+
+@pytest.fixture()
+def business():
+    from voice.plugins import base as plugins
+    from voice.plugins.business import BusinessPlugin, load_profile, write_template
+
+    plugins.clear()
+    profile = {
+        "name": "مطعم النخيل",
+        "hours": {"mon": {"open": "09:00", "close": "18:00"},
+                  "fri": {"closed": True}},
+        "address": "شارع الملك حسين، عمّان",
+        "phone": "+962 700 000 000",
+        "prices": {"قهوة": "1.5", "كبسة": "6"},
+        "delivery": "توصيل واستلام",
+        "payment": "نقداً وبطاقة",
+    }
+    yield BusinessPlugin(profile=profile), plugins
+    plugins.clear()
+
+
+def test_business_answers_hours_location_and_prices(business):
+    import time as _time
+
+    p, _ = business
+    hours_reply = p.on_turn_start("شو الدوام اليوم؟", "ar", {})
+    # the fixture closes on Friday, so the answer must follow TODAY
+    if _time.localtime().tm_wday == 4:
+        assert "مغلق" in hours_reply
+    else:
+        assert "09:00" in hours_reply and "18:00" in hours_reply
+    assert "شارع الملك حسين" in p.on_turn_start("وين الموقع؟", "ar", {})
+    assert "قهوة" in p.on_turn_start("بكم القهوة؟", "ar", {})
+    assert "+962" in p.on_turn_start("شو رقم التلفون؟", "ar", {})
+
+
+def test_business_answers_in_hebrew_and_english(business):
+    import time as _time
+
+    p, _ = business
+    friday = _time.localtime().tm_wday == 4
+    he = p.on_turn_start("מתי אתם פתוחים?", "he", {})
+    en = p.on_turn_start("what are your hours?", "en", {})
+    ar = p.on_turn_start("شو الدوام اليوم؟", "ar", {})
+    assert ("09:00" in he and "18:00" in he) if not friday else ("סגור" in he)
+    assert en.startswith("Today") and (("09:00" in en) if not friday else ("closed" in en))
+    assert ("09:00" in ar) if not friday else ("مغلق" in ar)
+
+
+def test_business_never_invents_a_booking(business):
+    p, _ = business
+    for ask, lang in (("ابغي احجز طاولة", "ar"), ("אני רוצה להזמין", "he"),
+                      ("I want to book a table", "en")):
+        reply = p.on_turn_start(ask, lang, {})
+        assert reply, "a booking request must still get an answer"
+        lowered = reply.lower()
+        assert not any(w in lowered for w in
+                       ("confirmed", "تم تأكيد", "אישור", "booked", "הזמנתך"))
+        assert "not" in lowered or "לא" in reply or "غير" in reply
+        # the hand-off line must be in the CALLER's language
+        if lang == "ar":
+            assert not any(w in reply for w in ("Might", "colleague"))
+        if lang == "he":
+            assert "אולי" in reply or "אעביר" in reply
+
+
+def test_business_never_speaks_the_template_placeholder_name():
+    from voice.plugins.business import BusinessPlugin, business_name
+
+    placeholder = BusinessPlugin(profile={"name": "business name"})
+    reply = placeholder.on_turn_start("مرحبا", "ar", {})
+    assert "business name" not in reply
+    assert business_name({"name": "business name"}) == ""
+    assert business_name({"name": "مطعم النخيل"}) == "مطعم النخيل"
+
+
+def test_business_says_not_set_up_instead_of_guessing():
+    from voice.plugins.business import BusinessPlugin
+
+    empty = BusinessPlugin(profile={})
+    assert "غير" in empty.on_turn_start("شو الدوام؟", "ar", {})       # Arabic
+    assert "לא" in empty.on_turn_start("מה השעות?", "he", {})          # Hebrew
+    assert "not been set up" in empty.on_turn_start("what are your hours?", "en", {})
+
+
+def test_business_ignores_anything_it_does_not_own(business):
+    p, _ = business
+    assert p.on_turn_start("من فاز بمباراة الأمس؟", "ar", {}) is None
+    assert p.on_turn_start("what is the weather?", "en", {}) is None
+
+
+def test_intent_matching_is_safe_per_script(business):
+    """Latin keywords need word boundaries ("hi" must not fire inside
+    "this"); Arabic/Hebrew ones are prefixes by nature ("השעות")."""
+    from voice.plugins.business import detect_intent
+
+    assert detect_intent("this is a machine") is None
+    assert detect_intent("hi there") == "greeting"
+    assert detect_intent("מה השעות שלכם?") == "hours"
+    assert detect_intent("بالدوام متى تفتحون؟") == "hours"
+
+
+def test_business_plugin_answers_a_turn_without_calling_aali(business):
+    p, plugins_registry = business
+    plugins_registry.register(p)
+    pipe = _pipe(reply="رد آلي")
+    # the caller asks the SHOP a question the plugin owns
+    pipe.stt = type("S", (), {"transcribe": lambda self, pcm, sr=16000: {
+        "text": "شو الدوام اليوم؟", "lang": "ar", "confidence": 0.9}})()
+    res = pipe.run_turn({"sample_rate": 16000, "pcm": _pcm(300), "ms": 300})
+    assert res["ok"] and res["handled_by"] == "business"
+    assert pipe._asks == []                    # the LLM was never asked
+    assert res["chunks"] and res["chunks"][0]["ok"] is True
+
+
+def test_business_plugin_off_by_default_means_aali_answers():
+    from voice.plugins import base as plugins
+
+    plugins.clear()
+    pipe = _pipe(reply="رد آلي")
+    pipe.stt = type("S", (), {"transcribe": lambda self, pcm, sr=16000: {
+        "text": "شو الدوام اليوم؟", "lang": "ar", "confidence": 0.9}})()
+    res = pipe.run_turn({"sample_rate": 16000, "pcm": _pcm(300), "ms": 300})
+    assert res["handled_by"] is None and len(pipe._asks) == 1
+    assert res["reply"] == "رد آلي"
+
+
+def test_business_profile_template_is_created_and_honest(tmp_path):
+    from voice.plugins.business import load_profile, write_template
+
+    path = tmp_path / "profile.json"
+    write_template(path)
+    data = load_profile(path)
+    assert data["name"] and "readme" in json.dumps(data).lower()
+
+
+def test_plugins_are_opt_in_and_a_broken_one_never_stops_the_server(capsys, tmp_path):
+    """A vertical must be enabled on purpose, and a bad entry may be
+    reported — it may never take the voice server down with it."""
+    from voice.core.server import _load_plugins
+    from voice.plugins import base as plugins
+
+    _load_plugins({"plugins": [{"name": "business", "enabled": False,
+                               "profile": str(tmp_path / "p.json")}]})
+    assert plugins.registered() == []          # off by default
+    capsys.readouterr()
+
+    _load_plugins({"plugins": [{"name": "business", "enabled": True,
+                               "profile": str(tmp_path / "p.json")}]})
+    assert [getattr(p, "name", "") for p in plugins.registered()] == ["business"]
+    assert "plugin enabled: business" in capsys.readouterr().out
+
+    _load_plugins({"plugins": [{"name": "nonexistent", "enabled": True}]})
+    assert "unknown plugin" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
 # studio API (fake engine, hermetic tmp dirs)
 # --------------------------------------------------------------------------
 

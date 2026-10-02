@@ -16,6 +16,16 @@ class VoicePlugin(Protocol):
 
     name: str
 
+    def on_turn_start(self, text: str, lang: str, meta: Dict[str, Any]) -> Optional[str]:
+        """Answer the turn WITHOUT calling Aali. Return a reply or None.
+
+        This is how a vertical (a shop's hours, prices, address) can answer
+        from its own data instead of spending an LLM call — and how it stays
+        honest: a plugin that has no data must return None and let the turn
+        continue, never invent an answer.
+        """
+        ...
+
     def on_transcript(self, text: str, lang: str, meta: Dict[str, Any]) -> Optional[str]:
         """Observe/rewrite the user transcript. Return new text or None."""
         ...
@@ -54,6 +64,19 @@ def clear() -> None:
     _REGISTRY.clear()
 
 
+def apply_turn_start(text: str, lang: str, meta: Dict[str, Any]) -> Optional[str]:
+    """First plugin that answers wins; None means "ask Aali as usual"."""
+    for p in _REGISTRY:
+        hook = getattr(p, "on_turn_start", None)
+        if hook is None:
+            continue
+        out = hook(text, lang, meta)
+        if out:
+            meta["handled_by"] = getattr(p, "name", "?")
+            return out
+    return None
+
+
 def apply_transcript(text: str, lang: str, meta: Dict[str, Any]) -> str:
     for p in _REGISTRY:
         hook = getattr(p, "on_transcript", None)
@@ -74,6 +97,17 @@ def apply_reply(reply: str, meta: Dict[str, Any]) -> str:
         if out:
             reply = out
     return reply
+
+
+def apply_turn_done(result: Dict[str, Any]) -> None:
+    for p in _REGISTRY:
+        hook = getattr(p, "on_turn_done", None)
+        if hook is None:
+            continue
+        try:
+            hook(result)
+        except Exception:
+            pass  # an observer must never break a finished turn
 
 
 def apply_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

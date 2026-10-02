@@ -57,3 +57,11 @@ llm:
 audio:
   in_sample_rate: 16000           # client -> server: 16k mono int16 PCM
   out_sample_rate: 24000          # server -> client: 24k mono int16 PCM (XTTS)
+
+# Phase 2 verticals (OFF unless enabled here). A vertical answers a turn
+# from its OWN data without an LLM call — and refuses to invent anything
+# it does not have. See docs/features/voice_agent.md.
+plugins:
+  - name: business
+    enabled: false
+    profile: D:/hwk-data/voice_business/profile.json

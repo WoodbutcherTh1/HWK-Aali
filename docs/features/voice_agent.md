@@ -79,6 +79,29 @@ Server: `scripts/voice/studio_api.py` (stdlib HTTP, loopback unless
 An unknown voice name is refused at the API boundary (400) whatever engine
 is loaded — the console never returns audio the caller did not ask for.
 
+### Commercial verticals (plugins)
+`scripts/voice/plugins/business.py` — a local business answering the phone
+from its OWN data: hours, address, phone, prices, delivery, payment — in
+Arabic, Hebrew and English, **without an LLM call** (the plugin answers the
+turn before Aali is asked; the result carries `handled_by`).
+
+Off unless enabled in config.yaml:
+
+    plugins:
+      - name: business
+        enabled: true
+        profile: D:/hwk-data/voice_business/profile.json
+
+The first run writes a starter profile to edit by hand. What it will never
+do: invent a field it does not have (it says “not set up yet”), improvise
+an answer to a question it does not own (the turn continues to Aali), or
+confirm a booking/order/payment — phone booking is not implemented, so it
+says so plainly and offers the person on duty, in the caller's language.
+Cultural neutrality is deliberate: no greeting or assumption beyond what
+the caller said. Intent matching folds Arabic spelling variants and matches
+Hebrew/Arabic by substring (they carry prefixes: השעות vs שעות) while
+requiring word boundaries for Latin, so “hi” never fires inside “this”.
+
 ## Voice cloning
 XTTS-v2 in D:/hwk-models/xtts-v2 (plain files, CCCPML license accepted by
 the owner's brief). AR ref `arabic_male.wav` exists; HE/EN refs are
@@ -172,7 +195,7 @@ voice, 39.4s turn wall cold (0s cached). Cold XTTS synth ≈ 26s (49 chars)
 / 63s (180 chars) on CPU — hence the engine char cap above.
 
 ## Tests
-tests/test_voice_agent.py — 60 tests: language detect/chunking (incl. the
+tests/test_voice_agent.py — 71 tests: language detect/chunking (incl. the
 engine char cap), tracker, segmenter state machine, barge-in gate, STT
 gating (fake whisper), TTS seams + cache + XTTS language set + Hebrew
 routing + language-matched Piper voice, the voice library (validation of
@@ -180,7 +203,9 @@ every real defect, CRUD, defaults, named-voice isolation), the studio API
 (fake engine, hermetic tmp dirs: console page, voices, real wav back,
 unknown-voice refusal, clip upload, batch manifest, audio-route traversal),
 entrypoints runnable as plain scripts with PYTHONPATH stripped, pipeline
-turn e2e (fakes) + honest ask failure, ask_aali contract + key-mode 404
+turn e2e (fakes) + honest ask failure, the business vertical (hours,
+prices, location in three languages, no fabricated booking, opt-in loading,
+placeholder name never spoken), ask_aali contract + key-mode 404
 (hermetic HTTP server), UTF-8 stdio guards, WS e2e with the FAKE pipeline
 (skips where websockets is absent), and the barge-in contract over a real
 WebSocket: silence during playback does NOT interrupt, sustained speech

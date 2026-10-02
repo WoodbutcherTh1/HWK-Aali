@@ -55,6 +55,7 @@ def build_pipeline(host_cfg: Dict[str, Any], fake: bool = False) -> VoicePipelin
 
     if fake:
         return _fake_pipeline()
+    _load_plugins(host_cfg)
     from voice.core.stt import WhisperSTT
     from voice.core.tts import VoiceTTS
     from voice.core.vad import default_prob_fn
@@ -87,6 +88,38 @@ def build_pipeline(host_cfg: Dict[str, Any], fake: bool = False) -> VoicePipelin
         api_key=os.environ.get("AALI_VOICE_API_KEY") or os.environ.get("AALI_API_KEY", ""),
         wake_phrase=host_cfg.get("wake_word", {}).get("phrase", "") or "",
     )
+
+
+PLUGIN_MODULES = {"business": "voice.plugins.business"}
+
+
+def _load_plugins(host_cfg: Dict[str, Any]) -> None:
+    """Register the CONFIGURED verticals (off unless listed+enabled).
+
+    A plugin that fails to load is logged and skipped — a broken optional
+    vertical must never stop the voice server from starting.
+    """
+    import importlib
+
+    from voice.plugins import base as plugins
+
+    plugins.clear()
+    for spec in host_cfg.get("plugins", []) or []:
+        if not isinstance(spec, dict) or not spec.get("enabled"):
+            continue
+        name = spec.get("name", "")
+        module_path = PLUGIN_MODULES.get(name)
+        if not module_path:
+            print(f"[voice] unknown plugin: {name}", flush=True)
+            continue
+        try:
+            module = importlib.import_module(module_path)
+            plugin = module.register_from_config(spec)
+            if plugin is not None:
+                print(f"[voice] plugin enabled: {name}", flush=True)
+        except Exception as exc:  # honest: named, not swallowed
+            print(f"[voice] plugin {name} failed to load: "
+                  f"{type(exc).__name__}: {exc}", flush=True)
 
 
 def _fake_pipeline() -> VoicePipeline:
