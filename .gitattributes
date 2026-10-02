@@ -1,2 +1,7 @@
 # cmd.exe requires CRLF + ASCII in .bat files (see tests/test_bat_hygiene.py)
 *.bat eol=crlf
+
+# bash on macOS/Linux dies on CRLF ("$'\r': command not found" for every line).
+# The .sh files were committed from a Windows working tree with CRLF baked in,
+# so a fresh clone on the Mac could not run the build scripts at all.
+*.sh text eol=lf

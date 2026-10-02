@@ -236,6 +236,38 @@ def test_shell_scripts_are_executable():
         assert os.access(REPO / relative, os.X_OK), relative
 
 
+def _git(*args: str) -> bytes:
+    result = subprocess.run(["git", "-C", str(REPO), *args],
+                            capture_output=True, timeout=120)
+    if result.returncode != 0:
+        pytest.skip("git unavailable here: " + result.stderr.decode("utf-8", "replace")[-200:])
+    return result.stdout
+
+
+def test_shell_scripts_are_lf_in_what_a_mac_clone_receives():
+    """bash on macOS dies on a CRLF shebang.
+
+    ``read_text`` hides this: universal newlines turn ``\\r\\n`` into ``\\n``
+    before the shebang assertion ever sees it, so the tests above stayed green
+    while every .sh in the repo was CRLF. A MacBook cloning the repo would have
+    failed on the FIRST line of every build script with `$'\\r': command not
+    found`. The .bat rule stays CRLF (cmd.exe); the .sh rule must be LF.
+    """
+    attrs = _source(REPO / ".gitattributes")
+    assert "*.sh text eol=lf" in attrs, ".gitattributes must pin LF for shell scripts"
+
+    tracked = _git("ls-files", "-z", "--", "*.sh").split(b"\x00")
+    offenders = []
+    for raw in tracked:
+        if not raw:
+            continue
+        relative = raw.decode("utf-8")
+        blob = _git("cat-file", "blob", f"HEAD:{relative}")
+        if b"\r\n" in blob:
+            offenders.append(relative)
+    assert not offenders, f"CRLF shell scripts break on macOS: {offenders}"
+
+
 def test_portability_check_runs_here_as_a_subprocess():
     """It must work with PYTHONPATH stripped (frozen-exe entry-point rule)."""
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
