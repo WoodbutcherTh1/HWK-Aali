@@ -40,6 +40,22 @@ class BargeInGate:
             self._hot_run = 0
         return False
 
+    def confirm(self) -> bool:
+        """A VAD-confirmed SEGMENT already proves sustained speech.
+
+        Per-frame callers use :meth:`feed`; a caller that decides on whole
+        segments (the WS server does) must not be forced to replay N frames
+        through the consecutive-frame rule — only the COOLDOWN applies here,
+        which is what keeps an echo burst after playback from interrupting
+        twice in a row.
+        """
+        if self._clock() - self._last_fire < self.cooldown_s:
+            self._hot_run = 0
+            return False
+        self._last_fire = self._clock()
+        self._hot_run = 0
+        return True
+
     def reset(self) -> None:
         self._hot_run = 0
         self._last_fire = 0.0

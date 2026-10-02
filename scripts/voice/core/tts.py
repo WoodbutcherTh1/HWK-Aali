@@ -76,14 +76,16 @@ class VoiceTTS:
     ):
         self.refs = {k: v for k, v in {**DEFAULT_REFS, **(refs or {})}.items() if v}
         self.fallback_ref_lang = fallback_ref_lang
-        self.xtts_dir = xtts_dir
+        # config.yaml ships `xtts_snapshot_dir: null` meaning "use the default";
+        # assigning None here made Path(None) raise on the first synth.
+        self.xtts_dir = str(xtts_dir or DEFAULT_XTTS_DIR)
         self._xtts = None
         self._cond_cache: Dict[str, object] = {}
         self._synth_fn = synth_fn  # test seam: (text, lang, ref) -> {path, sr}
 
     # -- engine state ----------------------------------------------------
     def xtts_ready(self) -> bool:
-        d = Path(self.xtts_dir)
+        d = Path(self.xtts_dir or DEFAULT_XTTS_DIR)
         return (d / "model.pth").exists() or self._xtts is not None
 
     def engine_report(self) -> Dict[str, object]:

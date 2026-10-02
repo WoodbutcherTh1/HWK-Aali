@@ -10,6 +10,7 @@ Two layers:
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Dict, List, Optional
 
@@ -122,6 +123,40 @@ def chunk_for_tts(
     if cur:
         chunks.append(cur)
     return chunks
+
+
+_TASHKEEL = re.compile(r"[ً-ْٰـ]")
+_AR_FOLD = str.maketrans({
+    "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا",
+    "ى": "ي", "ئ": "ي", "ؤ": "و", "ة": "ه", "ک": "ك", "گ": "ك",
+    "پ": "ب", "چ": "ج", "ژ": "ز",
+})
+
+
+# Punctuation is folded to a space. Built with re.escape so no character in
+# the set can ever break the pattern (an escaped-backslash class silently
+# stopped matching Arabic punctuation once already).
+_PUNCT = "،؛؟٪؍،«»\"'()[]{}<>.,!?…:/\\|+*=_#@&%$«»“”‘’–—"
+_PUNCT_RE = re.compile("[" + re.escape(_PUNCT) + r"\s]+")
+
+
+def normalize_for_match(text: str) -> str:
+    """Fold a phrase for WAKE-WORD matching, not for display.
+
+    Arabic is written with optional marks and several spellings of the same
+    letter ("آلي" / "علي" / "الٰلي"), so a literal substring test would miss
+    a correct wake word. Folds tashkeel, alef/ya/ta-marbuta variants and
+    punctuation, keeping the text otherwise intact.
+    """
+    t = _TASHKEEL.sub("", text or "")
+    t = t.translate(_AR_FOLD)
+    return _PUNCT_RE.sub(" ", t).strip()
+
+
+def contains_phrase(haystack: str, needle: str) -> bool:
+    """Substring test on folded text (used by the wake-word gate)."""
+    n = normalize_for_match(needle)
+    return bool(n) and n in normalize_for_match(haystack)
 
 
 class LanguageTracker:

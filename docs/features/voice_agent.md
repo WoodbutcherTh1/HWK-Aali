@@ -12,12 +12,16 @@ code-switching handled per SENTENCE (each sentence speaks in its own tongue).
 ## Layout
 ```
 scripts/voice/
-  core/{vad,stt,language_detect,tts,pipeline,barge_in,server,cli}.py
+  core/{vad,stt,language_detect,tts,pipeline,barge_in,server,voices}.py
+  server.py              # run the servers from config.yaml (--check = report only)
+  cli.py                 # live mic / --file / --fake
+  studio.py              # voice library CLI (voices | audition | batch)
+  studio_api.py          # console API + host for web/voice/studio.html (:5082)
   plugins/base.py        # interface ONLY (no plugin yet, by design)
   config.yaml
   probe_xtts.py          # [1.1] gate: model fetch + voice-cloned synth
   fetch_whisper.py       # pre-downloads STT model as plain files
-web/voice/               # Arabic-first RTL mic UI (mic → WS → playback)
+web/voice/               # Arabic-first RTL mic UI + studio console
 ```
 
 ## Stack (all local, no cloud)
@@ -92,6 +96,26 @@ no fabrication of a "native" voice).
 - Whisper's per-utterance detection can be overridden by the transcript's
   script when its confidence is low (Hebrew/Arabic confusion guard).
 
+### Quality (Phase 2)
+- **Barge-in that echo cannot trigger.** Phase 1 cancelled playback on the
+  FIRST audio frame while Aali spoke — a cough or speaker echo cut the reply
+  off. Now the gate needs SUSTAINED speech: several hot 32 ms frames inside
+  the packet (the VAD counts frames, not packets) plus the cooldown, so a
+  real voice still interrupts in ~100 ms while echo cannot.
+- **Interim transcripts** (`partial_stt.interval_s`, default off): while you
+  are still speaking, the server sends what it has heard so far. Each
+  interim costs one Whisper pass on CPU, so it is off by default.
+- **Wake word** (`wake_word.phrase`, default empty = always answer): a turn
+  without the phrase is heard but not answered. Honest cost: this is a
+  filter over a transcript we already produced — it saves the LLM call, not
+  the STT one. Arabic spelling variants (آ/ا, tashkeel, ة/ه) are folded
+  before matching, so "يا آلي" is heard even when Whisper writes it
+  differently.
+- Echo cancellation itself is the browser's (the UI requests
+  `echoCancellation`/`noiseSuppression`/`autoGainControl`), which works
+  because playback runs in the same Web Audio context. Headphones still
+  recommended.
+
 ## Transport
 - WS :5080 — client streams 16k int16 PCM; server emits events
   (hello/transcript/reply/chunk_start/turn_done/barge_in/error) + raw 24k
@@ -105,6 +129,7 @@ no fabrication of a "native" voice).
 ## Run
 ```
 D:/hwk-tools/voice-venv/Scripts/python.exe scripts/voice/server.py   # servers
+D:/hwk-tools/voice-venv/Scripts/python.exe scripts/voice/server.py --check   # config+engines, no servers
 D:/hwk-tools/voice-venv/Scripts/python.exe scripts/voice/cli.py      # live mic
 D:/hwk-tools/voice-venv/Scripts/python.exe scripts/voice/cli.py --file x.wav --save out.wav
 
@@ -131,8 +156,8 @@ voice_probe.log, voice_e2e.log (content-free).
 - Hebrew is a PIPER voice, not a clone: it is a different, flatter voice
   than the Arabic XTTS clone. Cloning a Hebrew reference would need an
   engine that supports Hebrew — none is installed locally.
-- No echo cancellation: barge-in uses VAD gating; Aali's own playback may
-  trigger it. Wired headphones recommended.
+- The wake word costs a full transcription before it can reject a turn;
+  it is not a low-power wake engine.
 - Whisper hallucinates on silence (classic whisper failure) — the VAD
   segmenter filters most of it; min_speech_ms drops coughs/clicks.
 - HE/EN refs not recorded → AR voice speaks HE/EN (clone works cross-lingual
@@ -147,7 +172,7 @@ voice, 39.4s turn wall cold (0s cached). Cold XTTS synth ≈ 26s (49 chars)
 / 63s (180 chars) on CPU — hence the engine char cap above.
 
 ## Tests
-tests/test_voice_agent.py — 51 tests: language detect/chunking (incl. the
+tests/test_voice_agent.py — 60 tests: language detect/chunking (incl. the
 engine char cap), tracker, segmenter state machine, barge-in gate, STT
 gating (fake whisper), TTS seams + cache + XTTS language set + Hebrew
 routing + language-matched Piper voice, the voice library (validation of
@@ -157,7 +182,9 @@ unknown-voice refusal, clip upload, batch manifest, audio-route traversal),
 entrypoints runnable as plain scripts with PYTHONPATH stripped, pipeline
 turn e2e (fakes) + honest ask failure, ask_aali contract + key-mode 404
 (hermetic HTTP server), UTF-8 stdio guards, WS e2e with the FAKE pipeline
-(skips where websockets is absent).
+(skips where websockets is absent), and the barge-in contract over a real
+WebSocket: silence during playback does NOT interrupt, sustained speech
+does.
 Models are NEVER loaded by the suite; the real-model gate is probe_xtts.py,
 the CLI --file run, `studio batch` and the console over HTTP (see
 D:/hwk-data/voice_e2e.log and D:/hwk-data/voice_out/).

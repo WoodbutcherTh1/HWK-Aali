@@ -27,6 +27,7 @@ import json
 import os
 import queue
 import threading
+import time
 import wave
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -84,6 +85,7 @@ def build_pipeline(host_cfg: Dict[str, Any], fake: bool = False) -> VoicePipelin
         tts=tts,
         base_url=host_cfg.get("llm", {}).get("base_url", "http://127.0.0.1:5055"),
         api_key=os.environ.get("AALI_VOICE_API_KEY") or os.environ.get("AALI_API_KEY", ""),
+        wake_phrase=host_cfg.get("wake_word", {}).get("phrase", "") or "",
     )
 
 
@@ -175,11 +177,14 @@ def make_static_server(port: int, root: Path):
 
 
 class VoiceServer:
-    def __init__(self, pipeline: VoicePipeline, ws_port: int = 5080, http_port: int = 5081):
+    def __init__(self, pipeline: VoicePipeline, ws_port: int = 5080, http_port: int = 5081,
+                 partial_interval_s: float = 0.0):
         self.pipeline = pipeline
         self.ws_port = ws_port
         self.http_port = http_port
         self._conns: Dict[Any, Dict[str, Any]] = {}
+        # 0 disables interim transcripts (they cost a whisper pass each)
+        self.partial_interval_s = partial_interval_s
 
     # -- per-connection worker ------------------------------------------
     def _turn_worker(self, ws, state):
@@ -233,6 +238,28 @@ class VoiceServer:
                 state["cancel"].clear()
                 state["speaking"] = False
 
+    def _partial_worker(self, ws, state) -> None:
+        """Interim transcript of the utterance in progress (never blocking).
+
+        Debounces first: after the interval it re-reads the segmenter so the
+        text covers more speech than the snapshot that triggered it, then
+        releases the slot so the next interval can fire.
+        """
+        try:
+            time.sleep(self.partial_interval_s)
+            seg = self.pipeline.segmenter.pending(min_ms=800.0)
+            if seg is None:
+                return
+            res = self.pipeline.stt.transcribe(seg["pcm"], seg.get("sample_rate", 16000))
+            text = (res.get("text") or "").strip()
+            if text:
+                _safe_send_text(ws, {"type": "partial", "text": text,
+                                     "lang": res.get("lang")})
+        except Exception as exc:
+            _safe_send_text(ws, {"type": "error", "message": f"partial: {exc}"})
+        finally:
+            state["partial_busy"] = False
+
     # -- websocket handler -------------------------------------------------
     async def _ws_handler(self, ws):
         import websockets  # lazy (module top must stay import-safe without it)
@@ -243,6 +270,7 @@ class VoiceServer:
             "queue": queue.Queue(),
             "speaking": False,
             "cancel": threading.Event(),
+            "partial_busy": False,
         }
         self._conns[ws] = state
         state["sid"] = self.pipeline.session_state(state["sid"])["sid"]
@@ -255,15 +283,33 @@ class VoiceServer:
                     import numpy as np
 
                     pcm = np.frombuffer(raw, dtype="<i2")
-                    if state["speaking"] and not state["cancel"].is_set():
-                        # user audio during streamed playback -> cancel the
-                        # remaining chunks; the segment below becomes the
-                        # next turn (worker serves the queue serially)
-                        state["cancel"].set()
-                        _safe_send_text(ws, {"type": "barge_in"})
                     segs = self.pipeline.segmenter.feed(pcm)
+                    if state["speaking"] and not state["cancel"].is_set():
+                        # Phase 1 bug fixed: barge-in fired on the FIRST audio
+                        # frame while Aali spoke, so any echo or cough cut the
+                        # reply off. Now the gate needs SUSTAINED speech —
+                        # several hot 32ms frames inside this packet — so
+                        # playback echo cannot interrupt, while a real voice
+                        # still interrupts in ~100ms without waiting for the
+                        # utterance to end. The gate keeps the cooldown.
+                        sustained = (self.pipeline.segmenter.hot_frames
+                                     >= self.pipeline.barge_in.consecutive_frames)
+                        if sustained and self.pipeline.barge_in.confirm():
+                            state["cancel"].set()
+                            _safe_send_text(ws, {"type": "barge_in"})
                     for seg in segs:
                         state["queue"].put(seg)
+                    if segs:
+                        continue
+                    # Interim transcript while the user is still speaking:
+                    # ONE throttled worker at a time (a thread per audio frame
+                    # would be a stampede on CPU).
+                    pending = self.pipeline.segmenter.pending()
+                    if pending and self.partial_interval_s and not state["partial_busy"]:
+                        state["partial_busy"] = True
+                        threading.Thread(
+                            target=self._partial_worker, args=(ws, state), daemon=True
+                        ).start()
                 else:
                     try:
                         msg = json.loads(raw)

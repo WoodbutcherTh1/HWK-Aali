@@ -37,6 +37,17 @@ barge_in:
   consecutive_frames: 3
   cooldown_s: 0.8
 
+# Phase 2 quality knobs (honest costs in docs/features/voice_agent.md)
+wake_word:
+  phrase: ""            # "" = always answer. e.g. "يا آلي" — Arabic marks and
+                        # alef/ya spelling variants are folded before matching.
+                        # It is a FILTER over the transcript we already made:
+                        # it saves the LLM call, not the STT one.
+
+partial_stt:
+  interval_s: 0         # 0 = off. >0 sends interim transcripts while the user is
+                        # still speaking; each one costs a whisper pass on CPU.
+
 llm:
   base_url: http://127.0.0.1:5055
   ask_path: /api/ask              # key mode reads AALI_VOICE_API_KEY / AALI_API_KEY

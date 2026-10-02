@@ -120,6 +120,11 @@ def _pcm(ms: float, sr: int = 16000) -> np.ndarray:
     return (np.sin(np.linspace(0, 300, n)) * 9000).astype("<i2")
 
 
+def _silence(ms: float, sr: int = 16000) -> np.ndarray:
+    """'Cold' audio: what echo and room noise look like to the VAD."""
+    return np.zeros(int(sr * ms / 1000), dtype="<i2")
+
+
 def _seg(threshold=0.5, **kw) -> SpeechSegmenter:
     return SpeechSegmenter(prob_fn=lambda frame: 0.9, threshold=threshold, **kw)
 
@@ -246,6 +251,17 @@ def test_tts_synthfn_ok_and_fail(monkeypatch, tmp_path):
     t2 = ttsmod.VoiceTTS(synth_fn=bad_fn)
     r2 = t2.synthesize("مرحبا", "ar")
     assert not r2["ok"] and "synth_fn" in r2["error"]
+
+
+def test_tts_null_xtts_dir_falls_back_to_the_default(monkeypatch):
+    """config.yaml ships `xtts_snapshot_dir: null`; passing it through used
+    to make Path(None) raise on the first synthesis (caught by server --check).
+    """
+    from voice.core.tts import DEFAULT_XTTS_DIR, VoiceTTS
+
+    t = VoiceTTS(xtts_dir=None)
+    assert t.xtts_dir == DEFAULT_XTTS_DIR
+    assert isinstance(t.xtts_ready(), bool)      # no TypeError
 
 
 def test_tts_empty_text_honest():
@@ -656,6 +672,203 @@ def test_corrupt_store_reads_as_empty_not_a_crash(lib):
     voice_lib, store, _ = lib
     store.write_text("{not json", encoding="utf-8")
     assert voice_lib.load_store(store)["voices"] == {}
+
+
+# --------------------------------------------------------------------------
+# Phase 2 quality: barge-in gate, interim STT, wake word
+# --------------------------------------------------------------------------
+
+def test_segmenter_counts_hot_frames_per_feed():
+    """Barge-in evidence is per 32ms FRAME: one WS packet carries many frames,
+    so counting packets would call a single noisy packet 'sustained speech'."""
+    from voice.core.vad import SpeechSegmenter as Seg
+
+    calls = {"n": 0}
+
+    def prob(frame):
+        calls["n"] += 1
+        return 0.9 if calls["n"] <= 4 else 0.0
+
+    s = Seg(prob_fn=prob, threshold=0.5)
+    s.feed(_pcm(256))          # 8 frames, 4 hot
+    assert s.hot_frames == 4
+    s.feed(_pcm(64))           # 2 frames, both cold
+    assert s.hot_frames == 0
+
+
+def test_segmenter_pending_exposes_the_utterance_in_progress():
+    from voice.core.vad import SpeechSegmenter as Seg
+
+    s = Seg(prob_fn=lambda f: 0.9, threshold=0.5, silence_ms_to_close=700, min_speech_ms=100)
+    assert s.pending() is None                    # nothing said yet
+    s.feed(_pcm(200))
+    assert s.pending(min_ms=400) is None         # too short to bother whisper
+    p = s.pending(min_ms=100)
+    assert p is not None and p["partial"] is True and p["ms"] >= 100
+    # it is a COPY of the buffer, not the live one
+    s.feed(_pcm(300))
+    assert s.pending()["ms"] > p["ms"]
+    seg = s.flush()
+    assert seg is not None and "partial" not in seg
+
+
+def test_barge_in_needs_vad_confirmed_speech_not_one_frame():
+    """The Phase 1 server cancelled playback on the FIRST audio frame while
+    Aali spoke — any echo cut the reply off. Now only a completed VAD segment
+    interrupts (confirm()), and the cooldown rejects an immediate second."""
+    from voice.core.barge_in import BargeInGate
+
+    gate = BargeInGate(threshold=0.6, consecutive_frames=3, cooldown_s=0.8)
+    assert gate.confirm() is True                # first confirmed segment fires
+    assert gate.confirm() is False               # cooldown: echo burst refused
+    # per-frame mode still needs SUSTAINED speech
+    assert gate.feed(1.0) is False               # still cooling down
+    gate2 = BargeInGate(threshold=0.6, consecutive_frames=3, cooldown_s=0.0)
+    assert gate2.feed(1.0) is False and gate2.feed(1.0) is False
+    assert gate2.feed(1.0) is True
+    assert gate2.feed(0.1) is False              # a cold frame resets the run
+
+
+def test_wake_word_filters_turns_without_the_phrase():
+    from voice.core.language_detect import contains_phrase, normalize_for_match
+
+    # Arabic spelling variants must still match; an empty phrase never does
+    assert contains_phrase("يا آلي، شو الأخبار", "") is False
+    assert contains_phrase("يا آلي، شو الأخبار", "يا آلي") is True
+    assert contains_phrase("يا علي شو الأخبار", "يا آلي") is False   # different word
+    assert contains_phrase("يا ٰآلي مرحبا", "يا آلي") is True        # stray mark folded
+    assert normalize_for_match("آلي، مرحبا!") == "الي مرحبا"   # آ folds to ا
+
+    p = _pipe()
+    p.wake_phrase = "يا آلي"
+    ignored = p.run_turn({"sample_rate": 16000, "pcm": _pcm(300), "ms": 300})
+    assert ignored["ok"] and ignored["ignored"] is True
+    assert ignored["reply"] == "" and p._asks == []      # Aali was NOT called
+    assert "يا آلي" in ignored["reason"]
+
+
+def test_wake_word_lets_an_addressed_turn_through():
+    p = _pipe()
+    p.wake_phrase = "يا آلي"
+    p.stt = type("S", (), {"transcribe": lambda self, pcm, sr=16000: {
+        "text": "يا آلي شو الأخبار", "lang": "ar", "confidence": 0.9}})()
+    res = p.run_turn({"sample_rate": 16000, "pcm": _pcm(300), "ms": 300})
+    assert res["ok"] and not res.get("ignored") and len(p._asks) == 1
+
+
+def test_status_reports_the_wake_phrase():
+    p = _pipe()
+    p.wake_phrase = "يا آلي"
+    assert p.status()["wake_phrase"] == "يا آلي"
+
+
+def test_server_entrypoint_check_mode_runs_without_models(capsys):
+    """The documented `python scripts/voice/server.py` existed in docs only;
+    it must actually run, and --check must report instead of crashing."""
+    import importlib.util
+
+    from pathlib import Path as P
+
+    path = P(__file__).resolve().parents[1] / "scripts" / "voice" / "server.py"
+    spec = importlib.util.spec_from_file_location("voice_server_entry", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.main(["--check", "--fake"]) == 0
+    out = capsys.readouterr().out
+    assert "config:" in out and "engines" in out and "llm" in out
+
+
+def test_ws_barge_in_ignores_echo_but_honours_real_speech():
+    """End-to-end over the WS: while Aali is speaking, a COLD frame (echo,
+    a cough) must NOT cut the reply off; a VAD-confirmed speech segment
+    must. Phase 1 cancelled on the very first audio frame."""
+    websockets = pytest.importorskip("websockets")
+    from websockets.sync.client import connect as ws_connect
+
+    from voice.core.server import VoiceServer, _fake_pipeline
+    from voice.core.vad import SpeechSegmenter
+
+    pipe = _fake_pipeline()
+    # Real VAD state machine. Hotness is carried BY THE AUDIO (loud tone vs
+    # silence), not by a shared test flag — a flag races with the server's
+    # async read of the frame and silently produced "no speech at all".
+    def prob(frame):
+        return 0.9 if float(np.abs(frame.astype(np.int32)).mean()) > 500 else 0.0
+
+    pipe.segmenter = SpeechSegmenter(prob_fn=prob, threshold=0.5, pre_roll_ms=100,
+                                     silence_ms_to_close=250, min_speech_ms=150)
+    release = threading.Event()
+    real_tts = pipe.tts
+
+    class SlowTTS:                      # keeps state["speaking"] true while we poke
+        def synthesize(self, text, lang="ar"):
+            release.wait(timeout=10)
+            return real_tts.synthesize(text, lang)
+
+        def engine_report(self):
+            return real_tts.engine_report()
+
+    pipe.tts = SlowTTS()
+
+    ws_port, http_port = _free_port(), _free_port()
+    srv = VoiceServer(pipe, ws_port=ws_port, http_port=http_port)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            s = socket.create_connection(("127.0.0.1", ws_port), timeout=0.3)
+            s.close()
+            break
+        except OSError:
+            time.sleep(0.1)
+    else:
+        pytest.fail("voice WS server never came up")
+
+    with ws_connect(f"ws://127.0.0.1:{ws_port}", open_timeout=5) as ws:
+        json.loads(ws.recv(timeout=5))                      # hello
+        ws.send(_pcm(900).tobytes())                       # a real utterance
+        ws.send(_silence(500).tobytes())                # silence closes the segment
+        # the worker announces the turn and blocks in TTS: from here on the
+        # connection is in the "speaking" state barge-in must survive
+        deadline = time.monotonic() + 5
+        started = False
+        while time.monotonic() < deadline and not started:
+            try:
+                msg = ws.recv(timeout=0.3)
+            except TimeoutError:
+                continue
+            if not isinstance(msg, (bytes, bytearray)) and json.loads(msg)["type"] == "transcript":
+                started = True
+        assert started, "the turn never started"
+
+        # ECHO / noise while Aali speaks: playback must NOT be cut
+        ws.send(_silence(600).tobytes())
+        time.sleep(0.8)
+        echo_barge = False
+        try:
+            while True:
+                msg = ws.recv(timeout=0.2)
+                if not isinstance(msg, (bytes, bytearray)) and json.loads(msg)["type"] == "barge_in":
+                    echo_barge = True
+                    break
+        except TimeoutError:
+            pass
+        assert not echo_barge, "cold audio (echo) must not interrupt playback"
+
+        # a real voice: sustained hot frames DO interrupt
+        ws.send(_pcm(600).tobytes())
+
+        saw_barge = False
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not saw_barge:
+            try:
+                msg = ws.recv(timeout=0.5)
+            except TimeoutError:
+                continue
+            if not isinstance(msg, (bytes, bytearray)) and json.loads(msg)["type"] == "barge_in":
+                saw_barge = True
+        release.set()
+        assert saw_barge, "confirmed speech during playback must interrupt"
 
 
 # --------------------------------------------------------------------------

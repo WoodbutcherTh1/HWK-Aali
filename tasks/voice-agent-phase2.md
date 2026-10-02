@@ -1,8 +1,8 @@
 # Aali Voice — Phase 2 (Studio → Console → Quality → Verticals)
 
 - owner: buffy (this PC, Freebuff session)
-- status: in-progress — slices 1 (voice assets) and 2 (console) DONE and
-  verified live; slices 3-4 open
+- status: in-progress — slices 1 (voice assets), 2 (console) and 3 (quality)
+  DONE and verified live; slice 4 open
 - started: 2026-10-02
 - owner GO: "Start Part 2 of the voice package (Studio)" with ALL FOUR
   areas selected (voice assets, script-to-voice console, voice quality,
@@ -112,10 +112,40 @@ with PYTHONPATH STRIPPED, because the suite's own PYTHONPATH masks exactly
 this bug; and the .bat launchers are ASCII+CRLF per the repo bat-hygiene
 rule.
 
-## Slice 3 — voice quality
-Not started. Echo cancellation (today barge-in can trip on Aali's own
-playback), streaming/partial STT, wake word. Honest: these decide whether
-conversation feels natural.
+## Slice 3 — voice quality (DONE 2026-10-02)
+
+- **Barge-in that echo cannot trigger** (the real bug). Phase 1 cancelled
+  playback on the FIRST audio frame while Aali spoke, so a cough or
+  speaker echo cut every reply off — and `BargeInGate` was created but
+  never consulted anywhere. Now the gate needs SUSTAINED speech: the VAD
+  counts hot 32ms FRAMES inside the packet (counting packets called a
+  single noisy packet “sustained speech” — the test proved it), plus the
+  cooldown. Real voice still interrupts in ~100ms, without waiting for the
+  utterance to end. Pinned by a WebSocket test: silence during playback
+  does NOT interrupt, sustained speech DOES.
+- **Interim transcripts** (`partial_stt.interval_s`, default OFF): while the
+  user still speaks, the server sends what it has heard. One throttled
+  worker (a thread per audio frame would be a CPU stampede); it debounces,
+  then re-reads the segmenter so the text covers more speech. Honest cost:
+  one Whisper pass per interim.
+- **Wake word** (`wake_word.phrase`, default empty = always answer): a turn
+  without the phrase is heard but NOT answered (Aali is never called).
+  Arabic spelling variants are folded (tashkeel, آ→ا, ة→ه, punctuation) so
+  the phrase survives normal Whisper variation.
+- **The documented launcher existed only in docs**: `python scripts/voice/server.py`
+  was in the README since Phase 1 but the file did not exist. Added, with
+  `--check` printing config + the real engine report.
+
+### Bugs the new entrypoint exposed immediately
+`--check` reported `TypeError: ... not 'NoneType'` on the first real run:
+config.yaml ships `xtts_snapshot_dir: null` and `VoiceTTS` stored that
+None, so `Path(None)` would have raised on the FIRST synthesis of any real
+server run — a crash the old test-only path never touched. Fixed (null
+means “use the default dir”) and pinned.
+
+Echo cancellation itself is the browser's: the UI already requests
+`echoCancellation`/`noiseSuppression`/`autoGainControl`, which works because
+playback happens in the same Web Audio context. Headphones still advised.
 
 ## Slice 4 — commercial verticals (local businesses)
 Not started. Built as voice PLUGINS over the existing interface

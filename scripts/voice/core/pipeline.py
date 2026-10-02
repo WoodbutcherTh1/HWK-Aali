@@ -29,6 +29,7 @@ from voice.core.barge_in import BargeInGate
 from voice.core.language_detect import (
     LanguageTracker,
     chunk_for_tts,
+    contains_phrase,
     detect_script_lang,
 )
 from voice.core.vad import SpeechSegmenter
@@ -84,6 +85,7 @@ class VoicePipeline:
         api_key: str = "",
         barge_in: Optional[BargeInGate] = None,
         sid_prefix: str = "voice-",
+        wake_phrase: str = "",
     ):
         self.segmenter = segmenter
         self.stt = stt
@@ -93,6 +95,7 @@ class VoicePipeline:
         self.api_key = api_key or ""
         self.barge_in = barge_in or BargeInGate()
         self.sid_prefix = sid_prefix
+        self.wake_phrase = (wake_phrase or "").strip()
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self.lang_tracker = LanguageTracker()
 
@@ -139,6 +142,18 @@ class VoicePipeline:
         if not text:
             return {"ok": False, "error": "empty transcription", "sid": state["sid"]}
         self.lang_tracker.update(stt_res.get("lang"), float(stt_res.get("confidence", 0.0)))
+
+        # Wake word: a turn that does not contain the phrase is heard but NOT
+        # answered. Honest cost note: this is a FILTER over an utterance we
+        # already transcribed, not a low-power wake engine — it saves the
+        # LLM call, not the STT one.
+        if self.wake_phrase and not contains_phrase(text, self.wake_phrase):
+            return {
+                "ok": True, "ignored": True, "sid": state["sid"],
+                "user_text": text, "user_lang": stt_res.get("lang"),
+                "reply": "", "chunks": [], "partial": False,
+                "reason": f"wake phrase {self.wake_phrase!r} not present",
+            }
 
         try:
             ask = self.ask_fn(
@@ -196,6 +211,7 @@ class VoicePipeline:
         return {
             "sessions": len(self.sessions),
             "language": self.lang_tracker.current,
+            "wake_phrase": self.wake_phrase,
             "tts_engine": self.tts.engine_report() if hasattr(self.tts, "engine_report") else {},
         }
 

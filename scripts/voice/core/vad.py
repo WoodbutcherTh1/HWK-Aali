@@ -44,14 +44,27 @@ class SpeechSegmenter:
         self._speech_ms = 0.0
         self._sil_ms = 0.0
         self._in_speech_ms = 0.0  # total hot frames since open
+        self.last_prob = 0.0      # probability of the most recent frame
+        self._hot_in_feed = 0  # hot frames in the LAST feed() call
 
     @property
     def speaking(self) -> bool:
         return self._speaking
 
+    @property
+    def hot_frames(self) -> int:
+        """How many 32ms frames in the LAST feed() were speech.
+
+        Per-frame evidence the barge-in gate needs: one WS message carries
+        many frames, so counting messages instead of frames would treat a
+        single noisy packet as sustained speech.
+        """
+        return self._hot_in_feed
+
     def feed(self, pcm16: np.ndarray) -> List[dict]:
         """Feed 16k mono int16 PCM; return any COMPLETED segments."""
         out: List[dict] = []
+        self._hot_in_feed = 0
         if pcm16.ndim != 1:
             pcm16 = pcm16.reshape(-1)
         n = pcm16.shape[0]
@@ -64,7 +77,10 @@ class SpeechSegmenter:
                     break  # drop a tail fragment while idle (harmless)
                 # keep partial frame so a closing segment is not truncated
             prob = float(self.prob_fn(frame)) if self.prob_fn else 0.0
+            self.last_prob = prob
             hot = prob >= self.threshold
+            if hot:
+                self._hot_in_feed += 1
             self._buf.append(frame)
             if self._speaking:
                 self._in_speech_ms += self.frame_ms()
@@ -108,6 +124,22 @@ class SpeechSegmenter:
         if not self._speaking:
             return None
         return self._close()
+
+    def pending(self, min_ms: float = 400.0) -> Optional[dict]:
+        """The utterance in progress, as a segment dict, WITHOUT closing it.
+
+        Used for interim (partial) transcription so the user sees their
+        words while still speaking. Returns None when nothing is being said
+        or the audio is too short to transcribe meaningfully.
+        """
+        if not self._speaking or not self._buf:
+            return None
+        pcm = np.concatenate(self._buf)
+        dur_ms = pcm.shape[0] * SR_MS
+        if dur_ms < min_ms:
+            return None
+        return {"sample_rate": IN_SR, "pcm": pcm.astype(np.int16), "ms": dur_ms,
+                "partial": True}
 
 
 class SileroVAD:
