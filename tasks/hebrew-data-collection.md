@@ -99,6 +99,34 @@ tokenized shards → Phase D continuation + future SFT. Target 5–10B tokens
   (riskiest, owner said do it last). [3.5.3] code comments: needs a
   GitHub token (API auth) — awaiting owner decision. [3.5.5]
   hewiktionary: still deferred to the Phase 5 shortfall check.
+  [3.5.4] CC-class SAMPLED (license verified first, per the owner's
+  rule): HPLT v2 CLEANED heb_Hebr = single 28.8 GB .jsonl.zst shard,
+  packaging CC0 (allowed list; terms page verified live), per-file md5
+  published. Resume-safe 1 GB prefix downloaded (raw/hplt/) — it IS the
+  start of the full file — and quality-assessed: 539,819 docs / 2.03 GB
+  chars / ~507M tokens from 3.4% of the file; Hebrew share 74.4%,
+  lang-ID prob 1.00, robotstxt=allowed 100%, filter=keep 100%, pii
+  spans 1.8% (maskable). Extrapolated full shard ~14.6B tokens — the
+  gap-closer if the owner approves the full 28.8 GB download.
+  Script: scripts/sample_hplt.py.
+  OWNER DECISIONS (2026-10-02, via ask_user): CC-class = KEEP THE SAMPLE
+  ONLY (no full download); code comments = try unauthenticated.
+  [3.5.4] EXECUTED per decision: extracted/hplt/hplt_sample.jsonl =
+  529,949 docs / 1.96 GB chars / ~489M tokens (9,870 pii-flagged docs
+  EXCLUDED by the privacy gate; script extract_hplt_sample.py).
+  [3.5.3] EXECUTED per decision (fetch_code_comments.py): GitHub code
+  search API needs auth (401) and even `language:` qualifiers 422 on
+  anonymous REST search — pivoted to plain q=hebrew repo search (5
+  pages, sort=stars) + client-side language filter + SPDX license gate
+  {MIT, Apache-2.0, BSD-2/3, CC0-1.0, Unlicense} + codeload tarballs +
+  Hebrew-COMMENT-LINE-only extraction. RESULT: 114/114 repos, 3,188
+  comment lines, ~41K tokens — honest verdict NEGLIGIBLE (Hebrew-speaking
+  developers comment in English); kept (clean + tiny), Phase 5 may drop.
+  PHASE 3.5 PRE-CLEANING PROJECTION: ~600M (Phases 2-3) + ~260M Sefaria
+  + Knesset (pending) + ~489M HPLT sample + ~0.04M code ≈ 1.6-1.7B —
+  the owner's sample-only choice knowingly stays under the 5-6B target;
+  the lever (HPLT full / fineweb-2 owner license call) stays open for
+  after Phase 5 quality numbers.
 - 2026-10-01 PHASE 2 COMPLETE (owner GO received): hewiki-20261001 dump
   downloaded as 6 parts (1.151 GB), every part SHA1-verified against the
   official dumpstatus.json manifest — scripts/fetch_hebrew_wiki.py
