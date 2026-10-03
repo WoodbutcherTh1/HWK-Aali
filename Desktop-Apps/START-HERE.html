@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>آلي — من أين تبدأ؟ | Aali — Start Here</title>
+<style>
+  :root { --ink:#0b0e14; --ink2:#161a26; --line:#2d3450; --fg:#e8e6e3;
+          --dim:#8b93a7; --gold:#e8b34b; --green:#7fb069; --blue:#6f9ec9; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ink); color:var(--fg);
+         font-family: "Segoe UI", Tahoma, system-ui, sans-serif; line-height:1.9; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 18px 80px; }
+  header { border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:26px; }
+  h1 { color:var(--gold); font-size:30px; margin:0 0 6px; }
+  .sub { color:var(--dim); font-size:15px; }
+  h2 { color:var(--gold); font-size:22px; margin:36px 0 10px;
+       border-inline-start:4px solid var(--gold); padding-inline-start:10px; }
+  .card { background:var(--ink2); border:1px solid var(--line); border-radius:14px;
+          padding:16px 18px; margin:14px 0; }
+  .big { font-size:20px; font-weight:700; color:var(--green); }
+  code, .addr { font-family:"Cascadia Mono", Consolas, monospace; direction:ltr;
+                display:inline-block; background:#0d1017; border:1px solid var(--line);
+                border-radius:8px; padding:6px 12px; font-size:16px; color:var(--blue); }
+  ol, ul { padding-inline-start:24px; }
+  li { margin:8px 0; }
+  img { max-width:100%; border-radius:12px; border:1px solid var(--line); margin:10px 0; }
+  .warn { border-color:#7a3f3f; background:#241618; }
+  .warn .big { color:#e08a7a; }
+  .ok { border-color:#35502f; }
+  .tag { font-size:12px; color:var(--dim); border:1px solid var(--line);
+         border-radius:999px; padding:2px 10px; margin-inline-end:6px; }
+  .en { color:var(--dim); font-size:14px; direction:ltr; text-align:left; }
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:15px; }
+  td, th { border:1px solid var(--line); padding:8px 10px; text-align:start; }
+  th { color:var(--gold); background:var(--ink2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>آلي — من أين تبدأ؟</h1>
+  <div class="sub">Aali — Start Here · three devices, one brain, no scripts needed</div>
+</header>
+
+<div class="card ok">
+  <div class="big">✅ الحالة الآن: آلي يعمل</div>
+  <p>العقل (آلي) شغّال الآن على هذا الحاسوب، يستجيب، ويقبل المفتاح. جرّب بنفسك:</p>
+  <div><span class="addr">http://192.168.1.13:5055</span> من أي جهاز على نفس شبكة البيت.</div>
+</div>
+
+<h2>١)افتح آلي فوراً (٣٠ ثانية، بدون ما تبني أي شيء)</h2>
+<div class="card">
+  <ul>
+    <li><b>الآيفون أو الماك:</b> افتح المتصفح (Safari / Chrome).</li>
+    <li>اكتب في شريط العنوان: <span class="addr">http://192.168.1.13:5055</span> واضغط Enter.</li>
+    <li>إذا طلب منك <b>المفتاح</b>: على الحاسوب افتح الملف
+        <span class="addr">D:\hwk-data\aali_master_key.txt</span>
+        وانسخ السطر الموجود داخله والصقه.</li>
+    <li>الآن اكتب أي سؤال واضغط إرسال. 🎉</li>
+  </ul>
+  <p class="en">Tip: on iPhone, tap Share → “Add to Home Screen” — آلي becomes a real app with an icon.</p>
+</div>
+
+<h2>٢)افتح الشبكة على ويندوز (مطلوب مرة واحدة)</h2>
+<div class="card warn">
+  <p>ويندوز يمنع الأجهزة الأخرى من الوصول إلى آلي حتى يسمح المرشد. مرشد واحد يفتح الباب:</p>
+  <ol>
+    <li>على سطح مكتب الحاسوب يوجد ملف اسمه
+        <span class="addr">1-DOUBLE-CLICK-Open-Aali-To-Your-Phone.bat</span></li>
+    <li><b>دبل كليك</b> عليه.</li>
+    <li>إذا ظهر سؤال «هل تسمح بالتغييرات؟» اختر <b>نعم / Yes</b>.</li>
+    <li>سيكتب: <b>DONE. Aali is awake and open to your devices.</b></li>
+  </ol>
+  <p>هذا يعمل مرتين فقط (شبكة البيت + شبكة Tailscale)، ومن بعدها كل شيء يعمل تلقائياً.</p>
+</div>
+
+<h2>٣)صور تشرح كل شيء ببساطة</h2>
+<div class="card">
+  <p><b>في البيت — على نفس الواي فاي:</b></p>
+  <img src="Aali-Guide-Home.png" alt="How Aali connects at home" />
+  <p><b>خارج البيت — مع Tailscale + حل المشاكل:</b></p>
+  <img src="Aali-Guide-Anywhere.png" alt="Aali anywhere with Tailscale" />
+</div>
+
+<h2>العناوين: أينما كنت</h2>
+<div class="card">
+  <table>
+    <tr><th>أين أنت</th><th>العنوان الذي تكتبه</th><th>متى يعمل</th></tr>
+    <tr><td>في البيت (واي فاي واحد)</td><td><span class="addr">http://192.168.1.13:5055</span></td><td>دائماً</td></tr>
+    <tr><td>برا البيت</td><td><span class="addr">http://100.94.100.57:5055</span></td><td>مع Tailscale مشغّل (زر ON)</td></tr>
+  </table>
+  <p><b>المفتاح:</b> نفس السطر في
+     <span class="addr">D:\hwk-data\aali_master_key.txt</span> — يتكرر في كل مكان.</p>
+  <p><b>Tailscale:</b> تطبيق مجاني على الآيفون والماك. سجّل بحسابك، ثم شغّل المفتاح (ON)،
+     وستقدر تتكلم مع آلي من أي مكان في العالم.</p>
+</div>
+
+<h2>آلي ستوديو للماك — زر واحد بعد أول مرة</h2>
+<div class="card">
+  <p>ستوديو هو «سطح المكتب» الكامل لآلي (محرّر + وكيل + طرفية). على الماك:</p>
+  <ol>
+    <li>فكّ ضغط <span class="addr">aali_mac_sync_2026-10-03.zip</span>.</li>
+    <li>ادخل مجلد <span class="addr">Aali-Studio-macOS</span>.</li>
+    <li><b>دبل كليك</b> على <span class="addr">Make-Aali-Studio.command</span>
+        (إن رفضها الماك أول مرة: كليك يمين → Open).</li>
+    <li>انتظر دقيقة، وسيصبح <b>آلي ستوديو</b> تطبيقاً عادياً داخل
+        <b>Applications</b> — بأيقونته. من بعده: دبل كيك الأيقونة فقط.</li>
+  </ol>
+  <p class="en">After this one time, آلي ستوديو is a normal Mac app — icon in
+     Applications/Launchpad, click to open, no Terminal, no scripts.</p>
+</div>
+
+<h2>تطبيق الآيفون (آلي iOS)</h2>
+<div class="card">
+  <p>هذا تطبيق SwiftUI حقيقي (يبني على Xcode على الماك). بعد بنائه:</p>
+  <ol>
+    <li>الإعدادات ⚙️ داخل التطبيق.</li>
+    <li>العنوان: <span class="addr">http://192.168.1.13:5055</span></li>
+    <li>المفتاح: انسخه من <span class="addr">aali_master_key.txt</span> والصقه.</li>
+    <li>احفظ، ثم «اضبط الاتصال» أعلى الشاشة، ثم اسأل.</li>
+  </ol>
+  <p class="en">Note: the iPhone app is a SwiftUI build (needs Xcode on the Mac).
+     The browser route in section ١ works today with zero build.</p>
+</div>
+
+<h2>كل الملفات في هذه الحزمة: ماذا يعني كل واحد؟</h2>
+<div class="card">
+  <table>
+    <tr><th>الملف / المجلد</th><th>ماذا يفعل</th></tr>
+    <tr><td><span class="addr">Aali-Studio-macOS/</span></td>
+        <td>كل ما تحتاجه لبناء تطبيق «آلي ستوديو» على الماك. <b>Make-Aali-Studio.command</b> هو الملف الوحيد الذي تحتاج دبل كليك.</td></tr>
+    <tr><td><span class="addr">Aali-Studio-macOS/Aali-Studio.webloc</span></td>
+        <td>اختصار يفتح آلي في المتصفح مباشرة (دبل كليك).</td></tr>
+    <tr><td><span class="addr">Aali-iOS/</span></td>
+        <td>ملفات تطبيق الآيفون (Swift). تُفتح في Xcode على الماك.</td></tr>
+    <tr><td><span class="addr">aali_mac_sync_2026-10-03.zip</span></td>
+        <td>نسخة كاملة من المشروع (بدون فenvs) لبناء أي تطبيق على الماك.</td></tr>
+    <tr><td><span class="addr">Aali-Guide-*.png</span></td>
+        <td>الصور التوضيحية أعلاه.</td></tr>
+    <tr><td><span class="addr">1-DOUBLE-CLICK-Open-Aali-To-Your-Phone.bat</span></td>
+        <td>ملف يفتح جدار الحماية مرة واحدة (يُشغّل على ويندوز).</td></tr>
+  </table>
+  <p class="en">Full file-by-file map of the whole project: open
+     <b>OWNER-MAP.html</b> in this folder.</p>
+</div>
+
+<footer class="sub" style="margin-top:40px;">
+  HWK Aali · built by team HWK · عزيزة 💛
+</footer>
+
+</div>
+</body>
+</html>

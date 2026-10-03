@@ -1,0 +1,747 @@
+<!DOCTYPE html><html lang="ar" dir="rtl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>خريطة المشروع — HWK Aali</title>
+<style>
+:root{--ink:#0b0e14;--ink2:#161a26;--line:#2d3450;--fg:#e8e6e3;--dim:#8b93a7;--gold:#e8b34b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--fg);
+ font-family:"Segoe UI",Tahoma,system-ui,sans-serif;line-height:1.8}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 90px}
+h1{color:var(--gold);font-size:30px;margin:0 0 4px}
+.sub{color:var(--dim);margin-bottom:20px}
+h2{color:var(--gold);font-size:22px;margin:34px 0 10px}
+.area{background:var(--ink2);border:1px solid var(--line);border-radius:14px;
+ padding:14px 18px;margin:14px 0}
+.area h3{margin:0 0 4px;font-size:20px}
+.area .en{color:var(--dim);font-size:14px;direction:ltr;text-align:left}
+.area .why{color:#c9c6bf;font-size:15.5px;margin:6px 0 10px}
+.count{float:inline-end;color:var(--dim);font-size:14px;border:1px solid var(--line);
+ border-radius:999px;padding:1px 10px}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+td,th{border-bottom:1px solid #22263a;padding:7px 9px;text-align:start;vertical-align:top}
+th{color:var(--gold);font-weight:600;font-size:15px}
+code{font-family:Consolas,monospace;direction:ltr;unicode-bidi:embed;display:inline-block;
+ color:#6f9ec9;font-size:14px}
+.purp{color:#c9c6bf;font-size:14.5px}
+.kind{color:var(--dim);font-size:12px;border:1px solid var(--line);border-radius:6px;
+ padding:0 6px}
+.size{color:#5d667f;font-size:12px;white-space:nowrap}
+input{width:100%;background:var(--ink2);border:1px solid var(--line);border-radius:10px;
+ padding:10px 14px;color:var(--fg);font-size:16px;margin:10px 0}
+input:focus{outline:none;border-color:var(--gold)}
+.hidden{display:none}
+footer{color:var(--dim);font-size:14px;margin-top:40px}
+</style></head><body><div class="wrap">
+<h1>خريطة المشروع — كل ملف ويفعله</h1>
+<div class="sub">HWK Aali · 513 ملفاً في 21 منطقة · built by team HWK · عزيزة</div>
+
+<h2>١) كيف ترتبط الأجزاء (الرسم الكبير)</h2>
+
+<svg viewBox="0 0 1200 640" width="100%" role="img" aria-label="Aali system graph">
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3"
+            orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#8b93a7"/></marker>
+  </defs>
+  <rect width="1200" height="640" fill="#0b0e14"/>
+
+  <!-- brain -->
+  <rect x="430" y="150" width="340" height="230" rx="18" fill="#161a26"
+        stroke="#e8b34b" stroke-width="2"/>
+  <text x="600" y="205" text-anchor="middle" fill="#e8b34b" font-size="30"
+        font-family="Segoe UI, Tahoma" font-weight="bold">قلب آلي</text>
+  <text x="600" y="243" text-anchor="middle" fill="#e8e6e3" font-size="18"
+        font-family="Segoe UI, Tahoma">file-agent/app.py</text>
+  <text x="600" y="285" text-anchor="middle" fill="#6f9ec9" font-size="17"
+        font-family="Consolas, monospace" direction="ltr">:5055 — يستقبل ويرد</text>
+  <text x="600" y="315" text-anchor="middle" fill="#6f9ec9" font-size="16"
+        font-family="Consolas, monospace" direction="ltr">:20129 — النموذج نفسه</text>
+  <text x="600" y="352" text-anchor="middle" fill="#8b93a7" font-size="15"
+        font-family="Segoe UI, Tahoma">يستمع على الشبكة — يحتاج مفتاح</text>
+
+  <!-- clients -->
+  <g font-family="Segoe UI, Tahoma" font-size="17" fill="#e8e6e3">
+    <rect x="60" y="90" width="250" height="60" rx="12" fill="#161a26"
+          stroke="#2d3450"/><text x="185" y="127" text-anchor="middle">الآيفون (SwiftUI)</text>
+    <rect x="60" y="200" width="250" height="60" rx="12" fill="#161a26"
+          stroke="#2d3450"/><text x="185" y="237" text-anchor="middle">الماك (ستوديو/ديسكتوب)</text>
+    <rect x="60" y="310" width="250" height="60" rx="12" fill="#161a26"
+          stroke="#2d3450"/><text x="185" y="347" text-anchor="middle">الطرفية (CLI)</text>
+    <rect x="60" y="420" width="250" height="60" rx="12" fill="#161a26"
+          stroke="#2d3450"/><text x="185" y="457" text-anchor="middle">المتصفح (Web)</text>
+    <rect x="890" y="90" width="250" height="60" rx="12" fill="#161a26"
+          stroke="#2d3450"/><text x="1015" y="127" text-anchor="middle">المركز السحابي</text>
+    <rect x="890" y="200" width="250" height="60" rx="12" fill="#161a26"
+          stroke="#2d3450"/><text x="1015" y="237" text-anchor="middle">عقدة المستخدم (Node)</text>
+    <rect x="890" y="310" width="250" height="60" rx="12" fill="#161a26"
+          stroke="#2d3450"/><text x="1015" y="347" text-anchor="middle">n8n / تطبيقات أخرى</text>
+  </g>
+  <g stroke="#8b93a7" stroke-width="2" fill="none" marker-end="url(#ar)">
+    <path d="M310,120 C380,120 390,180 430,190"/>
+    <path d="M310,230 L430,240"/>
+    <path d="M310,340 C380,340 390,300 430,290"/>
+    <path d="M310,450 C380,450 390,340 430,330"/>
+    <path d="M770,190 C830,190 840,120 890,120"/>
+    <path d="M770,250 C830,250 840,230 890,230"/>
+    <path d="M770,320 C830,320 840,340 890,340"/>
+  </g>
+  <text x="600" y="580" text-anchor="middle" fill="#8b93a7" font-size="17"
+        font-family="Segoe UI, Tahoma">كل العملاء يتكلمون نفس القلب — نفس المفتاح — نفس الإجابة</text>
+</svg>
+
+
+<h2>٢) كل منطقة وكل ملف</h2>
+<input id="q" placeholder="ابحث باسم أي ملف أو كلمة… (search any file)" />
+<div id="list">
+<div class="area" data-area="file-agent">
+<span class="count">53 ملف</span>
+<h3>العقل والواجهة الخلفية <span class="en">/ The brain &amp; backend</span></h3>
+<div class="why">قلب آلي: يستقبل سؤالك، يقرر، ينفّذ الأدوات، ويرد. هذا هو 프로그램 الذي يعمل على حاسوبك.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>file-agent/accounts.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>file-agent/agent_log.py</code> <span class="kind">py</span></td><td class="purp">Small JSONL audit log for agent requests and tool execution.</td><td class="size">6 KB</td></tr>
+<tr><td><code>file-agent/agent_loop.py</code> <span class="kind">py</span></td><td class="purp">Scratch-model and optional cloud function-calling loop for the file agent.</td><td class="size">128 KB</td></tr>
+<tr><td><code>file-agent/api_keys.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">4 KB</td></tr>
+<tr><td><code>file-agent/app.py</code> <span class="kind">py</span></td><td class="purp">Mobile-friendly Flask chat UI for the local Aali file agent. Multi-turn conversations are stored server-side (sessions.jsonl) keyed by a cookie, bounded to the last MAX_TURNS turns, with TTL</td><td class="size">146 KB</td></tr>
+<tr><td><code>file-agent/audit_log.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">2 KB</td></tr>
+<tr><td><code>file-agent/providers.py</code> <span class="kind">py</span></td><td class="purp">Pluggable remote model &quot;connectors&quot;: optional BYO-key bridges to Google (Gemini), plus the existing OpenRouter/managed-key path. &quot;Connecting a plugin/connector&quot; here means: pick a provider a</td><td class="size">8 KB</td></tr>
+<tr><td><code>file-agent/pyproject.toml</code> <span class="kind">toml</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>file-agent/requirements.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>file-agent/sessions.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">3 KB</td></tr>
+<tr><td><code>file-agent/tools.py</code> <span class="kind">py</span></td><td class="purp">Compatibility module for code that imports a top-level tools.py.</td><td class="size">0 KB</td></tr>
+<tr><td><code>file-agent/agent_workspace/test.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>file-agent/agent_workspace/n8n_workflows/إنشاء_تطبيق_ويب_بسيط_لعرض_الأذكار_اليومي.json</code> <span class="kind">json</span></td><td class="purp">ملف</td><td class="size">2 KB</td></tr>
+<tr><td><code>file-agent/agent_workspace/n8n_workflows/إنشاء_ملف_app_config_yaml_في_arena_r2_لخ.json</code> <span class="kind">json</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>file-agent/agent_workspace/n8n_workflows/إنشاء_ملف_في_ملاحظات_وكتابة_محتواه.json</code> <span class="kind">json</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>file-agent/agent_workspace/notes/olivetree.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>file-agent/agent_workspace/uploads/872730_recipe.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>file-agent/agent_workspace/uploads/94c097_Aali_Night_Update_2026-09-24_EN.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">2 KB</td></tr>
+<tr><td><code>file-agent/agent_workspace/uploads/d631d4_Aali_Night_Update_2026-09-24_EN.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">2 KB</td></tr>
+<tr><td><code>file-agent/file_agent/__init__.py</code> <span class="kind">py</span></td><td class="purp">Safe, function-callable local file operations.</td><td class="size">1 KB</td></tr>
+<tr><td><code>file-agent/file_agent/accounts.py</code> <span class="kind">py</span></td><td class="purp">Aali accounts — users | builders &amp; team (admin, owner). One app, two worlds: regular users sign up with email + password, verify with a code, reset their password, and chat. The owner/builde</td><td class="size">16 KB</td></tr>
+<tr><td><code>file-agent/file_agent/agent_tools.py</code> <span class="kind">py</span></td><td class="purp">High-frequency agent tools missing from Aali&#x27;s toolbox (2026-09-23). Owner request: &quot;check what Claude, DeepSeek, GLM and GPT agents have that Aali doesn&#x27;t — give him those tools and teach h</td><td class="size">29 KB</td></tr>
+<tr><td><code>file-agent/file_agent/apikeys.py</code> <span class="kind">py</span></td><td class="purp">Aali API-key platform — Aali is the provider and issues his own keys. A user key is a high-entropy token ``aali-&lt;hex&gt;``. Only its SHA-256 hash is stored, so a leaked store never leaks a usab</td><td class="size">7 KB</td></tr>
+<tr><td><code>file-agent/file_agent/assistants.py</code> <span class="kind">py</span></td><td class="purp">Custom assistants (Wave 4, 2026-09-25). Named persona configs OVER the existing machinery: an assistant is a small record (name, icon, tagline, instruction, optional project pin) that a user</td><td class="size">6 KB</td></tr>
+<tr><td><code>file-agent/file_agent/audit.py</code> <span class="kind">py</span></td><td class="purp">Aali audit log — who did what on the admin surface, when, from where. Every admin action (issue a key, revoke a key, delete an account) is appended here so the dashboard can show the trail: </td><td class="size">4 KB</td></tr>
+<tr><td><code>file-agent/file_agent/autocorrect.py</code> <span class="kind">py</span></td><td class="purp">Aali&#x27;s autocorrector: chat-speak, typos, and Arabic normalization. Owner request (2026-09-06): &quot;if the user says &#x27;hai dode&#x27; and meant &#x27;Hi Dude&#x27; - which one is more understandable? the correc</td><td class="size">8 KB</td></tr>
+<tr><td><code>file-agent/file_agent/brain_tree.py</code> <span class="kind">py</span></td><td class="purp">آلي Brain Tree — how Aali actually works, as a living tree (OWNER ONLY). The owner asked for a map he can watch LIVE: &quot;if user signed in what happen, if user start chat what happen, if user </td><td class="size">32 KB</td></tr>
+<tr><td><code>file-agent/file_agent/doc_tools.py</code> <span class="kind">py</span></td><td class="purp">Document readers for the Aali agent: PDF, Word, Excel. These wrap pypdf / python-docx / openpyxl. They are pure-Python and safe: they only read files inside the agent workspace (enforced by </td><td class="size">3 KB</td></tr>
+<tr><td><code>file-agent/file_agent/emoji.py</code> <span class="kind">py</span></td><td class="purp">Emoji intelligence for Aali: understand, react, and use them well. Owner request (2026-09-06): Aali must (1) understand the emotion inside the user&#x27;s emojis, (2) react to that feeling in his</td><td class="size">5 KB</td></tr>
+<tr><td><code>file-agent/file_agent/file_tools.py</code> <span class="kind">py</span></td><td class="purp">Sandboxed text-file operations exposed as function-callable tools.</td><td class="size">83 KB</td></tr>
+<tr><td><code>file-agent/file_agent/hwk_paths.py</code> <span class="kind">py</span></td><td class="purp">hwk_paths — where HWK/Aali keeps its stuff, on EVERY operating system. AGENTS.md says: *&quot;Never hardcode absolute user paths into library code; use hwk_paths.py&quot;*. This is that module. It exi</td><td class="size">4 KB</td></tr>
+<tr><td><code>file-agent/file_agent/memory.py</code> <span class="kind">py</span></td><td class="purp">Aali&#x27;s long-term memory: what the user said, when, and in what order. Design goals (owner request, 2026-09-06): - The user tells Aali something at 07:00 (&quot;do NOT push to GitHub&quot;); Aali must </td><td class="size">26 KB</td></tr>
+<tr><td><code>file-agent/file_agent/n8n_gen.py</code> <span class="kind">py</span></td><td class="purp">n8n workflow generator for Aali. Turns a short Arabic/English description into a valid n8n workflow JSON the user can import into their n8n editor (Workflows → Import from file/clipboard). P</td><td class="size">7 KB</td></tr>
+<tr><td><code>file-agent/file_agent/preview.py</code> <span class="kind">py</span></td><td class="purp">Owner preview mode — &quot;View as user&quot; (Track B 11.7, 2026-09-25). The owner can flip THEIR OWN session into a preview that resolves to the `user` role, to check exactly what a normal signed-in</td><td class="size">4 KB</td></tr>
+<tr><td><code>file-agent/file_agent/projects.py</code> <span class="kind">py</span></td><td class="purp">Projects + RAG knowledge base (Wave 2 #5+#6, 2026-09-25). The organizing layer everything else plugs into: a project groups conversations, carries a custom instruction (its &quot;system flavor&quot;),</td><td class="size">20 KB</td></tr>
+<tr><td><code>file-agent/file_agent/prompts.py</code> <span class="kind">py</span></td><td class="purp">Prompt library (Wave 3 #9, 2026-09-25). Built-in starter prompts (Arabic-first, English second) + per-user custom prompts stored ns-scoped (same u&lt;key_id&gt;/local contract as projects/shares).</td><td class="size">6 KB</td></tr>
+<tr><td><code>file-agent/file_agent/protocol.py</code> <span class="kind">py</span></td><td class="purp">Versioned, signed JSON message protocol for Aali Cloud (Hub ↔ Node ↔ Brain). SaaS mode transport contract (docs/SAAS_ARCHITECTURE.md STEP 2). Every message is a JSON object with: v — protoco</td><td class="size">14 KB</td></tr>
+<tr><td><code>file-agent/file_agent/reach.py</code> <span class="kind">py</span></td><td class="purp">آلي ريتش — Aali Reach: read a PUBLIC link, read-only, with a hard fence. A URL reader sitting next to ``run_command`` is the most dangerous tool in this repo, so the fence IS the feature and</td><td class="size">24 KB</td></tr>
+<tr><td><code>file-agent/file_agent/redaction.py</code> <span class="kind">py</span></td><td class="purp">Secret redaction — stdlib-only, shared by the brain, the Hub and the Node. Extracted from file_agent.memory (which hard-imports `requests`) so the Aali Node can redact tool output on the use</td><td class="size">1 KB</td></tr>
+<tr><td><code>file-agent/file_agent/roles.py</code> <span class="kind">py</span></td><td class="purp">Server-side role resolution (Track B 11.1, 2026-09-25). Contract -------- Exactly five roles, resolved ONLY here from server-verified facts: owner — the machine&#x27;s master: AALI_API_KEY holder</td><td class="size">6 KB</td></tr>
+<tr><td><code>file-agent/file_agent/search_index.py</code> <span class="kind">py</span></td><td class="purp">SQLite FTS5 search index over all conversations (Wave 1 #2, 2026-09-25). Design notes ------------ - stdlib sqlite3 only — no Elasticsearch/Meilisearch (owner rule). - FTS5 virtual table `me</td><td class="size">10 KB</td></tr>
+<tr><td><code>file-agent/file_agent/shares.py</code> <span class="kind">py</span></td><td class="purp">Shared conversations (Wave 3 #8, 2026-09-25). Read-only, tokened, expiring links to one conversation. The share token IS the credential (same pattern as the admin handoff): stored SHA-256-ha</td><td class="size">6 KB</td></tr>
+<tr><td><code>file-agent/file_agent/skills.py</code> <span class="kind">py</span></td><td class="purp">Skills: small markdown playbooks the agent can list and load on demand — the same idea as the well-known assistant Skills pattern, kept intentionally simple. A skill is a markdown file under</td><td class="size">2 KB</td></tr>
+<tr><td><code>file-agent/file_agent/suggestions.py</code> <span class="kind">py</span></td><td class="purp">Suggestion chips for Aali&#x27;s replies — the &quot;what next?&quot; engine. Owner request (2026-09-06): the senior agents suggest follow-up actions and the user just clicks one; Aali should do the same. </td><td class="size">4 KB</td></tr>
+<tr><td><code>file-agent/file_agent/tool_guard.py</code> <span class="kind">py</span></td><td class="purp">Serving-side tool-name validator: invented names never reach the tools. 2026-09-13 (v4/v5 graduation evidence): the 1.5B brain invents plausible tool names that are NOT in Aali&#x27;s registry — </td><td class="size">6 KB</td></tr>
+<tr><td><code>file-agent/file_agent/tool_orchestrator.py</code> <span class="kind">py</span></td><td class="purp">Tool orchestrator — routes proposed tool calls to their execution target. SaaS mode (AALI_MODE=saas): the brain never touches user machines directly. The brain *proposes* tool calls; this mo</td><td class="size">5 KB</td></tr>
+<tr><td><code>file-agent/file_agent/tts.py</code> <span class="kind">py</span></td><td class="purp">Piper TTS for Aali (Wave 1 #3, 2026-09-25; full contract 3.1-3.11). Design ------ - Piper runs in an ISOLATED venv (D:/hwk-tools/vision-venv) and is called as a SUBPROCESS from here — the tr</td><td class="size">10 KB</td></tr>
+<tr><td><code>file-agent/file_agent/web_tools.py</code> <span class="kind">py</span></td><td class="purp">Web tools: let Aali fetch a page and do a keyless web search. No API key is required (a DuckDuckGo HTML search endpoint is used, the same trick many no-key local agents rely on) — nothing he</td><td class="size">6 KB</td></tr>
+<tr><td><code>file-agent/hwk_model/__init__.py</code> <span class="kind">py</span></td><td class="purp">The from-scratch HWK language model.</td><td class="size">1 KB</td></tr>
+<tr><td><code>file-agent/hwk_model/bpe_tokenizer.py</code> <span class="kind">py</span></td><td class="purp">SentencePiece BPE tokenizer trained from scratch on our own corpus. This is still fully &quot;from scratch&quot;: the vocabulary is learned from the downloaded Arabic/English/code text; nothing is dow</td><td class="size">4 KB</td></tr>
+<tr><td><code>file-agent/hwk_model/generation.py</code> <span class="kind">py</span></td><td class="purp">Tokens that would COMPLETE an n-gram already seen in `generated`. 2026-09-14 run-5 lesson: the CTRL-style repetition penalty (divide the logit, one notch at a time) could NOT hold a 110M mod</td><td class="size">6 KB</td></tr>
+<tr><td><code>file-agent/hwk_model/model.py</code> <span class="kind">py</span></td><td class="purp">Small causal Transformer implemented from scratch with PyTorch. Uses rotary position embeddings (RoPE) instead of learned position vectors so the context window is a training-time choice rat</td><td class="size">8 KB</td></tr>
+<tr><td><code>file-agent/hwk_model/tokenizer.py</code> <span class="kind">py</span></td><td class="purp">A dependency-free UTF-8 byte tokenizer for Arabic and other languages.</td><td class="size">1 KB</td></tr>
+</table></div>
+<div class="area" data-area="build-desktop">
+<span class="count">16 ملف</span>
+<h3>تطبيقات سطح المكتب <span class="en">/ Desktop apps</span></h3>
+<div class="why">ثلاثة تطبيقات سطح مكتب مبنية من نفس العقل: آلي ستوديو (محرّر كامل)، آلي ديسكتوب (نافذة بسيطة)، و آلي CLI (طرفية).</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>build-desktop/Aali-Setup.iss</code> <span class="kind">iss</span></td><td class="purp">ملف</td><td class="size">2 KB</td></tr>
+<tr><td><code>build-desktop/MAC-START-HERE.md</code> <span class="kind">md</span></td><td class="purp">Aali Studio on the Mac — where to start</td><td class="size">4 KB</td></tr>
+<tr><td><code>build-desktop/aali-cli.spec</code> <span class="kind">spec</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>build-desktop/version_info.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/Aali-Studio.spec</code> <span class="kind">spec</span></td><td class="purp">ملف</td><td class="size">5 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/build-mac.sh</code> <span class="kind">sh</span></td><td class="purp">============================================================</td><td class="size">3 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/build.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/models_proxy.py</code> <span class="kind">py</span></td><td class="purp">Aali Studio — model registry, API adapters and the key store. Everything here is **API only**: Studio never downloads a model to the PC. The default model, HWK-AZiZA, is not an API at all — </td><td class="size">17 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/studio_app.py</code> <span class="kind">py</span></td><td class="purp">آلي ستوديو — desktop window (pywebview/WebView2) around the Studio server. One window, one Flask server on 127.0.0.1:5070, no install and no cloud: the IDE works with the machine&#x27;s own brain</td><td class="size">6 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/studio_server.py</code> <span class="kind">py</span></td><td class="purp">آلي ستوديو — Aali Studio&#x27;s Flask backend (port 5070). A three-pane desktop IDE around the owner&#x27;s own brain. The AGENT PANEL is the heart of it: every turn is streamed as a small event vocab</td><td class="size">61 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/update_ui.py</code> <span class="kind">py</span></td><td class="purp">آلي ستوديو — the four update surfaces, rendered on the SERVER. Why server-rendered HTML instead of JS string templates: every label, every control id and the whole banner/dialog copy become </td><td class="size">13 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/updater.py</code> <span class="kind">py</span></td><td class="purp">آلي ستوديو — the Studio side of the universal updater. Thin on purpose. Every security decision (verify, refuse, zip-slip, retain the previous version) lives in :mod:`shared.updater`; this m</td><td class="size">18 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/version.py</code> <span class="kind">py</span></td><td class="purp">آلي ستوديو — the version triple every update surface reads. Three values, one module, so the status bar, the settings dialog, the About box, the CLI-facing ``--version`` and the PUBLISH scri</td><td class="size">3 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/web/app.js</code> <span class="kind">js</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">51 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/web/index.html</code> <span class="kind">html</span></td><td class="purp">آلي ستوديو — Aali Studio</td><td class="size">10 KB</td></tr>
+<tr><td><code>build-desktop/aali-studio/web/style.css</code> <span class="kind">css</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">24 KB</td></tr>
+</table></div>
+<div class="area" data-area="ios">
+<span class="count">6 ملف</span>
+<h3>تطبيق الآيفون <span class="en">/ The iPhone app</span></h3>
+<div class="why">تطبيق آلي للآيفون بواجهة SwiftUI، يتصل بنفس العقل عبر الشبكة.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>ios/Aali/APIClient.swift</code> <span class="kind">swift</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">4 KB</td></tr>
+<tr><td><code>ios/Aali/AaliApp.swift</code> <span class="kind">swift</span></td><td class="purp">آلي — Aali for iOS</td><td class="size">0 KB</td></tr>
+<tr><td><code>ios/Aali/ChatView.swift</code> <span class="kind">swift</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">10 KB</td></tr>
+<tr><td><code>ios/Aali/SettingsView.swift</code> <span class="kind">swift</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">4 KB</td></tr>
+<tr><td><code>ios/Aali/Theme.swift</code> <span class="kind">swift</span></td><td class="purp">Deep-ink night + warm amber-gold, matching the web client.</td><td class="size">3 KB</td></tr>
+<tr><td><code>ios/Aali.xcodeproj/project.pbxproj</code> <span class="kind">pbxproj</span></td><td class="purp">ملف</td><td class="size">7 KB</td></tr>
+</table></div>
+<div class="area" data-area="web">
+<span class="count">24 ملف</span>
+<h3>تطبيق الويب <span class="en">/ The web client</span></h3>
+<div class="why">واجهة آلي في المتصفح — تعمل على أي جهاز بدون تثبيت.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>web/app.js</code> <span class="kind">js</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">4 KB</td></tr>
+<tr><td><code>web/icon.svg</code> <span class="kind">svg</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>web/index.html</code> <span class="kind">html</span></td><td class="purp">آلي — عقلك المحلي</td><td class="size">1 KB</td></tr>
+<tr><td><code>web/manifest.webmanifest</code> <span class="kind">webmanifest</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>web/package-lock.json</code> <span class="kind">json</span></td><td class="purp">ملف</td><td class="size">62 KB</td></tr>
+<tr><td><code>web/package.json</code> <span class="kind">json</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>web/signup.html</code> <span class="kind">html</span></td><td class="purp">آلي — إنشاء مفتاحك</td><td class="size">5 KB</td></tr>
+<tr><td><code>web/styles.css</code> <span class="kind">css</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">15 KB</td></tr>
+<tr><td><code>web/sw.js</code> <span class="kind">js</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>web/tsconfig.json</code> <span class="kind">json</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>web/vite.config.ts</code> <span class="kind">ts</span></td><td class="purp">base &#x27;./&#x27; keeps asset paths relative -&gt; works on GitHub Pages AND Flask /ui/</td><td class="size">0 KB</td></tr>
+<tr><td><code>web/src/App.tsx</code> <span class="kind">tsx</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">103 KB</td></tr>
+<tr><td><code>web/src/Auth.tsx</code> <span class="kind">tsx</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">6 KB</td></tr>
+<tr><td><code>web/src/api.ts</code> <span class="kind">ts</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">26 KB</td></tr>
+<tr><td><code>web/src/github.ts</code> <span class="kind">ts</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>web/src/main.tsx</code> <span class="kind">tsx</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>web/src/markdown.tsx</code> <span class="kind">tsx</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">8 KB</td></tr>
+<tr><td><code>web/src/styles.css</code> <span class="kind">css</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">55 KB</td></tr>
+<tr><td><code>web/src/theme.ts</code> <span class="kind">ts</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>web/src/store/role.tsx</code> <span class="kind">tsx</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">4 KB</td></tr>
+<tr><td><code>web/voice/app.js</code> <span class="kind">js</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">6 KB</td></tr>
+<tr><td><code>web/voice/index.html</code> <span class="kind">html</span></td><td class="purp">آلي — محادثة صوتية</td><td class="size">1 KB</td></tr>
+<tr><td><code>web/voice/studio.html</code> <span class="kind">html</span></td><td class="purp">استوديو الصوت — آلي</td><td class="size">13 KB</td></tr>
+<tr><td><code>web/voice/style.css</code> <span class="kind">css</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+</table></div>
+<div class="area" data-area="aali_hub">
+<span class="count">17 ملف</span>
+<h3>المركز السحابي (SaaS) <span class="en">/ The cloud hub</span></h3>
+<div class="why">مركز آلي السحابي: حسابات، طابور، واشتراكات، وتحديثات موقّعة.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>aali_hub/__init__.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub — the broker between brains, nodes and external clients.</td><td class="size">0 KB</td></tr>
+<tr><td><code>aali_hub/admin_api.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub admin API — owner/admin-only management endpoints. Gating: requests must carry ``Authorization: Bearer &lt;access JWT&gt;`` whose claims resolve to role ``admin`` or ``owner``. Every muta</td><td class="size">8 KB</td></tr>
+<tr><td><code>aali_hub/app_updates.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub — per-app, per-platform signed update store (studio · desktop · cli). The single-app store in :mod:`aali_hub.update_server` exists for the Aali Node and keeps working untouched (bac</td><td class="size">19 KB</td></tr>
+<tr><td><code>aali_hub/audit.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub audit log — append-only JSONL of every tool_call. Content-free by contract: each record holds who/what/when/where-outcome — {ts, user_id, tool, args_hash, status, duration_ms, node_</td><td class="size">3 KB</td></tr>
+<tr><td><code>aali_hub/auth.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub authentication — JWT minting/verification + brain token check. HS256 JWTs. Uses PyJWT when importable; otherwise a small standards-compliant stdlib implementation (base64url + HMAC-</td><td class="size">5 KB</td></tr>
+<tr><td><code>aali_hub/config.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub configuration — env-var driven, no hardcoded paths. Every value is overridable via environment variables; defaults are safe for local development only. Secrets (JWT secret, brain to</td><td class="size">6 KB</td></tr>
+<tr><td><code>aali_hub/main.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub main — FastAPI app factory wiring every router together. Mounts: /health, /metrics, /api/admin/*, /api/auth/*, /v1/* (OpenAI surface), /ws/brain, /ws/node. The heavy per-route logic</td><td class="size">11 KB</td></tr>
+<tr><td><code>aali_hub/model_registry.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub model registry — one catalog of every model version. Tracks checkpoints, promoted adapters, GGUF exports and HuggingFace uploads so every layer (Hub /v1 surface, admin API, future O</td><td class="size">8 KB</td></tr>
+<tr><td><code>aali_hub/openai_compat.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub OpenAI-compatible /v1 surface — the external distribution entry. Mirrors the brain&#x27;s existing /v1 endpoints (file-agent/app.py, tested in tests/test_openai_compat.py) but adds Hub c</td><td class="size">7 KB</td></tr>
+<tr><td><code>aali_hub/protocol.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub protocol shim — re-exports the shared signed-message protocol. The single source of truth for the wire protocol is ``file-agent/file_agent/protocol.py`` (stdlib-only, tested there).</td><td class="size">1 KB</td></tr>
+<tr><td><code>aali_hub/queue.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub request queue — admission control, fair ordering, circuit breaker. Pure in-process state (single-process FastAPI service on the VPS). All limits live in :class:`aali_hub.config.HubC</td><td class="size">9 KB</td></tr>
+<tr><td><code>aali_hub/update_api.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub update API — the HTTP surface over aali_hub.update_server. Public (any authenticated user): GET /updates/latest → newest valid manifest GET /updates/{version}/manifest → one valid m</td><td class="size">15 KB</td></tr>
+<tr><td><code>aali_hub/update_server.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub update server — signed manifests + binaries for the Aali Node. Manifest shape (stored as &lt;version&gt;.json next to the artifact): {version, min_version, url, sha256, signature, release</td><td class="size">12 KB</td></tr>
+<tr><td><code>aali_hub/user_context.py</code> <span class="kind">py</span></td><td class="purp">Per-user execution context for Aali Cloud SaaS mode (STEP 4). Shared by the brain (file-agent/app.py) and testable in any venv. Identity model: the Hub authenticates every user and forwards </td><td class="size">3 KB</td></tr>
+<tr><td><code>aali_hub/users_db.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub user database — SQLite (Postgres migration later). Tables: users — id, email (unique), password_hash, role, created_at, disabled, email_verified api_keys — key_hash (sha256), user_i</td><td class="size">14 KB</td></tr>
+<tr><td><code>aali_hub/wol.py</code> <span class="kind">py</span></td><td class="purp">Wake-on-LAN sender — wakes the brain PC when a request arrives. Builds the standard WoL magic packet (6×0xFF followed by the MAC repeated 16×) and broadcasts it over UDP. No external depende</td><td class="size">2 KB</td></tr>
+<tr><td><code>aali_hub/ws_gateway.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub WebSocket gateway — connects Brains and Nodes to the Hub. Transport auth (``hello`` handshake, NOT part of the signed protocol): Node → {&quot;type&quot;: &quot;hello&quot;, &quot;role&quot;: &quot;node&quot;, &quot;token&quot;: &lt;u</td><td class="size">15 KB</td></tr>
+</table></div>
+<div class="area" data-area="aali_node">
+<span class="count">10 ملف</span>
+<h3>عقدة آلي على جهاز المستخدم <span class="en">/ The Aali Node</span></h3>
+<div class="why">العميل الذي يعمل على حاسوب المستخدم ويأمر من远程.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>aali_node/__init__.py</code> <span class="kind">py</span></td><td class="purp">Aali Node — the user-side execution half of Aali Cloud (STEP 5). The Node runs on the USER&#x27;s machine and is the ONLY thing that touches the user&#x27;s files there. The brain proposes tool calls;</td><td class="size">1 KB</td></tr>
+<tr><td><code>aali_node/__main__.py</code> <span class="kind">py</span></td><td class="purp">بلا وصف</td><td class="size">0 KB</td></tr>
+<tr><td><code>aali_node/activate.py</code> <span class="kind">py</span></td><td class="purp">Aali Node update ACTIVATION — swap a staged, verified update into place. The updater (aali_node/updater.py) only STAGES verified artifacts under ``&lt;install_root&gt;/staged/&lt;version&gt;/``; this mo</td><td class="size">11 KB</td></tr>
+<tr><td><code>aali_node/config_screen.py</code> <span class="kind">py</span></td><td class="purp">Aali Node in-shell first-run config screen — the UI half of Q4. Owner decision (Q4): first-run entry is BUILT. The daemon CLI can only take --token from a flag/env/saved config; this screen </td><td class="size">13 KB</td></tr>
+<tr><td><code>aali_node/confirm.py</code> <span class="kind">py</span></td><td class="purp">User confirmation for dangerous tool calls (docs/SAAS_ARCHITECTURE.md §5). The sandbox asks via ``confirm_hook``; this module supplies the two real implementations: - :func:`native_confirm` </td><td class="size">19 KB</td></tr>
+<tr><td><code>aali_node/daemon.py</code> <span class="kind">py</span></td><td class="purp">Aali Node daemon — connects to the Aali Hub and executes tool calls. Runs headless (no UI) so every shell works: bash, zsh, PowerShell, CMD:: python -m aali_node --hub ws://127.0.0.1:8080 --</td><td class="size">25 KB</td></tr>
+<tr><td><code>aali_node/node_config.py</code> <span class="kind">py</span></td><td class="purp">Aali Node first-run config — the Hub/token entry screen&#x27;s storage half. Owner decision (Q4, 2026-09-15): first-run entry is BUILT, persisted to a local JSON file so the user types the Hub UR</td><td class="size">9 KB</td></tr>
+<tr><td><code>aali_node/sandbox.py</code> <span class="kind">py</span></td><td class="purp">Aali Node sandbox — the security boundary for user-side execution. Every proposed tool call from the brain arrives over the Hub and MUST be validated here before anything runs. The rules (do</td><td class="size">14 KB</td></tr>
+<tr><td><code>aali_node/shell.py</code> <span class="kind">py</span></td><td class="purp">Aali Node shell — the GUI half of STEP 5: pywebview window + system tray. The shell is UI ONLY on top of exactly the headless daemon&#x27;s calls: it starts ``daemon.run_node`` in a thread (``nat</td><td class="size">18 KB</td></tr>
+<tr><td><code>aali_node/updater.py</code> <span class="kind">py</span></td><td class="purp">Aali Node updater — signed update checks against the Aali Hub. The Node never trusts the Hub&#x27;s word: every manifest is signature-verified (aali_hub.update_server.verify_manifest — Ed25519 vi</td><td class="size">9 KB</td></tr>
+</table></div>
+<div class="area" data-area="aali_monitor">
+<span class="count">4 ملف</span>
+<h3>شاشة المراقبة <span class="en">/ The monitor</span></h3>
+<div class="why">لوحة مراقبة: صحة العقل، كرت الشاشة، والوظائف الجارية.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>aali_monitor/__init__.py</code> <span class="kind">py</span></td><td class="purp">Aali Monitor — desktop watcher package (2026-09-25). Owner-ordered side project: a tray + window companion that watches the real D:/hwk-data logs and the live services, with Arabic-first ale</td><td class="size">0 KB</td></tr>
+<tr><td><code>aali_monitor/__main__.py</code> <span class="kind">py</span></td><td class="purp">Aali Monitor — desktop watcher for Aali&#x27;s long jobs (2026-09-25). Usage: python -m aali_monitor # GUI (pywebview + tray) python -m aali_monitor --headless # console-only alerts python -m aal</td><td class="size">2 KB</td></tr>
+<tr><td><code>aali_monitor/core.py</code> <span class="kind">py</span></td><td class="purp">Aali Monitor core (2026-09-25, owner-ordered side project). A tiny desktop companion that watches Aali&#x27;s long jobs from the REAL logs in D:/hwk-data and raises a tray notification when somet</td><td class="size">8 KB</td></tr>
+<tr><td><code>aali_monitor/shell.py</code> <span class="kind">py</span></td><td class="purp">Aali Monitor shell — pywebview window + pystray tray (2026-09-25). Same proven mechanics as aali_node/shell.py (same dependency set, already debugged there): a pywebview window over a poller</td><td class="size">10 KB</td></tr>
+</table></div>
+<div class="area" data-area="scripts">
+<span class="count">156 ملف</span>
+<h3>الأدوات والسكربتات <span class="en">/ Tools &amp; scripts</span></h3>
+<div class="why">كل الأدوات: بناء، تشغيل، مراقبة، نسخ احتياطي، ورسوم owner&#x27;s guides.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>scripts/_phase35_code_docs.py</code> <span class="kind">py</span></td><td class="purp">One-off: append the code-comments source block to SOURCES.md (2026-10-02).</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/_phase35_docs.py</code> <span class="kind">py</span></td><td class="purp">One-off: append Phase 3.5 sections to D:/hwk-data/hebrew docs (2026-10-02). Appends to LICENSE_REPORT.md and SOURCES.md; idempotent (marker-guarded). Numbers come from the live probe/fetch r</td><td class="size">7 KB</td></tr>
+<tr><td><code>scripts/_phase35_hplt_docs.py</code> <span class="kind">py</span></td><td class="purp">One-off: append the HPLT sample block to STATS.md + SOURCES.md (2026-10-02).</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/_probe_phase_c_brain.py</code> <span class="kind">py</span></td><td class="purp">Throwaway diagnostic (Buffy night 2026-09-14): probe Phase C SFT vs raw Phase B with the runtime&#x27;s EXACT serving prompt (System + tools + User + instruction), the format _local_model_loop ac</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/_probe_sefaria.py</code> <span class="kind">py</span></td><td class="purp">Sefaria-Export probe (Hebrew Phase 3.5, source 3.5.1) — one-off recon. Answers, before any real fetch: 1. books.json index shape (entry count, keys, languages, license presence). 2. Full GCS</td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/_read_step.py</code> <span class="kind">py</span></td><td class="purp">Print (saved trainer step + extra) from a trainer-state.pt checkpoint. Used by sft_now.bat to compute --max-steps without embedding single quotes in a batch `for /f` command (cmd.exe&#x27;s for /</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/aali_autostart.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/aali_brain_watchdog.py</code> <span class="kind">py</span></td><td class="purp">Aali brain watchdog - revives the promoted brain (:20129) mid-session. 2026-09-23 lesson: the API (:5055) had a watchdog, the brain (:20129) did not - the soup server died after the trainer </td><td class="size">9 KB</td></tr>
+<tr><td><code>scripts/aali_cli.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/aali_cli.py</code> <span class="kind">py</span></td><td class="purp">Aali CLI — a pro-style terminal client for the Aali server. Colorful, animated, Linux-terminal look: banner box, gold prompt, live spinner while Aali thinks, tool lines streaming as he works</td><td class="size">89 KB</td></tr>
+<tr><td><code>scripts/aali_connect.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/aali_deploy.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/aali_desktop.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/aali_domain.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/aali_guide.html</code> <span class="kind">html</span></td><td class="purp">دليل تشغيل آلي</td><td class="size">8 KB</td></tr>
+<tr><td><code>scripts/aali_hub_secrets.py</code> <span class="kind">py</span></td><td class="purp">Aali Hub production secrets — one-shot generator for the owner (Q8 prep). Creates a secrets directory OUTSIDE the repo (default ``D:/hwk-data/aali-hub-secrets`` on the owner&#x27;s machine, ``~/.</td><td class="size">7 KB</td></tr>
+<tr><td><code>scripts/aali_jobs.py</code> <span class="kind">py</span></td><td class="purp">Live jobs snapshot — one source for CLI /jobs and the desktop pill. Owner request (2026-09-23): see in the CLI and the desktop app which jobs are running right now, like the Freebuff screen.</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/aali_monitor.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/aali_open_network.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/aali_server_watchdog.py</code> <span class="kind">py</span></td><td class="purp">Aali server watchdog - revives the Flask server mid-session. 2026-09-22 lesson: the logon autostart guard only fires at boot, and the server died silently between sessions anyway. This polle</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/aali_share.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/aali_studio.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/aali_tunnel.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/after_phaseA.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/arena_probe.py</code> <span class="kind">py</span></td><td class="purp">Probe arena.ai&#x27;s anonymous chat UI: does a textbox exist, what does the page offer?</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/audit_mentor_lab.py</code> <span class="kind">py</span></td><td class="purp">Audit the mentor-lab episodes: keep only builds that actually work. Every lab episode claims the external mentor built something in its sandbox. This audit VERIFIES the claim (evidence first</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/audit_refusal_gates.py</code> <span class="kind">py</span></td><td class="purp">Audit: do the LIVE policy gates hold when checkpoint-3873 complies? The distillation run (tasks/distill-teacher-scratch.md) caught the promoted brain COMPLYING with refusal seeds at the gene</td><td class="size">9 KB</td></tr>
+<tr><td><code>scripts/bootstrap_sft_state.py</code> <span class="kind">py</span></td><td class="purp">Bootstrap an SFT-ready trainer state from the Phase B pretrained model. Phase B (pretraining, 100,000 steps / 3.28B tokens on the pile+arabic corpora with OUR OWN tokenizer) left final.pt / </td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/build_aali_sft_scratch.py</code> <span class="kind">py</span></td><td class="purp">Build sft_scratch.jsonl: the SFT mix in Aali&#x27;s SCRATCH serving shape. Run-7 diagnosis (2026-09-26, tasks/phase-c-own-brain-sft-relaunch.md): the model was taught rows shaped like the SOUP se</td><td class="size">11 KB</td></tr>
+<tr><td><code>scripts/build_aali_sft_small.py</code> <span class="kind">py</span></td><td class="purp">Build a SMALL-MODEL-targeted SFT mix from sft_v2.jsonl (Phase C run 6+). 2026-09-14 run-5 lesson: the 110M own-brain trained on the full 5,434-row mix served real Arabic (1,719 short-Arabic-</td><td class="size">11 KB</td></tr>
+<tr><td><code>scripts/build_aali_sft_v2.py</code> <span class="kind">py</span></td><td class="purp">Build Aali&#x27;s re-SFT dataset (sft_v2) from every source we now have. Fixes the failures documented in the recovery report: the old sft_mix was 99.6% English Alpaca, over-trained ~32 epochs, c</td><td class="size">128 KB</td></tr>
+<tr><td><code>scripts/build_all_macos.sh</code> <span class="kind">sh</span></td><td class="purp">============================================================</td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/build_brain_vault.py</code> <span class="kind">py</span></td><td class="purp">Export the آلي Brain Tree as an Obsidian vault (OWNER ONLY). Usage: python scripts/build_brain_vault.py # default: D:/hwk-data/aali-brain-vault python scripts/build_brain_vault.py --out X:/h</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/build_desktop.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/build_node.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/checkpoint_watchdog.py</code> <span class="kind">py</span></td><td class="purp">Checkpoint watchdog: archive every Phase A checkpoint save to a backup dir. The trainer overwrites checkpoint.pt / trainer-state.pt / final.pt in place every --save-steps, so a crash between</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/cli_update.py</code> <span class="kind">py</span></td><td class="purp">آلي CLI — the terminal client&#x27;s auto-update (same contract, same code path). Third client on :mod:`shared.updater`, so there is still ONE security story: never trust the hub, verify SHA256 +</td><td class="size">24 KB</td></tr>
+<tr><td><code>scripts/distill_teacher.py</code> <span class="kind">py</span></td><td class="purp">Distill the PROMOTED teacher into scratch-shaped SFT rows (sft_distill.jsonl). Why (tasks/distill-teacher-scratch.md): run-8 proved the SCRATCH row shape is right but the mix&#x27;s completion si</td><td class="size">19 KB</td></tr>
+<tr><td><code>scripts/download_teacher.py</code> <span class="kind">py</span></td><td class="purp">Download the Soup teacher model once into D:/hwk-models (soup serve/train expect a LOCAL model directory — they do not fetch from the HF hub).</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/exam_tool_calling.py</code> <span class="kind">py</span></td><td class="purp">Held-out exam for Aali&#x27;s tool-calling / honesty behaviour. Every case in data/exam_tool_calling.jsonl uses wording that never appears in data/tool_calling_sft.jsonl or data/sft_mix.jsonl - t</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/extend_context.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/extract_benyehuda.py</code> <span class="kind">py</span></td><td class="purp">Extract Project Ben-Yehuda texts to JSONL (Phase 3.2). Input: the verified git clone at raw/benyehuda_repo (pseudocatalogue.csv + txt/&lt;path&gt;.txt, PUBLIC DOMAIN per the repo&#x27;s own LICENSE). O</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/extract_hebrew_wiki.py</code> <span class="kind">py</span></td><td class="purp">Extract Hebrew Wikimedia dumps to JSON with wikiextractor (Phase 2/3). Runs the D:/hwk-tools/hebrew-venv wikiextractor per verified dump part into D:/hwk-data/hebrew/extracted/&lt;wiki&gt;/part&lt;N&gt;</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/extract_hplt_sample.py</code> <span class="kind">py</span></td><td class="purp">Extract the HPLT v2 Hebrew SAMPLE into the corpus JSONL (Phase 3.5.4). Owner decision (2026-10-02): keep the SAMPLED 1 GB prefix of the HPLT v2 cleaned heb_Hebr shard only (~507M tokens esti</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/fetch_arabic_corpus.py</code> <span class="kind">py</span></td><td class="purp">Fetch public Arabic corpora for Aali&#x27;s pretraining + Arabic SFT seeds. Sources (all public/open, no keys): - Arabic news text (OSCAR-ish, Gutenberg AraBERT sample, public mirrors) - Arabic W</td><td class="size">12 KB</td></tr>
+<tr><td><code>scripts/fetch_benyehuda.py</code> <span class="kind">py</span></td><td class="purp">Fetch the Project Ben-Yehuda public-domain dump (Phase 3.2). Source: github.com/projectbenyehuda/public_domain_dump — the rights holder&#x27;s own repository. LICENSE in that repo states the data</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/fetch_code_comments.py</code> <span class="kind">py</span></td><td class="purp">Hebrew code comments from permissive GitHub repos (Phase 3.5.3). Owner decision (2026-10-02): try UNAUTHENTICATED. GitHub&#x27;s CODE search API hard-requires auth (verified live: 401), so this u</td><td class="size">10 KB</td></tr>
+<tr><td><code>scripts/fetch_hebrew_wiki.py</code> <span class="kind">py</span></td><td class="purp">Resume-safe Wikimedia dump fetcher for the Hebrew data pipeline. Phase 2 of the Hebrew collection (tasks/hebrew-data-collection.md): downloads the pages-articles dump parts for a wiki (defau</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/fetch_knesset.py</code> <span class="kind">py</span></td><td class="purp">Fetch the Knesset Corpus sentence shards (Hebrew Phase 3.5, source 3.5.2). Source: HaifaCLGroup/KnessetCorpus on HuggingFace — an annotated corpus of Hebrew parliamentary proceedings (plenar</td><td class="size">12 KB</td></tr>
+<tr><td><code>scripts/fetch_sefaria.py</code> <span class="kind">py</span></td><td class="purp">Fetch Sefaria-Export Hebrew texts (Hebrew Phase 3.5, source 3.5.1). The Sefaria-Export GitHub repo is a lightweight index; the actual texts (~26 GB) live in the public GCS bucket gs://sefari</td><td class="size">18 KB</td></tr>
+<tr><td><code>scripts/finish_babysit.py</code> <span class="kind">py</span></td><td class="purp">Babysitter: neutralize smoke-probe cycles while the OLD pipeline runs. 2026-09-12 14:47 decision: the live run&#x27;s trainer starves host RAM (its own memory keeps growing), so every remaining s</td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/finish_pipeline.py</code> <span class="kind">py</span></td><td class="purp">Salvage finisher for a pipeline run whose code predates the tuned-exam fix. The run launched at 2026-09-12 12:48 imported the OLD soup_pipeline (the 09-09 rewrite silently dropped `tuned = r</td><td class="size">7 KB</td></tr>
+<tr><td><code>scripts/generate_emoji.py</code> <span class="kind">py</span></td><td class="purp">Generate custom emojis FROM SCRATCH with Pillow (no AI model needed). Aali&#x27;s generate_emoji tool backend: draws a designed emoji face on a transparent canvas - emotion shapes, skin/color the</td><td class="size">8 KB</td></tr>
+<tr><td><code>scripts/hebrew_corpus_stats.py</code> <span class="kind">py</span></td><td class="purp">Quick pre-cleaning stats for extracted Hebrew Wikipedia (Phase 2.3). Streams every JSON output file, counts articles + Hebrew-char share (sanity: the corpus must be predominantly Hebrew scri</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/hf_deploy.py</code> <span class="kind">py</span></td><td class="purp">One-shot Aali deployment to a Hugging Face Space (Docker SDK). Logs in with the owner&#x27;s credentials (passed via HF_EMAIL / HF_PASSWORD env — NEVER hard-coded), creates a scoped access token,</td><td class="size">8 KB</td></tr>
+<tr><td><code>scripts/hf_uploader.py</code> <span class="kind">py</span></td><td class="purp">HuggingFace uploader for Aali checkpoints — STEP 10.3. Converts the repo&#x27;s native checkpoint format (``{config, model, step, tokenizer}`` from hwk_model.save_checkpoint, final.pt / checkpoin</td><td class="size">9 KB</td></tr>
+<tr><td><code>scripts/idle_sleep_guard.py</code> <span class="kind">py</span></td><td class="purp">Idle sleep guard for the home PC - decides when the PC MAY sleep. Pairs with the Pi sentinel (scripts/pi_sentinel_catcher.py): the Pi runs 24/7 and wakes this PC with a Wake-on-LAN magic pac</td><td class="size">10 KB</td></tr>
+<tr><td><code>scripts/image_gen_tool.py</code> <span class="kind">py</span></td><td class="purp">HWK image generation: text prompt -&gt; PNG file, via a local Stable Diffusion model. Called by the agent&#x27;s generate_image tool. Runs as its own subprocess (torch + diffusers are heavy imports </td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/image_tools.py</code> <span class="kind">py</span></td><td class="purp">HWK image tools: text-to-image and image-editing with Stable Diffusion. Run with the SD venv&#x27;s python but the project&#x27;s CUDA torch on PYTHONPATH so we never touch the training environment: P</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/launch_detached.py</code> <span class="kind">py</span></td><td class="purp">Generic detached launcher: run a command with NO console, survive closes. 2026-09-12 12:20 lesson: every process living in a visible console dies with it - a console Ctrl+C/close event swept</td><td class="size">7 KB</td></tr>
+<tr><td><code>scripts/machine_ops.py</code> <span class="kind">py</span></td><td class="purp">Machine operations for the HWK agent: Aali&#x27;s hands on the PC. Wrapped by file_agent/file_tools.py::machine_ops in a subprocess. Capabilities requested by the owner (2026-09-06): open apps, i</td><td class="size">12 KB</td></tr>
+<tr><td><code>scripts/make_aali_guide.py</code> <span class="kind">py</span></td><td class="purp">Build Aali-Guide-&lt;date&gt;.pdf — illustrated Arabic guide with real app screenshots. Pages are composed as A4 bitmaps with PIL (raqm handles Arabic shaping) and wrapped in a minimal PDF that em</td><td class="size">14 KB</td></tr>
+<tr><td><code>scripts/make_cli_gif.py</code> <span class="kind">py</span></td><td class="purp">Render the Aali-CLI demo GIF (docs/assets/aali_cli_demo.gif). Draws Claude Code-style terminal frames with PIL: window chrome (traffic lights + title), a dark Linux-terminal body, truecolor </td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/make_connection_guide.py</code> <span class="kind">py</span></td><td class="purp">Simple picture guides for connecting the phone and the Mac to Aali. The owner asked for &quot;explain like I&#x27;m 5&quot; pictures: big shapes, few words, numbers in order. Two PNGs are rendered to the D</td><td class="size">11 KB</td></tr>
+<tr><td><code>scripts/make_desktop_shortcuts.ps1</code> <span class="kind">ps1</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/make_hwk_icon.py</code> <span class="kind">py</span></td><td class="purp">Generate the آلي Desktop app icon: HWK monogram on deep ink. The owner asked for the three letters &quot;HWK&quot; on the icon — deep-ink rounded square, gold border, bold gold HWK centered. Writes bu</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/make_icon_icns.py</code> <span class="kind">py</span></td><td class="purp">Build a macOS ``icon.icns`` from the PNGs already in the repo — stdlib only. Why this exists: the owner&#x27;s MacBook proved a claim in docs/PORTING.md a lie. Every .sh ran fine (the LF fix held</td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/make_icons.py</code> <span class="kind">py</span></td><td class="purp">Generate PWA PNG icons matching web/icon.svg (amber star on deep ink).</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/make_owner_map.py</code> <span class="kind">py</span></td><td class="purp">Owner map — one page that explains the whole project. The owner asked: &quot;as the owner I want to know what each file does and what he made for. Make me a giant graph.&quot; What this builds (one se</td><td class="size">15 KB</td></tr>
+<tr><td><code>scripts/make_print_sft.py</code> <span class="kind">py</span></td><td class="purp">Print-skill SFT episodes - teach Aali the print_file tool behaviorally. 2026-09-22 night, Buffy (owner request: a printer is attached to the PC and network). Episodes follow the repo&#x27;s exact</td><td class="size">10 KB</td></tr>
+<tr><td><code>scripts/media_edit.py</code> <span class="kind">py</span></td><td class="purp">Fast media editing for the HWK agent: Pillow for images, ffmpeg for video/audio. Called by file_agent/file_tools.py (edit_image / edit_video) in a subprocess so heavy work never blocks the a</td><td class="size">13 KB</td></tr>
+<tr><td><code>scripts/memory_review.py</code> <span class="kind">py</span></td><td class="purp">آلي memory review — what does Aali remember about you, and full control. Owner-facing tool (2026-09-06 request): see every long-term memory entry with its date and topic, edit, delete, and s</td><td class="size">8 KB</td></tr>
+<tr><td><code>scripts/mentor_capture.py</code> <span class="kind">py</span></td><td class="purp">Mentor capture: turn senior coding-agent session logs into SFT episodes Aali can learn from - INCLUDING the failures. The owner&#x27;s request (2026-09-06): capture what the user asked, what the </td><td class="size">13 KB</td></tr>
+<tr><td><code>scripts/mission_clock.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/mission_clock.py</code> <span class="kind">py</span></td><td class="purp">Mission clock - a colorful watch-party dashboard for Aali&#x27;s long jobs. The owner asked for something fun to stare at while the GPU cooks: moving clocks, the processes that are pending, how f</td><td class="size">23 KB</td></tr>
+<tr><td><code>scripts/mock_aali_api.py</code> <span class="kind">py</span></td><td class="purp">Mock Aali API for UI development and testing — NO GPU, NO real brain. Serves canned /api/* responses (same shapes as file-agent/app.py) plus the built web app from web/dist at /ui/. Used to </td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/n8n_hwk_ask.json</code> <span class="kind">json</span></td><td class="purp">ملف</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/night_caretaker.py</code> <span class="kind">py</span></td><td class="purp">Night caretaker: the autonomous operator while the owner sleeps. Modernized 2026-09-10 for the Phase B -&gt; graduation handoff. Runs for up to 20 hours, checking every 10 minutes: 1. WATCHES P</td><td class="size">13 KB</td></tr>
+<tr><td><code>scripts/omniroute_mentor_lab.py</code> <span class="kind">py</span></td><td class="purp">OmniRoute mentor lab: the external mentor builds 30 things through AALI&#x27;s tool layer. The owner&#x27;s learning-loop request (2026-09-06): have a strong external model ( via the local OmniRoute g</td><td class="size">20 KB</td></tr>
+<tr><td><code>scripts/overnight_arena.py</code> <span class="kind">py</span></td><td class="purp">Overnight Aali-vs-reference arena — same tasks to both agents, all night. The owner&#x27;s order (2026-09-07, before sleep): &quot;Let Aali talk and act like Senior-agent comparison... test on both un</td><td class="size">15 KB</td></tr>
+<tr><td><code>scripts/overnight_model_arena.py</code> <span class="kind">py</span></td><td class="purp">Overnight multi-AI arena — the owner&#x27;s last order before sleep (2026-09-08): &quot;chat all night with many AI as you can (9+ models, different companies), ask Aali the same questions, compare, f</td><td class="size">10 KB</td></tr>
+<tr><td><code>scripts/pc_tour_test.py</code> <span class="kind">py</span></td><td class="purp">PC capability tour. Exercises the REAL agent tools (file-agent.file_agent.file_tools) the same way the agent would — writes stay inside the workspace (D:\\\\hwk-projects\\\\_pctour) — and th</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/phase_c_after_v4.py</code> <span class="kind">py</span></td><td class="purp">Phase C chain: after the v4 soup run finishes, SFT Aali&#x27;s OWN brain. Aali&#x27;s from-zero pretrained model exists (Phase B: 100,000 steps / 3.28B tokens on the pile+arabic corpora with OUR OWN t</td><td class="size">8 KB</td></tr>
+<tr><td><code>scripts/phase_d_watchdog.py</code> <span class="kind">py</span></td><td class="purp">Phase D night watchdog - keeps Aali&#x27;s own-brain pretraining moving unattended. 2026-09-22 night, Buffy. Context: at 20:35 the NVIDIA driver reset (nvlddmkm Error 153) and silently killed the</td><td class="size">24 KB</td></tr>
+<tr><td><code>scripts/pi_sentinel_catcher.py</code> <span class="kind">py</span></td><td class="purp">Aali Pi sentinel catcher - runs ON the Raspberry Pi (stdlib only). Role in the WoL sentinel design (tasks/pi-wol-sentinel.md): Internet -&gt; Cloudflare edge -&gt; cloudflared tunnel (on the Pi) -</td><td class="size">15 KB</td></tr>
+<tr><td><code>scripts/portability_check.py</code> <span class="kind">py</span></td><td class="purp">Portability self-test — run this ON the machine you want to certify. python scripts/portability_check.py # human report python scripts/portability_check.py --json # machine-readable It answe</td><td class="size">15 KB</td></tr>
+<tr><td><code>scripts/post-merge.sh</code> <span class="kind">sh</span></td><td class="purp">Keep post-merge setup fast and non-interactive. Heavy model training is</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/prepare_sft_mix.py</code> <span class="kind">py</span></td><td class="purp">بلا وصف</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/preview_confirm_dialog.py</code> <span class="kind">py</span></td><td class="purp">Eyeball the Aali confirm dialog without running the daemon. Pops the REAL styled dialog on screen (the same one the sandbox shows for dangerous tool calls) and prints what the sandbox would </td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/prompt_leak_probe.py</code> <span class="kind">py</span></td><td class="purp">Part 5.1 — prompt-leak resistance probe (2026-09-25). Fires 15 AR/EN injection payloads at the LIVE brain (:5055 /api/ask, mode=local -&gt; the promoted soup server on :20129) and classifies ev</td><td class="size">8 KB</td></tr>
+<tr><td><code>scripts/publish_aali.py</code> <span class="kind">py</span></td><td class="purp">آلي الناشر — publish Aali&#x27;s model to the world (OWNER&#x27;S DEPLOY BUTTON). The owner decides what gets published and where; nothing is ever uploaded without an explicit flag. Steps are independ</td><td class="size">12 KB</td></tr>
+<tr><td><code>scripts/queue_sft.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/queue_sft.py</code> <span class="kind">py</span></td><td class="purp">Watches the training logs and automatically runs the rest of Aali&#x27;s pipeline, one stage at a time: Phase A (context=1024, resume_training.bat, already running) -&gt; extend_context.bat (continu</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/reach_fetch.py</code> <span class="kind">py</span></td><td class="purp">The browser half of آلي ريتش — renders ONE public page, read-only. Runs inside its own venv (``D:/hwk-tools/reach-venv``) because Playwright drags in a browser and AGENTS.md forbids heavy de</td><td class="size">8 KB</td></tr>
+<tr><td><code>scripts/rebuild_search_index.py</code> <span class="kind">py</span></td><td class="purp">Rebuild the FTS search index from sessions.jsonl (Wave 1 #2). Usage: python scripts/rebuild_search_index.py # rebuild + stats python scripts/rebuild_search_index.py --db PATH # custom db (te</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/restore_checkpoint2900.py</code> <span class="kind">py</span></td><td class="purp">Restore the promoted checkpoint-2900 adapter as Aali&#x27;s live brain. Use when a later graduation run ends NO-GO (or the promoted adapter must come back for any reason): stop whatever serves :2</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/resume_training.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/run_image_tools.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/run_tests.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/sample_hplt.py</code> <span class="kind">py</span></td><td class="purp">Sample + assess the HPLT v2 CLEANED Hebrew shard (Phase 3.5, source 3.5.4). HPLT v2 monolingual datasets: packaging licensed CC0 (&quot;no rights reserved&quot;, hplt-project.org/datasets/v2.0 terms, </td><td class="size">7 KB</td></tr>
+<tr><td><code>scripts/serve_app.ps1</code> <span class="kind">ps1</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/setup_reach.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/sft_now.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/sft_training.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/smoke_aali_node.py</code> <span class="kind">py</span></td><td class="purp">LIVE smoke test for the Aali Node against a REAL Hub — operator runbook. Everything is real and local, nothing mocked (this is the post-build check the owner/CI runs before shipping a Node):</td><td class="size">18 KB</td></tr>
+<tr><td><code>scripts/soup_exam.py</code> <span class="kind">py</span></td><td class="purp">Grade a Soup-served model on Aali&#x27;s tool-calling exam. The Soup server (`soup serve`) exposes an OpenAI-compatible API; this script replays the exact prompts Aali&#x27;s exam uses (exported by sc</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/soup_export_sft.py</code> <span class="kind">py</span></td><td class="purp">Export HWK data for Soup (MakazhanAlpamys/Soup). Reads data/sft_mix.jsonl (Aali&#x27;s SFT episodes, messages format) and writes: D:/hwk-data/soup/sft_alpaca.jsonl - alpaca-style records for `sou</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/soup_pipeline.py</code> <span class="kind">py</span></td><td class="purp">Post-Phase-A pipeline: teacher baseline -&gt; re-SFT on sft_v2 -&gt; gated exam. Runs the full GPU sequence the moment Phase A&#x27;s GPU is free (it refuses or waits while training is live - never tou</td><td class="size">42 KB</td></tr>
+<tr><td><code>scripts/soup_probe_smoke.py</code> <span class="kind">py</span></td><td class="purp">CPU-served smoke probe: grade the 6-case subset against a checkpoint. Runs its own `soup serve --device cpu` on a private port, so it can execute while the GPU trains - the smoke gate in sou</td><td class="size">9 KB</td></tr>
+<tr><td><code>scripts/spawn_live_test.py</code> <span class="kind">py</span></td><td class="purp">Post-revival live test of spawn_agents (2026-09-23). Runs detached: waits for the :20129 brain to come back up (it revives when stage 5 frees the card), then fires ONE real /api/ask that req</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/start_all.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/start_app.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/status.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/status_digest.py</code> <span class="kind">py</span></td><td class="purp">Aali status digest - aggregates every log into D:/hwk-data/STATUS.md. Runs every 30 min via the scheduled task &quot;HWK StatusDigest&quot; and can always be run by hand: python scripts/status_digest.</td><td class="size">14 KB</td></tr>
+<tr><td><code>scripts/test_multimodal_tools.py</code> <span class="kind">py</span></td><td class="purp">Functional test for the new multimodal tools: read_document + analyze_video. Creates sample files in a temp workspace, runs the tools through execute_tool, prints results. Exit code 0 = all </td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/today_chain.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/today_chain.py</code> <span class="kind">py</span></td><td class="purp">Morning chain (2026-09-09): graduation pipeline first, then Phase B resume. Freebuff&#x27;s restart killed the overnight caretaker + pipeline mid-flight (and the auto-respawn ran TWO soup.exe cop</td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/tokenize.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/tunnel_autostart.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/verify_wave4_live.py</code> <span class="kind">py</span></td><td class="purp">Wave 4 live verification: Arabic create -&gt; bind -&gt; ask -&gt; delete -&gt; detach.</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/video_gen_tool.py</code> <span class="kind">py</span></td><td class="purp">HWK video generation: text prompt -&gt; short MP4 clip, via a local text-to-video diffusion model. Called by the agent&#x27;s generate_video tool. Honest limitation, stated up front because it matte</td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/video_tools.py</code> <span class="kind">py</span></td><td class="purp">HWK video tools: understand a video by reading frames (OCR) and its audio track (Whisper transcript). Called by the agent&#x27;s analyze_video tool. Frames come from OpenCV&#x27;s built-in decoder (no</td><td class="size">5 KB</td></tr>
+<tr><td><code>scripts/voice_studio.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/voice_studio_server.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/wait_gpu_free.py</code> <span class="kind">py</span></td><td class="purp">Shared GPU/VRAM gate for every trainer launcher on this machine. One source of truth for &quot;is the 8GB card safe for a new job&quot; - used by soup_pipeline.py, today_chain.py, night_caretaker.py a</td><td class="size">7 KB</td></tr>
+<tr><td><code>scripts/watch_checkpoints.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/watch_training.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/watch_v5_exam_breakdown.py</code> <span class="kind">py</span></td><td class="purp">Watch for the v5 tuned exam report, then emit a per-case breakdown vs v4. Runs detached (launch_detached.py) alongside the soup pipeline. When soup_exam_report_tuned.json is rewritten with a</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/watch_verdict_restore.py</code> <span class="kind">py</span></td><td class="purp">Watch for tonight&#x27;s graduation verdict, then GUARANTEE a live brain. Launch detached NOW, before the verdict exists: .venv/Scripts/python.exe scripts/launch_detached.py --log brain_watch -- </td><td class="size">8 KB</td></tr>
+<tr><td><code>scripts/wol_enable_pc.bat</code> <span class="kind">bat</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/pi_sentinel/deploy_to_pi.sh</code> <span class="kind">sh</span></td><td class="purp">One-command deploy of the Aali Pi sentinel from the PC (Git Bash).</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/pi_sentinel/run_catcher.sh</code> <span class="kind">sh</span></td><td class="purp">Pi-side runner for the Aali sentinel catcher (launched by cron @reboot).</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/shared/__init__.py</code> <span class="kind">py</span></td><td class="purp">Shared client modules for the Aali clients (Studio, Desktop, CLI). Kept as a package (not a loose file) so ``from shared.updater import ...`` works from the repo checkout AND from a frozen b</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/shared/updater.py</code> <span class="kind">py</span></td><td class="purp">Aali universal updater — ONE signed-update contract for Studio, Desktop, CLI. This is the shared module behind &quot;publish once, users update themselves&quot;. It mirrors the already-shipped Aali No</td><td class="size">45 KB</td></tr>
+<tr><td><code>scripts/voice/__init__.py</code> <span class="kind">py</span></td><td class="purp">Aali Voice Agent — real-time AR/HE/EN voice loop, all local, CPU-first.</td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/voice/chain_e2e.py</code> <span class="kind">py</span></td><td class="purp">One-shot chained integration run: XTTS probe (fresh int16 wavs) then the CLI --file turn on the newest produced wav. Detached; log via launch_detached. Also demonstrates the voice agent as a</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/voice/cli.py</code> <span class="kind">py</span></td><td class="purp">Aali voice CLI. Modes: python -m voice.cli live mic loop (VAD + barge-in) python -m voice.cli --file x.wav transcribe a wav through the full pipeline, print + play/save python -m voice.cli -</td><td class="size">7 KB</td></tr>
+<tr><td><code>scripts/voice/config.yaml</code> <span class="kind">yaml</span></td><td class="purp">ملف</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/voice/fetch_whisper.py</code> <span class="kind">py</span></td><td class="purp">Pre-download faster-whisper large-v3-turbo as PLAIN FILES. HF cache symlinks fail on this box (WinError 1314, no Developer Mode) — same lesson as XTTS run 1. local_dir -&gt; plain files on D:, </td><td class="size">1 KB</td></tr>
+<tr><td><code>scripts/voice/probe_xtts.py</code> <span class="kind">py</span></td><td class="purp">XTTS-v2 live probe — voice-cloned Arabic synthesis (CPU), via the REAL VoiceTTS module (scripts/voice/core/tts.py) so the probe exercises the exact production path (owner rule: replicate the</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/voice/server.py</code> <span class="kind">py</span></td><td class="purp">Run the voice server from scripts/voice/config.yaml. python scripts/voice/server.py # WS :5080 + UI :5081 (+ studio API separate) python scripts/voice/server.py --check # config + engine rep</td><td class="size">3 KB</td></tr>
+<tr><td><code>scripts/voice/studio.py</code> <span class="kind">py</span></td><td class="purp">Aali Voice Studio — command line front for the voice asset library. Subcommands (all local, all CPU, all honest): voices list every profile + per-language availability voices check FILE vali</td><td class="size">12 KB</td></tr>
+<tr><td><code>scripts/voice/studio_api.py</code> <span class="kind">py</span></td><td class="purp">Voice Studio API + console host (Phase 2 slice 2). One stdlib HTTP server on :5082 that serves the Arabic-first console (web/voice/studio.html) and its JSON API: GET /api/voices library + en</td><td class="size">19 KB</td></tr>
+<tr><td><code>scripts/voice/core/__init__.py</code> <span class="kind">py</span></td><td class="purp">Aali Voice Agent core: VAD -&gt; STT -&gt; language tracking -&gt; Aali -&gt; TTS. Transport (WebSocket :5080) and orchestration live in pipeline.py/server.py.</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/voice/core/barge_in.py</code> <span class="kind">py</span></td><td class="purp">Barge-in gate: sustained user speech during Aali&#x27;s speech interrupts playback. Pure logic (injectable probability stream) so it is testable without the VAD model. Fires only on SUSTAINED spe</td><td class="size">2 KB</td></tr>
+<tr><td><code>scripts/voice/core/language_detect.py</code> <span class="kind">py</span></td><td class="purp">Language detection + tracking (AR/HE/EN, code-switch aware). Two layers: - script detection on TEXT (fast, deterministic): Arabic block -&gt; ar, Hebrew block -&gt; he, else Latin -&gt; en. Used per-</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/voice/core/pipeline.py</code> <span class="kind">py</span></td><td class="purp">Voice pipeline orchestrator: segment -&gt; STT -&gt; Aali -&gt; TTS chunks. Turn flow: 1. the server streams 16k int16 PCM frames (WS binary) into a SpeechSegmenter; 2. a completed segment goes to Wh</td><td class="size">11 KB</td></tr>
+<tr><td><code>scripts/voice/core/server.py</code> <span class="kind">py</span></td><td class="purp">Voice agent server: WebSocket :5080 (PCM in, events + audio out) and a static file server for web/voice/ on :5081. Protocol (client -&gt; server): binary frames = raw 16k mono int16 PCM from th</td><td class="size">16 KB</td></tr>
+<tr><td><code>scripts/voice/core/stt.py</code> <span class="kind">py</span></td><td class="purp">faster-whisper STT (AR/HE/EN) + whisper language detection. The transcriber object is injectable (any object with .transcribe) so the segment-level logic (language gating, segment merge, Lan</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/voice/core/tts.py</code> <span class="kind">py</span></td><td class="purp">TTS engine for the voice agent: Coqui XTTS-v2 (cloned voice) primary, existing Piper stack fallback. - XTTS loads from a LOCAL plain-file dir (D:/hwk-models/xtts-v2) or the HF cache — never </td><td class="size">12 KB</td></tr>
+<tr><td><code>scripts/voice/core/vad.py</code> <span class="kind">py</span></td><td class="purp">Silero VAD wrapper + streaming speech segmenter (CPU). The segmenter is a pure state machine driven by an injectable probability function, so tests exercise the full open/close logic without</td><td class="size">6 KB</td></tr>
+<tr><td><code>scripts/voice/core/voices.py</code> <span class="kind">py</span></td><td class="purp">Voice library: named voice profiles backed by recorded reference wavs. Phase 2 &quot;voice asset studio&quot;. Phase 1 hardcoded three ref paths and only the Arabic one existed, so Hebrew and English </td><td class="size">14 KB</td></tr>
+<tr><td><code>scripts/voice/plugins/README.md</code> <span class="kind">md</span></td><td class="purp">Voice plugins</td><td class="size">0 KB</td></tr>
+<tr><td><code>scripts/voice/plugins/base.py</code> <span class="kind">py</span></td><td class="purp">Voice agent plugin interface (Phase 1: INTERFACE ONLY — no plugin yet). A plugin can observe or transform any pipeline stage without touching core code. Implement one or more hooks and regis</td><td class="size">4 KB</td></tr>
+<tr><td><code>scripts/voice/plugins/business.py</code> <span class="kind">py</span></td><td class="purp">Local-business answering vertical (Phase 2 slice 4). Aali answering the phone for a shop: hours, location, prices, delivery, payment methods — from the shop&#x27;s OWN data, in Arabic / Hebrew / </td><td class="size">15 KB</td></tr>
+<tr><td><code>scripts/voice/samples/demo_ar.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+</table></div>
+<div class="area" data-area="tests">
+<span class="count">81 ملف</span>
+<h3>الاختبارات <span class="en">/ The test suite</span></h3>
+<div class="why">أكثر من 1700 اختبار يضمن أن لا شيء ينكسر بصمت.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>tests/test_aali_brain_watchdog.py</code> <span class="kind">py</span></td><td class="purp">Tests for the 2026-09-23 brain watchdog (scripts/aali_brain_watchdog.py). The :20129 brain had NO watchdog while the :5055 API had one - the soup server died after the trainer took the card </td><td class="size">9 KB</td></tr>
+<tr><td><code>tests/test_aali_jobs.py</code> <span class="kind">py</span></td><td class="purp">Tests for scripts/aali_jobs.py — the shared live-jobs snapshot. CPU-only, tmp redirects: no real D:/hwk-data files are touched. Run: .venv/Scripts/python -m pytest tests/test_aali_jobs.py -q</td><td class="size">2 KB</td></tr>
+<tr><td><code>tests/test_aali_node_activate.py</code> <span class="kind">py</span></td><td class="purp">Tests for aali_node.activate — the staged-update swap (STEP 5&#x27;s last gap). All headless and pure-filesystem: real trees under tmp_path, restart paths observed through monkeypatched spawners </td><td class="size">8 KB</td></tr>
+<tr><td><code>tests/test_aali_node_banner_and_ed25519.py</code> <span class="kind">py</span></td><td class="purp">Tests for the staged-update banner contract (Q5) + Ed25519 key loading. Banner: ShellState must surface the daemon&#x27;s structured ``update_staged`` field (version only) and the page must rende</td><td class="size">7 KB</td></tr>
+<tr><td><code>tests/test_aali_node_config.py</code> <span class="kind">py</span></td><td class="purp">Tests for aali_node.node_config — the first-run config storage (Q4). Headless pure-logic tests: parse/validate/persist contracts, POSIX permission rules (skipped on Windows where they cannot</td><td class="size">9 KB</td></tr>
+<tr><td><code>tests/test_aali_node_config_cli.py</code> <span class="kind">py</span></td><td class="purp">Tests for the daemon CLI&#x27;s first-run config wiring (Q4). Contracts: - precedence is flag &gt; env &gt; saved config &gt; builtin default; - an explicit --no-commands ALWAYS wins over the saved allow_</td><td class="size">7 KB</td></tr>
+<tr><td><code>tests/test_aali_node_config_screen.py</code> <span class="kind">py</span></td><td class="purp">Headless tests for the in-shell first-run config screen (Q4 UI half). Pure-logic contracts: page rendering (prefill rules, secret placeholders), form validation (required fields, ws/wss sche</td><td class="size">11 KB</td></tr>
+<tr><td><code>tests/test_aali_node_confirm.py</code> <span class="kind">py</span></td><td class="purp">Tests for aali_node.confirm — the human-confirmation layer. Safety property of the test suite itself: NO test ever pops a real dialog. The native path is exercised through the `_show_confirm</td><td class="size">14 KB</td></tr>
+<tr><td><code>tests/test_aali_node_daemon.py</code> <span class="kind">py</span></td><td class="purp">Tests for aali_node.daemon — session handling and Hub leg integration. The integration test wires the REAL Hub Broker + ConnectionManager (pure logic, no sockets) to a real NodeSession + san</td><td class="size">13 KB</td></tr>
+<tr><td><code>tests/test_aali_node_live.py</code> <span class="kind">py</span></td><td class="purp">LIVE end-to-end: real Hub server ↔ real Aali Node daemon. Runs only where fastapi+uvicorn+websockets exist (the hub venv — same place the hub HTTP tests live). Everything is loopback on an e</td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_aali_node_packaging.py</code> <span class="kind">py</span></td><td class="purp">Packaging contract for the آلي Node exe (Aali Cloud STEP 5). The exe is built by scripts/build_node.bat from aali-node.spec with the entry shim launch_aali_node.py. These tests pin the CONTR</td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_aali_node_sandbox.py</code> <span class="kind">py</span></td><td class="purp">Tests for aali_node.sandbox — the user-side security boundary. Strategy: the sandbox&#x27;s own validation layer is exercised directly, then the real file_tools implementations are bound in (no m</td><td class="size">10 KB</td></tr>
+<tr><td><code>tests/test_aali_node_shell.py</code> <span class="kind">py</span></td><td class="purp">Tests for aali_node.shell — the GUI shell over the headless daemon. Everything here is headless: ShellState/ShellApi are pure, the daemon status contract is tested through run_node&#x27;s honest </td><td class="size">7 KB</td></tr>
+<tr><td><code>tests/test_aali_node_updater.py</code> <span class="kind">py</span></td><td class="purp">Node-side signed update client — verification contract tests. The updater must FAIL CLOSED: an unverifiable manifest, a hash mismatch, or a malicious archive never reaches disk as a usable s</td><td class="size">9 KB</td></tr>
+<tr><td><code>tests/test_aali_server_watchdog.py</code> <span class="kind">py</span></td><td class="purp">Server watchdog (2026-09-22): revive Aali mid-session via the autostart guard. Pins the contracts: health = HTTP 200 AND ok:true, single instance via a pidlock whose stale entries are taken </td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_aali_studio.py</code> <span class="kind">py</span></td><td class="purp">Tests for Aali Studio — the desktop IDE (PART 2). Three things are pinned here, because they are the parts that could lie: 1. **The sandbox** — Studio must reuse the brain&#x27;s pentested resolv</td><td class="size">54 KB</td></tr>
+<tr><td><code>tests/test_accounts.py</code> <span class="kind">py</span></td><td class="purp">Account platform tests — users | builders &amp; team (admin, owner). One app, two roles: anyone signs up with email+password+code; emails on the admins list get role=admin and can open /api/admi</td><td class="size">5 KB</td></tr>
+<tr><td><code>tests/test_agent_guards.py</code> <span class="kind">py</span></td><td class="purp">Regression tests for the 2026-09-09 owner-transcript failures. Live transcript: the 7b brain answered chat with literal &quot;{}&quot;, parroted the user&#x27;s message back, and switched languages. These </td><td class="size">14 KB</td></tr>
+<tr><td><code>tests/test_agent_toolbelt.py</code> <span class="kind">py</span></td><td class="purp">Tests for the 2026-09-23 agent toolbelt extensions. Owner request: give Aali the high-frequency tools the big agents ship and teach him the right way to use them. These tests pin the mechani</td><td class="size">12 KB</td></tr>
+<tr><td><code>tests/test_assistants.py</code> <span class="kind">py</span></td><td class="purp">Wave 4: custom assistants (2026-09-25). Contract under test: - Store: create/get/list/update/delete, ns ownership (one user&#x27;s assistants invisible to another), Arabic-first errors, caps (emp</td><td class="size">16 KB</td></tr>
+<tr><td><code>tests/test_attachments.py</code> <span class="kind">py</span></td><td class="purp">Attachments: users send files/photos/videos with a chat message. Pins the upload endpoint contract (validation, sandboxed storage, analyze- first) and the ask-side context injection, without</td><td class="size">4 KB</td></tr>
+<tr><td><code>tests/test_audit.py</code> <span class="kind">py</span></td><td class="purp">Unit tests for the admin audit log (file_agent/audit.py).</td><td class="size">3 KB</td></tr>
+<tr><td><code>tests/test_audit_refusal_gates.py</code> <span class="kind">py</span></td><td class="purp">Tests for the refusal-gate audit probe (scripts/audit_refusal_gates.py). The probe drives the LIVE /api/ask/stream (never from tests) — these tests pin its pure classification logic: gate ve</td><td class="size">5 KB</td></tr>
+<tr><td><code>tests/test_auth_http.py</code> <span class="kind">py</span></td><td class="purp">HTTP tests for /api/auth/* and admin gating by account role.</td><td class="size">12 KB</td></tr>
+<tr><td><code>tests/test_bat_hygiene.py</code> <span class="kind">py</span></td><td class="purp">Bat-file hygiene (2026-09-22 owner lesson). cmd.exe misparses .bat files with Unix (LF) line endings - it slices commands mid-word (&#x27;ens&#x27; from &#x27;set&#x27;, &#x27;ho.&#x27; from &#x27;echo&#x27;) - and garbles on non-</td><td class="size">1 KB</td></tr>
+<tr><td><code>tests/test_brain.py</code> <span class="kind">py</span></td><td class="purp">Tests for the owner-only آلي Brain Tree (structure, renderers, gating).</td><td class="size">3 KB</td></tr>
+<tr><td><code>tests/test_brain_launcher_config.py</code> <span class="kind">py</span></td><td class="purp">Regression: the brain must serve the PROMOTED model, not the fallback card. 2026-10-02 incident: every ask on :5055 answered with the deterministic &quot;direct-command mode&quot; card and the SSE sai</td><td class="size">5 KB</td></tr>
+<tr><td><code>tests/test_capabilities_advertised.py</code> <span class="kind">py</span></td><td class="purp">Tests for Aali&#x27;s advertised capabilities: running commands on the user&#x27;s behalf and building apps &amp; games end-to-end. Covers (2026-09-13): SYSTEM_PROMPT advertises run_command + app/game bui</td><td class="size">5 KB</td></tr>
+<tr><td><code>tests/test_cli.py</code> <span class="kind">py</span></td><td class="purp">Tests for the Aali CLI input layer (aali_cli.py). The LineEditor is exercised through its `keys=` injection seam — the same key names the real readers emit (&quot;UP&quot;, &quot;TAB&quot;, plain characters…), </td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_cli_bidi.py</code> <span class="kind">py</span></td><td class="purp">Tests for the Arabic display fix in aali_cli.py (fx = shape + reorder). Classic conhost renders logical-order Arabic disconnected and mirrored; the CLI reshapes into Unicode presentation for</td><td class="size">7 KB</td></tr>
+<tr><td><code>tests/test_cli_update.py</code> <span class="kind">py</span></td><td class="purp">tests/test_cli_update.py — آلي CLI&#x27;s /update, on the same contract as Studio and Desktop. Two things this file takes seriously: * **the CLI never touches the real network in a test** — every</td><td class="size">19 KB</td></tr>
+<tr><td><code>tests/test_desktop_update.py</code> <span class="kind">py</span></td><td class="purp">tests/test_desktop_update.py — آلي Desktop&#x27;s self-update. Desktop has no HTML template: its UI is JavaScript injected into Aali&#x27;s own web UI, so every Arabic string and every id it renders i</td><td class="size">17 KB</td></tr>
+<tr><td><code>tests/test_distill_teacher.py</code> <span class="kind">py</span></td><td class="purp">Tests for the teacher-distillation builder (scripts/distill_teacher.py). The teacher (checkpoint-3873 on :20129) is NEVER touched here: every test injects a fake transport or asserts on pure</td><td class="size">17 KB</td></tr>
+<tr><td><code>tests/test_exam_integrity.py</code> <span class="kind">py</span></td><td class="purp">Exam-integrity defense (2026-10-01, the v7 26-vs-39 lesson). The deployed soup exam (D:/hwk-data/soup/exam_prompts.jsonl) was silently reset to the repo&#x27;s smaller file mid-graduation: the ni</td><td class="size">8 KB</td></tr>
+<tr><td><code>tests/test_export.py</code> <span class="kind">py</span></td><td class="purp">HTTP tests for GET /api/session/&lt;sid&gt;/export (Wave 1 #1, 2026-09-25). Markdown is the default (no-dep) format; JSON is a faithful record dump; pdf answers 400 honestly until implemented. Ses</td><td class="size">4 KB</td></tr>
+<tr><td><code>tests/test_finish_babysit.py</code> <span class="kind">py</span></td><td class="purp">Tests for the probe-cycle babysitter (finish_babysit.py). The babysitter exists because the LIVE pre-fix pipeline cannot be patched: its smoke-probe cycles starve the GPU trainer (host RAM) </td><td class="size">4 KB</td></tr>
+<tr><td><code>tests/test_finish_pipeline.py</code> <span class="kind">py</span></td><td class="purp">Tests for the salvage finisher&#x27;s pure helpers (finish_pipeline.py). The 2026-09-12 live run imported pre-fix pipeline code (the 09-09 rewrite dropped the tuned exam), so it would die with a </td><td class="size">4 KB</td></tr>
+<tr><td><code>tests/test_generation_guards.py</code> <span class="kind">py</span></td><td class="purp">Generation guards: repetition penalty + no-repeat-ngram ban + unk ban. 2026-09-14 lessons (Phase C run-3/run-5): the runtime serves the scratch brain with greedy decoding (temperature=0), an</td><td class="size">12 KB</td></tr>
+<tr><td><code>tests/test_hub_core.py</code> <span class="kind">py</span></td><td class="purp">Tests for the aali_hub package — core logic (no HTTP). Runs in ANY venv: FastAPI is not needed for these; argon2/pyjwt/cryptography fall back to stdlib paths transparently.</td><td class="size">21 KB</td></tr>
+<tr><td><code>tests/test_hub_http.py</code> <span class="kind">py</span></td><td class="purp">HTTP-level tests for the Aali Hub (FastAPI TestClient). The app is built with a dead brain URL (port 1) so no test ever reaches a real brain — even if the owner&#x27;s server is live on :5055.</td><td class="size">10 KB</td></tr>
+<tr><td><code>tests/test_hub_updates_http.py</code> <span class="kind">py</span></td><td class="purp">HTTP-level tests for the Hub update surface (publish → serve → retire). Runs in the hub venv (FastAPI + cryptography required); the store verifies signatures server-side, the public routes r</td><td class="size">9 KB</td></tr>
+<tr><td><code>tests/test_hub_updates_per_app.py</code> <span class="kind">py</span></td><td class="purp">tests/test_hub_updates_per_app.py — the Hub&#x27;s per-app, per-platform surface. Runs in the HUB venv (FastAPI + cryptography live in ``.venv-hub``; the training venv has no FastAPI, so the HTTP</td><td class="size">24 KB</td></tr>
+<tr><td><code>tests/test_hwk.py</code> <span class="kind">py</span></td><td class="purp">Unit tests for the HWK Aali model, tokenizers, and agent tools. Run from the project root: PYTHONIOENCODING=utf-8 PYTHONPATH=file-agent .venv/Scripts/python -m pytest tests -q</td><td class="size">27 KB</td></tr>
+<tr><td><code>tests/test_idle_sleep_guard.py</code> <span class="kind">py</span></td><td class="purp">Tests for scripts/idle_sleep_guard.py (PC-side sleep decision). All tests fabricate the process table - nothing here touches the real GPU, the real process list, or the power state. The guar</td><td class="size">4 KB</td></tr>
+<tr><td><code>tests/test_launch_detached.py</code> <span class="kind">py</span></td><td class="purp">Tests for the detached-launch convention (2026-09-12 12:20 lesson). A console Ctrl+C/close event swept the soup pipeline, the trainer and the smoke probe because they lived in a visible cons</td><td class="size">10 KB</td></tr>
+<tr><td><code>tests/test_mission_clock.py</code> <span class="kind">py</span></td><td class="purp">Tests for the mission clock dashboard (2026-09-12 watch-party request). The dashboard must be FUN but HONEST: every number is parsed from the real logs (soup_train_live.log tqdm lines, pipel</td><td class="size">16 KB</td></tr>
+<tr><td><code>tests/test_monitor_core.py</code> <span class="kind">py</span></td><td class="purp">Aali Monitor (2026-09-25, owner-ordered side project). The core parsers are PURE: every test feeds text/fakes, so the suite never touches the live logs, the GPU, or the network. Contract: - </td><td class="size">9 KB</td></tr>
+<tr><td><code>tests/test_night_2026_09_22.py</code> <span class="kind">py</span></td><td class="purp">Tests for the 2026-09-22 night session. Three fixes/features, all pinned by tests: 1. launch_detached .py wrapping (WinError 193 lesson: every .bat launcher passed a bare train_scratch.py an</td><td class="size">11 KB</td></tr>
+<tr><td><code>tests/test_night_caretaker_single_instance.py</code> <span class="kind">py</span></td><td class="purp">Night caretaker single-instance guard (2026-09-24). The nightly &quot;HWK NightCaretaker&quot; scheduled task makes duplicate launches normal, so the caretaker now carries the same pidlock contract as</td><td class="size">3 KB</td></tr>
+<tr><td><code>tests/test_openai_compat.py</code> <span class="kind">py</span></td><td class="purp">OpenAI-compatible /v1 surface: model discovery + chat completions shape. n8n / OpenRouter-style clients / Hugging Face tools talk to Aali through /v1/chat/completions (OpenAI wire format, st</td><td class="size">4 KB</td></tr>
+<tr><td><code>tests/test_phase_d_stage4.py</code> <span class="kind">py</span></td><td class="purp">Stage-4 extension of phase_d_watchdog (2026-09-23). The owner&#x27;s Phase D continuation (+2-4B tokens) needed a 4th stage chaining phase-d-wide -&gt; phase-d-all over ALL tokenized corpora, plus a</td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_pi_sentinel_catcher.py</code> <span class="kind">py</span></td><td class="purp">Tests for the Pi sentinel catcher (scripts/pi_sentinel_catcher.py). The catcher is the Pi-side half of the WoL sentinel design: it proxies Cloudflare-edge traffic to the home PC over LAN and</td><td class="size">12 KB</td></tr>
+<tr><td><code>tests/test_portability.py</code> <span class="kind">py</span></td><td class="purp">Portability contract — the clients must not drift back to Windows-only. The owner&#x27;s rule: *every Aali app should work on Windows, macOS and Linux.* These tests cannot run macOS (they are not</td><td class="size">16 KB</td></tr>
+<tr><td><code>tests/test_print_file_raw9100.py</code> <span class="kind">py</span></td><td class="purp">print_file raw-9100 route + text-only-driver guards (2026-09-22). Pins the owner-printer lesson: &#x27;Generic / Text Only&#x27; printers must get pure ASCII bytes straight on TCP port 9100 (never GDI</td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_projects.py</code> <span class="kind">py</span></td><td class="purp">Wave 2 #5+#6: Projects + RAG knowledge base (2026-09-25). Contract under test: - Store: create/list/update/archive/delete, ns ownership (one user&#x27;s projects invisible to another), Arabic-fir</td><td class="size">16 KB</td></tr>
+<tr><td><code>tests/test_prompt_leak_filter.py</code> <span class="kind">py</span></td><td class="purp">Part 5.2 + 5.3 (2026-09-25): prompt-leak output filter + canaries. Contract: - L1: an 8-word shingle shared with SYSTEM_PROMPT triggers redaction; a reply that merely QUOTES a short prompt p</td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_protocol.py</code> <span class="kind">py</span></td><td class="purp">Tests for file_agent/protocol.py (SaaS STEP 2).</td><td class="size">8 KB</td></tr>
+<tr><td><code>tests/test_reach.py</code> <span class="kind">py</span></td><td class="purp">آلي ريتش — Aali Reach: the fence is the feature. A link reader that sits next to ``run_command`` can read the owner&#x27;s LAN, reach the cloud metadata address, or be used as an exfiltration cha</td><td class="size">34 KB</td></tr>
+<tr><td><code>tests/test_remote_brain.py</code> <span class="kind">py</span></td><td class="purp">Remote-brain provider (AALI_REMOTE_BRAIN_URL): one Aali server using another Aali server&#x27;s OpenAI-compatible /v1 as its conversational brain — the Pi hosting setup. No third-party AI: Aali a</td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_roles.py</code> <span class="kind">py</span></td><td class="purp">Tests for server-side role resolution (Track B 11.1, 2026-09-25). Pure unit tests over file_agent/roles.resolve_role + the HTTP contract of /api/auth/me (the role endpoint every client consu</td><td class="size">10 KB</td></tr>
+<tr><td><code>tests/test_roles_routes.py</code> <span class="kind">py</span></td><td class="purp">Track B 11.6 + 11.7 (2026-09-25): role-gated system routes and the owner preview mode (&quot;view as user&quot;). Contract under test: - /api/system/training -&gt; owner only; /api/system/{models,logs,he</td><td class="size">8 KB</td></tr>
+<tr><td><code>tests/test_saas_mode.py</code> <span class="kind">py</span></td><td class="purp">Tests for SaaS mode (STEP 4): per-user scoping on the brain. Covers aali_hub/user_context (mode + user roots), the execute_tool saas gate (client tools can never run on the brain), per-user </td><td class="size">10 KB</td></tr>
+<tr><td><code>tests/test_sandbox_pentest.py</code> <span class="kind">py</span></td><td class="purp">Part 5.4 + 5.5 (2026-09-25): sandbox pentest + rate-limit guards. 5.5 pentest contract — every escape attempt FAILS CLOSED: - classic traversal (../), deep traversal, mixed separators - Wind</td><td class="size">7 KB</td></tr>
+<tr><td><code>tests/test_search.py</code> <span class="kind">py</span></td><td class="purp">Tests for the FTS5 conversation search (Wave 1 #2, 2026-09-25). Covers the module (file_agent/search_index.py) and the endpoint (GET /api/search): Arabic + mixed-language queries, role-aware</td><td class="size">13 KB</td></tr>
+<tr><td><code>tests/test_server_sharing.py</code> <span class="kind">py</span></td><td class="purp">Server-sharing security: guest policy gate + fail-safe bind host. When the owner shares Aali with friends (LAN or tunnel), remote non-admin keys must be forced into the server-enforced guest</td><td class="size">3 KB</td></tr>
+<tr><td><code>tests/test_sft_dataset_shift.py</code> <span class="kind">py</span></td><td class="purp">SFT dataset contract: next-token shift, completion-only loss masking, prompt/completion structure, and the serving-shape prompt. 2026-09-14 night lessons (Phase C), in the order they bit: 1.</td><td class="size">15 KB</td></tr>
+<tr><td><code>tests/test_sft_scratch_builder.py</code> <span class="kind">py</span></td><td class="purp">Tests for the run-8 scratch-shape SFT mix builder (build_aali_sft_scratch). Run-7 wall: the mix taught SOUP-shaped rows (soup system line + {&quot;tool&quot;: &quot;final&quot;, ...} envelopes) while Phase C se</td><td class="size">9 KB</td></tr>
+<tr><td><code>tests/test_sft_v2_builder.py</code> <span class="kind">py</span></td><td class="purp">Tests for the sft_v2 builder fixes found in the 2026-09-10 audit. The audit found three silent bugs starving the graduation re-SFT: 1. ALL mentor episodes died at write time (over MAX_TOTAL_</td><td class="size">45 KB</td></tr>
+<tr><td><code>tests/test_shares_prompts.py</code> <span class="kind">py</span></td><td class="purp">Wave 3 #8+#9: shared conversations + prompt library (2026-09-25). Shares contract: token IS the credential (stored hashed, shown once), read-only frozen copy, expiry/revoke = instant 404 eve</td><td class="size">10 KB</td></tr>
+<tr><td><code>tests/test_soup_smoke_gate.py</code> <span class="kind">py</span></td><td class="purp">Tests for the soup graduation pipeline&#x27;s fast-fail smoke gate and the phantom-verdict fixes (2026-09-09: the tuned exam graded a DEAD endpoint and produced a 0/26 &#x27;regression&#x27; that never tes</td><td class="size">19 KB</td></tr>
+<tr><td><code>tests/test_spawn_agents.py</code> <span class="kind">py</span></td><td class="purp">Tests for spawn_agents (2026-09-23, owner request: parallel sub-agents). agent_loop.agent_loop is faked at the module attribute — no model call, no GPU, no network. The tests pin the CONTRAC</td><td class="size">5 KB</td></tr>
+<tr><td><code>tests/test_status_digest.py</code> <span class="kind">py</span></td><td class="purp">Tests for the status digest&#x27;s alert semantics (2026-09-12 false alarms). The board must not cry wolf: a caretaker that ENDED ITS DUTY normally (&quot;going to sleep&quot; as the last log line) is not </td><td class="size">10 KB</td></tr>
+<tr><td><code>tests/test_studio_update_ui.py</code> <span class="kind">py</span></td><td class="purp">tests/test_studio_update_ui.py — آلي ستوديو&#x27;s four update surfaces. The UI is rendered on the SERVER (build-desktop/aali-studio/update_ui.py), so the owner&#x27;s four requested surfaces are asse</td><td class="size">23 KB</td></tr>
+<tr><td><code>tests/test_tool_guard.py</code> <span class="kind">py</span></td><td class="purp">Tests for file_agent/tool_guard.py and its agent_loop integration.</td><td class="size">6 KB</td></tr>
+<tr><td><code>tests/test_tool_orchestrator.py</code> <span class="kind">py</span></td><td class="purp">Tests for file_agent/tool_orchestrator.py (SaaS STEP 1).</td><td class="size">7 KB</td></tr>
+<tr><td><code>tests/test_train_resume.py</code> <span class="kind">py</span></td><td class="purp">Regression: SFT resume from a BOOTSTRAPPED trainer state must not crash. 2026-09-14 lesson: the first real Phase C launch died at the resume point - train_scratch.py called optimizer.load_st</td><td class="size">4 KB</td></tr>
+<tr><td><code>tests/test_tts.py</code> <span class="kind">py</span></td><td class="purp">Tests for Piper TTS (Wave 1 #3, full contract 3.1-3.11). The real Piper subprocess is mocked at the boundary — these tests pin the CONTRACT: module behavior (voice discovery w/ quality, cach</td><td class="size">13 KB</td></tr>
+<tr><td><code>tests/test_updater.py</code> <span class="kind">py</span></td><td class="purp">tests/test_updater.py — the universal signed-update contract (part 1). Every test here is real: a real throwaway Ed25519 key signs real manifests with the REAL hub signer (``aali_hub.update_</td><td class="size">36 KB</td></tr>
+<tr><td><code>tests/test_voice_agent.py</code> <span class="kind">py</span></td><td class="purp">Tests for the Aali voice agent (scripts/voice/, Phase 1). Everything heavy is faked: no VAD/STT/TTS models, no GPU, no real Aali API (except one hermetic localhost http server). The WS end-t</td><td class="size">50 KB</td></tr>
+<tr><td><code>tests/test_wait_gpu_free.py</code> <span class="kind">py</span></td><td class="purp">Unit tests for the shared GPU gate (scripts/wait_gpu_free.py). Every nvidia-smi call goes through _run(); the tests mock exactly that seam with canned command output and cover the three deci</td><td class="size">12 KB</td></tr>
+<tr><td><code>tests/test_watch_verdict_restore.py</code> <span class="kind">py</span></td><td class="purp">Tests for watch_verdict_restore&#x27;s verification logic (2026-09-12). The watcher runs unattended after the graduation verdict, so its decision function must be pinned: a PROMOTE whose promoted</td><td class="size">4 KB</td></tr>
+</table></div>
+<div class="area" data-area="docs">
+<span class="count">35 ملف</span>
+<h3>التوثيق <span class="en">/ Documentation</span></h3>
+<div class="why">شرح كل جزء: كيف يعمل، ولماذا، وما حدوده الصادقة.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>docs/PORTING.md</code> <span class="kind">md</span></td><td class="purp">تشغيل آلي على كل نظام — PORTING.md</td><td class="size">10 KB</td></tr>
+<tr><td><code>docs/SAAS_ARCHITECTURE.md</code> <span class="kind">md</span></td><td class="purp">Aali Cloud — SaaS Architecture / معمارية «آلي كلاود»</td><td class="size">15 KB</td></tr>
+<tr><td><code>docs/ai_security_lessons.md</code> <span class="kind">md</span></td><td class="purp">Security lessons for Aali — real AI incidents, and how he must not repeat them</td><td class="size">6 KB</td></tr>
+<tr><td><code>docs/clients.md</code> <span class="kind">md</span></td><td class="purp">عملاء آلي — One Brain, Five Faces</td><td class="size">6 KB</td></tr>
+<tr><td><code>docs/custom_domain.md</code> <span class="kind">md</span></td><td class="purp">آلي على الإنترنت — دومينك الخاص + HTTPS دائم</td><td class="size">7 KB</td></tr>
+<tr><td><code>docs/desktop_app.md</code> <span class="kind">md</span></td><td class="purp">Aali as a product — one server, every client</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/image_generation.md</code> <span class="kind">md</span></td><td class="purp">Image generation (`generate_image` tool)</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/long_term_memory.md</code> <span class="kind">md</span></td><td class="purp">Aali&#x27;s long-term memory — how the 07:00 → 19:00 promise works</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/mentor_learning_loop.md</code> <span class="kind">md</span></td><td class="purp">Mentor learning loop — teach Aali from senior-agent sessions (incl. failures)</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/monitor.md</code> <span class="kind">md</span></td><td class="purp">آلي Monitor — مراقب أعمال آلي (2026-09-25)</td><td class="size">2 KB</td></tr>
+<tr><td><code>docs/pi_wol_sentinel.md</code> <span class="kind">md</span></td><td class="purp">Pi WoL Sentinel — Aali يخدم دون أن يكون الحاسوب ساهراً</td><td class="size">5 KB</td></tr>
+<tr><td><code>docs/post_phaseA_pipeline.md</code> <span class="kind">md</span></td><td class="purp">Post-Phase-A pipeline — teacher baseline, re-SFT, gated promotion</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/project_handoff_2026-09-10.md</code> <span class="kind">md</span></td><td class="purp">HWK Aali — Full Project Handoff (snapshot 2026-09-10)</td><td class="size">22 KB</td></tr>
+<tr><td><code>docs/publish_aali.md</code> <span class="kind">md</span></td><td class="purp">نشر آلي للعالم — منصات النشر</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/server_deployment.md</code> <span class="kind">md</span></td><td class="purp">Putting Aali on a server — verified options &amp; step-by-step</td><td class="size">4 KB</td></tr>
+<tr><td><code>docs/soup_setup.md</code> <span class="kind">md</span></td><td class="purp">Soup integration for HWK-Aali — 2026-09-06</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/training.md</code> <span class="kind">md</span></td><td class="purp">تدريب HWK-Aali — دليل مرجعي</td><td class="size">10 KB</td></tr>
+<tr><td><code>docs/assets/aali_cli_demo.gif</code> <span class="kind">gif</span></td><td class="purp">ملف</td><td class="size">53 KB</td></tr>
+<tr><td><code>docs/assets/aali_tour.gif</code> <span class="kind">gif</span></td><td class="purp">ملف</td><td class="size">160 KB</td></tr>
+<tr><td><code>docs/features/aali_reach.md</code> <span class="kind">md</span></td><td class="purp">آلي ريتش — Aali Reach (PART 3)</td><td class="size">13 KB</td></tr>
+<tr><td><code>docs/features/aali_studio.md</code> <span class="kind">md</span></td><td class="purp">آلي ستوديو — Aali Studio (PART 2)</td><td class="size">23 KB</td></tr>
+<tr><td><code>docs/features/cli_update.md</code> <span class="kind">md</span></td><td class="purp">آلي CLI — التحديث الذاتي | Aali CLI self-update</td><td class="size">9 KB</td></tr>
+<tr><td><code>docs/features/conversation_search.md</code> <span class="kind">md</span></td><td class="purp">البحث في المحادثات — Conversation Search (Wave 1 #2)</td><td class="size">4 KB</td></tr>
+<tr><td><code>docs/features/custom_assistants.md</code> <span class="kind">md</span></td><td class="purp">Custom assistants (Wave 4 — 2026-09-25)</td><td class="size">4 KB</td></tr>
+<tr><td><code>docs/features/export_conversations.md</code> <span class="kind">md</span></td><td class="purp">تصدير المحادثات — Export Conversations (Wave 1 #1)</td><td class="size">2 KB</td></tr>
+<tr><td><code>docs/features/projects_rag.md</code> <span class="kind">md</span></td><td class="purp">Projects + RAG knowledge base (Wave 2 #5+#6 — 2026-09-25)</td><td class="size">4 KB</td></tr>
+<tr><td><code>docs/features/prompt_leak_defense.md</code> <span class="kind">md</span></td><td class="purp">Prompt-leak defense (Part 5.1–5.3 — 2026-09-25)</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/features/prompt_library.md</code> <span class="kind">md</span></td><td class="purp">Prompt library (Wave 3 #9 — 2026-09-25)</td><td class="size">2 KB</td></tr>
+<tr><td><code>docs/features/rate_limits_sandbox.md</code> <span class="kind">md</span></td><td class="purp">Rate-limit review + sandbox pentest (Part 5.4–5.5 — 2026-09-25)</td><td class="size">4 KB</td></tr>
+<tr><td><code>docs/features/role_based_ui.md</code> <span class="kind">md</span></td><td class="purp">الأدوار وواجهة المستخدم — Role-Based UI (Track B / Part 11)</td><td class="size">4 KB</td></tr>
+<tr><td><code>docs/features/shared_conversations.md</code> <span class="kind">md</span></td><td class="purp">Shared conversations (Wave 3 #8 — 2026-09-25)</td><td class="size">2 KB</td></tr>
+<tr><td><code>docs/features/system_routes.md</code> <span class="kind">md</span></td><td class="purp">System routes + owner preview (Track B 11.6 / 11.7 — 2026-09-25)</td><td class="size">3 KB</td></tr>
+<tr><td><code>docs/features/tts.md</code> <span class="kind">md</span></td><td class="purp">النطق — TTS / Piper Voice Output (Wave 1 #3, full contract)</td><td class="size">5 KB</td></tr>
+<tr><td><code>docs/features/voice_agent.md</code> <span class="kind">md</span></td><td class="purp">Aali Voice Agent — Phase 1 (core voice loop)</td><td class="size">11 KB</td></tr>
+<tr><td><code>docs/features/voice_output.md</code> <span class="kind">md</span></td><td class="purp">المخرجات الصوتية — Voice Output / Piper TTS (Wave 1 #3)</td><td class="size">3 KB</td></tr>
+</table></div>
+<div class="area" data-area="data">
+<span class="count">9 ملف</span>
+<h3>بيانات التدريب <span class="en">/ Training data</span></h3>
+<div class="why">بيانات supervized داخل المستودع (ملفات صغيرة). corpora الكبيرة خارج المستودع على D:.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>data/distill_seeds.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">8 KB</td></tr>
+<tr><td><code>data/exam_tool_calling.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">18 KB</td></tr>
+<tr><td><code>data/print_file_sft.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">9 KB</td></tr>
+<tr><td><code>data/questions_ar_coding.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>data/questions_ar_med_law.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>data/questions_en_coding.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>data/rules_instructions.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">6 KB</td></tr>
+<tr><td><code>data/teacher_sft.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">187 KB</td></tr>
+<tr><td><code>data/tool_calling_sft.jsonl</code> <span class="kind">jsonl</span></td><td class="purp">ملف</td><td class="size">66 KB</td></tr>
+</table></div>
+<div class="area" data-area="(root)">
+<span class="count">42 ملف</span>
+<h3>(root) <span class="en">/ (root)</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>AALI_ARCHITECTURE.md</code> <span class="kind">md</span></td><td class="purp">AALI_ARCHITECTURE.md — معمارية آلي / Aali Architecture</td><td class="size">93 KB</td></tr>
+<tr><td><code>AGENTS.md</code> <span class="kind">md</span></td><td class="purp">AGENTS.md — تعليمات لأي ذكاء اصطناعي يعمل على هذا المستودع</td><td class="size">140 KB</td></tr>
+<tr><td><code>Aali-Desktop.spec</code> <span class="kind">spec</span></td><td class="purp">ملف</td><td class="size">3 KB</td></tr>
+<tr><td><code>Dockerfile</code> <span class="kind">file</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>Dockerfile.hub</code> <span class="kind">hub</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>OWNER_GUIDE.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">7 KB</td></tr>
+<tr><td><code>README.md</code> <span class="kind">md</span></td><td class="purp">آلي (Aali) — من فريق HWK</td><td class="size">9 KB</td></tr>
+<tr><td><code>aali-node.spec</code> <span class="kind">spec</span></td><td class="purp">ملف</td><td class="size">3 KB</td></tr>
+<tr><td><code>aali_cli.py</code> <span class="kind">py</span></td><td class="purp">آلي CLI — terminal client for the local Aali brain (same API as web/iOS). Usage: python aali_cli.py # chat with the default server python aali_cli.py --server http://192.168.1.10:5055 python</td><td class="size">6 KB</td></tr>
+<tr><td><code>aali_desktop_app.py</code> <span class="kind">py</span></td><td class="purp">آلي Desktop — standalone desktop client (single binary, no install). pywebview window around Aali&#x27;s web UI + native extras: - First run: pick the server (saved to the platform&#x27;s own config d</td><td class="size">22 KB</td></tr>
+<tr><td><code>check_env.py</code> <span class="kind">py</span></td><td class="purp">Report availability and versions of the project&#x27;s Python dependencies.</td><td class="size">1 KB</td></tr>
+<tr><td><code>create_rules_data.py</code> <span class="kind">py</span></td><td class="purp">Generate instruction-tuning examples that demonstrate the assistant rules (rules/assistant_rules.md) in original Arabic and English phrasing. Output: data/rules_instructions.jsonl in the mes</td><td class="size">8 KB</td></tr>
+<tr><td><code>create_training_data.py</code> <span class="kind">py</span></td><td class="purp">Create the HWK Aali instruction dataset (thousands of examples). Covers, per the handoff Priority 4: - greetings and natural conversation (Arabic + English), - follow-up questions that need </td><td class="size">28 KB</td></tr>
+<tr><td><code>desktop_app.py</code> <span class="kind">py</span></td><td class="purp">آلي Desktop — native window shell around the web client (pywebview + WebView2). Same brain, dedicated window: start the server with scripts\\start_all.bat, then run: .venv/Scripts/python des</td><td class="size">2 KB</td></tr>
+<tr><td><code>desktop_update.py</code> <span class="kind">py</span></td><td class="purp">آلي Desktop — the auto-update bridge (shared updater + Desktop specifics). Same contract as Studio (``build-desktop/aali-studio/updater.py``), because both sit on the same :mod:`shared.updat</td><td class="size">26 KB</td></tr>
+<tr><td><code>docker-compose.hub.yml</code> <span class="kind">yml</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>docker-compose.yml</code> <span class="kind">yml</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>download_corpora.py</code> <span class="kind">py</span></td><td class="purp">Download the HWK Aali pretraining corpora from Hugging Face. Corpora (all into D:\\hwk-data\\raw\\&lt;corpus&gt;\\, capped, resume-safe): pile - monology/pile-uncopyrighted (English general; train</td><td class="size">9 KB</td></tr>
+<tr><td><code>download_github_corpora.py</code> <span class="kind">py</span></td><td class="purp">Download small, openly-licensed instruction datasets hosted directly on GitHub (no API key, no huggingface_hub needed) and convert them into the instruction/input/output parquet schema token</td><td class="size">2 KB</td></tr>
+<tr><td><code>evaluate_scratch.py</code> <span class="kind">py</span></td><td class="purp">Evaluate a from-scratch HWK checkpoint. Data can be a token-shard directory (evaluates eval.bin) or a .jsonl/.txt file (uses the 90/10 token split, as before). The tokenizer recorded in the </td><td class="size">4 KB</td></tr>
+<tr><td><code>export_project.sh</code> <span class="kind">sh</span></td><td class="purp">سكربت شل/باتش — بلا وصف في أول سطور</td><td class="size">0 KB</td></tr>
+<tr><td><code>generate_tool_sft.py</code> <span class="kind">py</span></td><td class="purp">Generate tool-calling / agentic SFT examples for Aali. Produces data/tool_calling_sft.jsonl in the same {&quot;messages&quot;: [...]} chat format already used by data/agent_instructions.jsonl, but tea</td><td class="size">35 KB</td></tr>
+<tr><td><code>hwk_paths.py</code> <span class="kind">py</span></td><td class="purp">Central disk-layout configuration for the HWK Aali project. Everything large (raw corpora, cleaned data, token shards, the tokenizer, checkpoints) lives on D: and X: so the small code folder</td><td class="size">2 KB</td></tr>
+<tr><td><code>launch_aali_node.py</code> <span class="kind">py</span></td><td class="purp">PyInstaller entry point for the آلي Node exe. A thin shim over aali_node.daemon.main — the SAME argv contract as the headless source run (`python -m aali_node …`), so every documented flag k</td><td class="size">1 KB</td></tr>
+<tr><td><code>mentor_a.py</code> <span class="kind">py</span></td><td class="purp">Desktop mentor A: capture a strong desktop assistant&#x27;s answers on this PC as training examples for the local model. The app is launched (or brought to the front), the prompt is pasted (so Ar</td><td class="size">12 KB</td></tr>
+<tr><td><code>mentor_b.py</code> <span class="kind">py</span></td><td class="purp">Web mentor B: capture a strong web assistant&#x27;s answers on this PC as training examples for the local model. The mentor web app has no official Windows desktop app, so this uses the WebView2 </td><td class="size">8 KB</td></tr>
+<tr><td><code>mentor_c.py</code> <span class="kind">py</span></td><td class="purp">Desktop mentor C: capture a strong desktop coding assistant&#x27;s answers as training examples for the local model. The desktop coding mentor is an AI code editor; its chat panel (Ctrl+L) can cr</td><td class="size">11 KB</td></tr>
+<tr><td><code>mentor_d.py</code> <span class="kind">py</span></td><td class="purp">Web mentor D: capture a strong web assistant&#x27;s answers on this PC as training examples for the local model. arena.ai is free, anonymous chat with frontier models (frontier models and more). </td><td class="size">8 KB</td></tr>
+<tr><td><code>prepare_data.py</code> <span class="kind">py</span></td><td class="purp">Download and clean The Pile Parquet shards without load_dataset.</td><td class="size">4 KB</td></tr>
+<tr><td><code>probe_model.py</code> <span class="kind">py</span></td><td class="purp">Generate sample responses from a scratch checkpoint. Probes: Arabic greeting, English greeting, file-tool request, code, medical, and law prompts. Shows the raw continuation so progress is v</td><td class="size">3 KB</td></tr>
+<tr><td><code>pyproject.toml</code> <span class="kind">toml</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>pytest.ini</code> <span class="kind">ini</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>requirements-hub.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>requirements.txt</code> <span class="kind">txt</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>scratch_training_log.csv</code> <span class="kind">csv</span></td><td class="purp">ملف</td><td class="size">4 KB</td></tr>
+<tr><td><code>soup.yaml</code> <span class="kind">yaml</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>teacher_to_sft.py</code> <span class="kind">py</span></td><td class="purp">Turn transcripts saved by the mentor capture scripts (mentor_a.py .. mentor_d.py) into SFT instruction records. Reads D:\\hwk-data\\teacher\\*.jsonl, keeps clean question/answer pairs, de-du</td><td class="size">3 KB</td></tr>
+<tr><td><code>test_agent.py</code> <span class="kind">py</span></td><td class="purp">Smoke-test the local no-key file-agent flow.</td><td class="size">1 KB</td></tr>
+<tr><td><code>tokenize_corpus.py</code> <span class="kind">py</span></td><td class="purp">Clean and tokenize downloaded corpora into uint16 token shards. Reads D:\\hwk-data\\raw\\&lt;corpus&gt;\\ (parquet / jsonl.zst / jsonl.xz / .txt), normalizes the text, and writes token shards (uin</td><td class="size">14 KB</td></tr>
+<tr><td><code>train_bpe.py</code> <span class="kind">py</span></td><td class="purp">Train the HWK BPE tokenizer from scratch on a sample of the corpora. Extracts up to --sample-mb of text from D:\\hwk-data\\raw (parquet, jsonl.zst, jsonl.xz, txt), then trains a 32k Sentence</td><td class="size">3 KB</td></tr>
+<tr><td><code>train_scratch.py</code> <span class="kind">py</span></td><td class="purp">Train the HWK Transformer from random weights, with no base model. Two data modes: 1. Pretraining (token shards): --data points at a directory of uint16 .bin shards produced by tokenize_corp</td><td class="size">40 KB</td></tr>
+<tr><td><code>win_ocr.ps1</code> <span class="kind">ps1</span></td><td class="purp">ملف</td><td class="size">2 KB</td></tr>
+</table></div>
+<div class="area" data-area=".github">
+<span class="count">1 ملف</span>
+<h3>.github <span class="en">/ .github</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>.github/workflows/tests.yml</code> <span class="kind">yml</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+</table></div>
+<div class="area" data-area="Desktop-Apps">
+<span class="count">12 ملف</span>
+<h3>Desktop-Apps <span class="en">/ Desktop-Apps</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>Desktop-Apps/README.md</code> <span class="kind">md</span></td><td class="purp">Desktop-Apps — تطبيقات آلي المكتبية والجوالة</td><td class="size">3 KB</td></tr>
+<tr><td><code>Desktop-Apps/START-HERE.html</code> <span class="kind">html</span></td><td class="purp">آلي — من أين تبدأ؟ | Aali — Start Here</td><td class="size">9 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-iOS/APIClient.swift</code> <span class="kind">swift</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">4 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-iOS/AaliApp.swift</code> <span class="kind">swift</span></td><td class="purp">آلي — Aali for iOS</td><td class="size">0 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-iOS/ChatView.swift</code> <span class="kind">swift</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">10 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-iOS/SettingsView.swift</code> <span class="kind">swift</span></td><td class="purp">ملف كود — بلا وصف في أول سطور</td><td class="size">4 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-iOS/Theme.swift</code> <span class="kind">swift</span></td><td class="purp">Deep-ink night + warm amber-gold, matching the web client.</td><td class="size">3 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-iOS/project.pbxproj</code> <span class="kind">pbxproj</span></td><td class="purp">ملف</td><td class="size">7 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-Studio-macOS/Aali-Studio.spec</code> <span class="kind">spec</span></td><td class="purp">ملف</td><td class="size">5 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-Studio-macOS/Aali-Studio.webloc</code> <span class="kind">webloc</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-Studio-macOS/Make-Aali-Studio.command</code> <span class="kind">command</span></td><td class="purp">ملف</td><td class="size">3 KB</td></tr>
+<tr><td><code>Desktop-Apps/Aali-Studio-macOS/build-mac.sh</code> <span class="kind">sh</span></td><td class="purp">============================================================</td><td class="size">3 KB</td></tr>
+</table></div>
+<div class="area" data-area="colab">
+<span class="count">1 ملف</span>
+<h3>colab <span class="en">/ colab</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>colab/HWK_colab_quickstart.py</code> <span class="kind">py</span></td><td class="purp">HWK Aali — extra practice runs on Google Colab&#x27;s free GPU. Why this exists: while your RTX 3070 trains Phase A at home, Colab (free T4) can run small experiments, evals, or micro fine-tunes </td><td class="size">3 KB</td></tr>
+</table></div>
+<div class="area" data-area="deploy">
+<span class="count">4 ملف</span>
+<h3>deploy <span class="en">/ deploy</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>deploy/aali-hub.service</code> <span class="kind">service</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>deploy/hf_space/Dockerfile</code> <span class="kind">file</span></td><td class="purp">ملف</td><td class="size">1 KB</td></tr>
+<tr><td><code>deploy/hf_space/README.md</code> <span class="kind">md</span></td><td class="purp">Aali on Hugging Face Spaces</td><td class="size">1 KB</td></tr>
+<tr><td><code>deploy/oracle/setup_aali_server.sh</code> <span class="kind">sh</span></td><td class="purp">Aali server bootstrap — Oracle Cloud Always Free Ubuntu (aarch64).</td><td class="size">3 KB</td></tr>
+</table></div>
+<div class="area" data-area="model">
+<span class="count">1 ملف</span>
+<h3>model <span class="en">/ model</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>model/scratch-smoke/config.json</code> <span class="kind">json</span></td><td class="purp">ملف</td><td class="size">0 KB</td></tr>
+</table></div>
+<div class="area" data-area="roadmap">
+<span class="count">1 ملف</span>
+<h3>roadmap <span class="en">/ roadmap</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>roadmap/multimodal.md</code> <span class="kind">md</span></td><td class="purp">Multimodal &amp; File-Format Roadmap (HWK Aali)</td><td class="size">4 KB</td></tr>
+</table></div>
+<div class="area" data-area="rules">
+<span class="count">1 ملف</span>
+<h3>rules <span class="en">/ rules</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>rules/assistant_rules.md</code> <span class="kind">md</span></td><td class="purp">قواعد سلوك المساعد — آلي (HWK-Aali)</td><td class="size">6 KB</td></tr>
+</table></div>
+<div class="area" data-area="skills">
+<span class="count">13 ملف</span>
+<h3>skills <span class="en">/ skills</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>skills/build-apps.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">4 KB</td></tr>
+<tr><td><code>skills/connectors.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">2 KB</td></tr>
+<tr><td><code>skills/emoji-etiquette.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">2 KB</td></tr>
+<tr><td><code>skills/emotional-intelligence.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">2 KB</td></tr>
+<tr><td><code>skills/machine-ops.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">2 KB</td></tr>
+<tr><td><code>skills/media-editing.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">3 KB</td></tr>
+<tr><td><code>skills/media-tools.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">2 KB</td></tr>
+<tr><td><code>skills/n8n-workflow.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">2 KB</td></tr>
+<tr><td><code>skills/pc-commands.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">3 KB</td></tr>
+<tr><td><code>skills/priority-erp.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">3 KB</td></tr>
+<tr><td><code>skills/security-rules.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">4 KB</td></tr>
+<tr><td><code>skills/self-verification.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">3 KB</td></tr>
+<tr><td><code>skills/web-research.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">1 KB</td></tr>
+</table></div>
+<div class="area" data-area="tasks">
+<span class="count">26 ملف</span>
+<h3>tasks <span class="en">/ tasks</span></h3>
+<div class="why">ملفات في جذر المشروع.</div>
+<table><tr><th style="width:34%">الملف</th><th>ماذا يفعل (taken from the file itself)</th><th style="width:9%">الحجم</th></tr>
+<tr><td><code>tasks/aali-reach.md</code> <span class="kind">md</span></td><td class="purp">Aali Reach — PART 3: read a public link, honestly</td><td class="size">10 KB</td></tr>
+<tr><td><code>tasks/aali-studio.md</code> <span class="kind">md</span></td><td class="purp">PART 2 — Aali Studio (desktop IDE)</td><td class="size">13 KB</td></tr>
+<tr><td><code>tasks/c-drive-cleanup.md</code> <span class="kind">md</span></td><td class="purp">C: drive emergency cleanup (100% full)</td><td class="size">2 KB</td></tr>
+<tr><td><code>tasks/commit-pending-work.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">0 KB</td></tr>
+<tr><td><code>tasks/competitive-analysis-part9.md</code> <span class="kind">md</span></td><td class="purp">task: competitive analysis &amp; feature parity (Part 9, Phase 9.1)</td><td class="size">1 KB</td></tr>
+<tr><td><code>tasks/distill-teacher-scratch.md</code> <span class="kind">md</span></td><td class="purp">Teacher distillation → scratch-shaped SFT rows (Phase C continuation, lever b)</td><td class="size">7 KB</td></tr>
+<tr><td><code>tasks/hebrew-data-collection.md</code> <span class="kind">md</span></td><td class="purp">Hebrew data collection — Aali&#x27;s second language (AR + HE)</td><td class="size">10 KB</td></tr>
+<tr><td><code>tasks/lead-agent-inbox.md</code> <span class="kind">md</span></td><td class="purp">Lead Agent inbox (DeepSeek/Gemma) — coordination channel</td><td class="size">10 KB</td></tr>
+<tr><td><code>tasks/part5-security.md</code> <span class="kind">md</span></td><td class="purp">Task claim: Part 5 security track (5.1-5.3)</td><td class="size">2 KB</td></tr>
+<tr><td><code>tasks/phase-c-own-brain-sft-relaunch.md</code> <span class="kind">md</span></td><td class="purp">Phase C — SFT Aali&#x27;s own brain (relaunch after power-off)</td><td class="size">14 KB</td></tr>
+<tr><td><code>tasks/phase-d-continue-110m.md</code> <span class="kind">md</span></td><td class="purp">Phase D — continue the 110M own-brain (owner decision 2026-09-21)</td><td class="size">2 KB</td></tr>
+<tr><td><code>tasks/phase-d-stage4-pici-night.md</code> <span class="kind">md</span></td><td class="purp">Phase D stage 4 + Pi-CI revival + night automation (2026-09-23)</td><td class="size">3 KB</td></tr>
+<tr><td><code>tasks/phase-ef-toolbelt-jobs-board.md</code> <span class="kind">md</span></td><td class="purp">Agent toolbelt + Phase E/F + live jobs board (2026-09-23 afternoon)</td><td class="size">6 KB</td></tr>
+<tr><td><code>tasks/pi-wol-sentinel.md</code> <span class="kind">md</span></td><td class="purp">Pi WoL sentinel — PC sleeps, Pi answers and wakes it</td><td class="size">3 KB</td></tr>
+<tr><td><code>tasks/refusal-episodes-next-mix.md</code> <span class="kind">md</span></td><td class="purp">Arabic-authored refusal episodes for the next soup SFT mix</td><td class="size">4 KB</td></tr>
+<tr><td><code>tasks/restore-39case-exam.md</code> <span class="kind">md</span></td><td class="purp">Restore the 39-case soup exam</td><td class="size">4 KB</td></tr>
+<tr><td><code>tasks/saas-transformation.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">10 KB</td></tr>
+<tr><td><code>tasks/sft-v3-image-tool-mix.md</code> <span class="kind">md</span></td><td class="purp">Task: image-tool-heavy SFT mix for the next graduation run (sft_v3)</td><td class="size">6 KB</td></tr>
+<tr><td><code>tasks/smoke-probe-ram-gate.md</code> <span class="kind">md</span></td><td class="purp">Task: smoke probe RAM gate</td><td class="size">6 KB</td></tr>
+<tr><td><code>tasks/soup-v6-graduation-run.md</code> <span class="kind">md</span></td><td class="purp">Soup v6 graduation run — the refusal-taught mix</td><td class="size">6 KB</td></tr>
+<tr><td><code>tasks/soup-v7-mix-hygiene.md</code> <span class="kind">md</span></td><td class="purp">Soup v7 — whole-mix attack→compliance hygiene gate</td><td class="size">8 KB</td></tr>
+<tr><td><code>tasks/track-b-11.6-11.7-aali-monitor.md</code> <span class="kind">md</span></td><td class="purp">Task claim: Track B 11.6–11.7 + Aali Monitor</td><td class="size">2 KB</td></tr>
+<tr><td><code>tasks/v5-graduation-run.md</code> <span class="kind">md</span></td><td class="purp">ملف توثيق</td><td class="size">4 KB</td></tr>
+<tr><td><code>tasks/voice-agent-phase1.md</code> <span class="kind">md</span></td><td class="purp">Aali Voice Agent — Phase 1 (core voice loop)</td><td class="size">6 KB</td></tr>
+<tr><td><code>tasks/voice-agent-phase2.md</code> <span class="kind">md</span></td><td class="purp">Aali Voice — Phase 2 (Studio → Console → Quality → Verticals)</td><td class="size">9 KB</td></tr>
+<tr><td><code>tasks/wave4-custom-assistants.md</code> <span class="kind">md</span></td><td class="purp">Wave 4 item 1 — Custom assistants UI</td><td class="size">3 KB</td></tr>
+</table></div>
+</div>
+<footer>كل وصف أعلاه مقروء من الملف نفسه (أول سطر في توثيقه) — لم يُختلق شيء.
+<code>python scripts/make_owner_map.py</code> يحدّث هذه الصفحة.</footer>
+<script>
+const q = document.getElementById('q');
+q.addEventListener('input', () => {
+  const v = q.value.trim().toLowerCase();
+  document.querySelectorAll('#list .area').forEach(a => {
+    const hit = !v || a.textContent.toLowerCase().includes(v);
+    a.classList.toggle('hidden', !hit);
+  });
+});
+</script>
+</div></body></html>
