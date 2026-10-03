@@ -248,7 +248,39 @@ in parallel:
   (answers every ask with the "direct-command mode" card, provider
   scratch_model with no weights) — the full translation is proven against a
   fake brain speaking :5055's exact vocabulary and really writing files.
-  PART 3 (Aali Reach) awaits the owner's go.
+- **Aali Reach answered deterministically after the live runs (2026-10-03,
+  Buffy)** — the unit suite was green while the feature did nothing useful, so
+  only live asks told the truth. (1) THE TOOL WAS NEVER THE BOTTLENECK:
+  `read_link` returned the real text, and the 1.5B brain, holding that text in
+  its own prompt, answered "please share the content of the webpage" — the
+  toolbelt ceiling this repo has now measured five times. PART 3 therefore
+  answers the way identity and capability already do: `app._link_context`
+  reads the pasted link BEFORE the model answers, and `_link_fallback`
+  replaces a reply that ignored it with an honest EXTRACTIVE digest — the
+  page's real opening lines labelled `اقتباس حرفي`, never a generated summary,
+  because a 1.5B asked to summarise invents and a quote cannot.
+  (2) A TUPLE RETURN SHIPPED A 500 WITH A GREEN SUITE: `_link_context` grew a
+  second return value and three early returns kept the bare string, so every
+  ask carrying a link died in 4 ms — while the tests passed through a helper
+  that TOLERATED both shapes. That tolerant helper was the bug's shelter; it
+  now asserts the exact tuple and 3 new tests pin every exit. LESSON: a
+  helper accepting "either shape" hides a shape mismatch until production.
+  (3) A DEFERRAL is a second failure shape (`اذهب إلى الرابط… لتحليله`) —
+  handing the owner's request back — so it gets its own veto beside the
+  ask-back. (4) MY OWN TEST caught the dangerous one: a CROSS-LANGUAGE
+  paraphrase shares no words with the page, so pure overlap scoring would
+  have overwritten a good Arabic answer with the raw excerpt; overlap is
+  evidence, not proof, and function words are stripped so "the/this/and" can
+  never fake a read. (5) THE FLAKINESS WAS THE HARNESS, NOT THE CODE: Arabic
+  live asks "failed" with NO audit entry — `curl -d` through the Windows
+  console mangled the Arabic before it left the shell so the intent regex
+  never matched; the same ask via `--data-binary @utf8.json` answered
+  `محتوى الرابط:` and quoted the real text. Two of tonight's four failures
+  were mine, not the product's. Live-verified AR+EN through the running
+  :5055 (killed by verified PID, revived by the watchdog in 10-40s). Tests:
+  tests/test_reach.py 100; suite 1525 passed / 15 skipped. Still honest gaps:
+  the playwright/camoufox route is BUILT BUT UNTESTED (venv not installed —
+  never claim a JS-rendered page was read), and no real social site measured.
 
 - **PART 3 Aali Reach — read-only link reading, fenced like a bank vault
   (2026-10-03, Buffy)**: tasks/aali-reach.md. `file_agent/reach.py` (STDLIB

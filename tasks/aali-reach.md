@@ -68,6 +68,75 @@ real social site, and camoufox's value unproven. The browser venv is NOT
 installed yet — `read_link` works today on `engine=static` and says so
 honestly instead of pretending to have rendered anything.
 
+---
+
+## Stage 5 — the live runs, and what they actually proved
+
+The unit suite was green from the start. Three LIVE asks against the served
+brain told the truth the suite could not.
+
+### 5.1 The tool was never the bottleneck
+
+`read_link` on `https://example.com` returned the title and the real text. The
+brain, handed that text inside its own prompt, answered:
+
+> Sure, let me help you with that! Please share the content of the webpage
+> you'd like me to check.
+
+It asked for material it was already holding. This is the toolbelt ceiling the
+repo has measured four times (13/39 exam cases): the 1.5B student does not
+emit tool calls. So PART 3 answers the way the repo already answers identity
+and capability — deterministically. `_link_context` reads the pasted link
+BEFORE the model answers, and `_link_fallback` replaces a reply that ignored
+the content with an honest EXTRACTIVE digest: the page's real opening lines,
+labelled `اقتباس حرفي` (verbatim quote), never a generated summary.
+
+### 5.2 A tuple return shipped a 500 with a green suite
+
+`_link_context` grew a second return value so the rescue layer could see the
+read record. Three of its early returns kept returning the bare string, so
+unpacking raised `ValueError` inside the request handler — every ask carrying
+a link died with a **500 in four milliseconds**. The suite stayed green
+because the tests all went through a helper that tolerated both shapes. That
+tolerant helper was the bug's shelter; it now asserts the exact tuple, and
+three new tests pin every exit (`AALI_REACH_OFF`, no-link, refused-link,
+import-failure). LESSON: a helper that accepts "either shape" hides a shape
+mismatch until production.
+
+### 5.3 Two more model failure shapes needed their own vetoes
+
+Live replies, in order: an ask-back, then `اذهب إلى الرابط https://example.com
+لتحليله.` — a DEFERRAL, handing the owner's own request back to the owner
+(`go to the link yourself`, `you can visit it`). Same failure, so it earns the
+same veto.
+
+### 5.4 The rescue must never overwrite a good answer
+
+My own test caught the dangerous bug: a **cross-language** paraphrase of an
+English page shares no words with it, so pure overlap scoring would have
+replaced a perfectly good Arabic answer with the raw excerpt. Overlap is
+evidence, not proof — the contract now also accepts a substantial reply as
+evidence, and function words are stripped so "the/this/and" can never fake a
+read.
+
+### 5.5 The flakiness was MY harness, and that is worth recording
+
+Several Arabic live asks "failed" with no audit entry at all — the link was
+never read. Cause: `curl -d "{\"message\":\"اقرأ…\"}"` through the Windows
+console mangled the Arabic before it left the shell, so the intent regex never
+matched. Sent as a UTF-8 file (`--data-binary @req.json`) the SAME ask
+answered `محتوى الرابط:` and quoted the real page text. No product bug; a
+measurement bug. Two of the four "failures" chased tonight were mine.
+
+## Honest verdict after the live runs
+
+- Reading works today on `engine=static`, verified live in Arabic and English.
+- The model often does NOT use the content it is handed; the deterministic
+  digest covers that case, and it is extractive on purpose.
+- The browser route (`playwright`/`camoufox`) is BUILT AND UNTESTED — the venv
+  is not installed. Do not claim a JS-rendered page has been read.
+- Still unmeasured against a real social site (the owner's actual use case).
+
 ## Decisions to record as they happen
 
 - **(2026-10-03)** Static-first, not browser-first. Most links are readable
