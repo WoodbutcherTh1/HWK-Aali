@@ -71,7 +71,12 @@ build_cli() {
     "$venv/bin/python" -m pip install pyinstaller
   fi
   say "[cli] compiling (a single-file binary, no install needed)..."
+  # --paths scripts: cli_update imports shared.updater, which lives in
+  # scripts/ and is NOT importable from the entry point's own directory. Without
+  # this the binary builds cleanly and /update dies with an ImportError at
+  # runtime — the exact failure shape the Studio spec hit.
   "$venv/bin/pyinstaller" --noconfirm --clean --onefile \
+    --paths scripts --hidden-import shared.updater --hidden-import cli_update \
     --name aali-cli --distpath "$DIST" \
     --workpath build-desktop/work-cli --specpath build-desktop \
     scripts/aali_cli.py

@@ -90,6 +90,36 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **[PART 4/10] آلي CLI `/update` LIVE in code (2026-10-03, Buffy)**: new
+  `scripts/cli_update.py` (CLI_VERSION 1.0.0 + the third client bridge over the
+  same `shared.updater`). Config `~/.aali/cli_update.json` (`AALI_CLI_UPDATE_CONFIG`
+  override) — JSON rather than another flat `~/.aali_cli_*` because it is
+  structured (auto_check default ON, channel stable/beta, hub_url, lang).
+  Commands: `/update` (status) · `check` · `apply` · `version` · `auto on|off`
+  · `channel stable|beta` · `rollback`, plus TAB completion and /help.
+  `/update apply` runs check → download → verify → stage → activate and then
+  **ASKS** before relaunching (the confirm callback is injected, so it is
+  testable): a terminal client that respawns itself behind your back is a
+  surprise, not a feature. The launch-time notice runs on a BACKGROUND thread
+  so an unreachable hub never delays the banner: «🎉 إصدار جديد v1.1.0 متوفر.
+  اكتب /update apply للتحديث.». Bilingual by construction: every string is an
+  `(arabic, english)` pair in `MSG` and `t(key, lang)` is the only chooser;
+  `lang` is ar (default) / en / both. Build: `build_desktop.bat` +
+  `build_all_macos.sh` gained `--paths scripts --hidden-import
+  shared.updater --hidden-import cli_update` (a test pins BOTH) — without them
+  the onefile exe builds cleanly and `/update` dies with an ImportError at
+  runtime. The `.bat` was patched by a scratch script, not a heredoc, because
+  a shell heredoc mangles Windows backslashes (and it stayed ASCII + CRLF for
+  tests/test_bat_hygiene.py). LESSON re-paid: the file transport injected CJK
+  characters into two Arabic lines of docs/features/cli_update.md — the same
+  hazard AGENTS.md warns about; found by a codepoint scan and fixed by
+  rewriting those lines from \u escapes. Tests: tests/test_cli_update.py 38,
+  the whole flow against a real loopback signed hub, and NO test touches the
+  public internet (loopback hub or an offline manifest stub). Docs:
+  docs/features/cli_update.md (AR+EN, incl. a troubleshooting table that maps
+  each error to its REAL cause). Suite 1708 green / 15 skipped. NEXT: [5] hub
+  per-app manifests, then [6] publish scripts.
+
 - **[PART 3/10] آلي Desktop auto-update LIVE in code (2026-10-03, Buffy)**:
   new `desktop_update.py` (the Desktop-side bridge over the same
   `shared.updater`: `%APPDATA%/AaliDesktop/config.json` with auto-check default

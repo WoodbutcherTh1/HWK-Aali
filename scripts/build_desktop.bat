@@ -32,7 +32,10 @@ echo [build] compiling exe...
 .venv-desktop\Scripts\pyinstaller.exe --noconfirm --clean --distpath build-desktop\dist --workpath build-desktop\work Aali-Desktop.spec
 
 rem --- terminal client (aali-cli.exe) ---
-.venv-desktop\Scripts\pyinstaller.exe --noconfirm --onefile --name aali-cli --icon "%~dp0..\build-desktop\icon.ico" --distpath build-desktop\dist --workpath build-desktop\work --specpath build-desktop scripts\aali_cli.py
+rem --paths + hidden-import: cli_update imports shared.updater, which lives
+rem in scripts/ and is invisible to the entry point. Without these the exe
+rem builds cleanly and /update dies with an ImportError at runtime.
+.venv-desktop\Scripts\pyinstaller.exe --noconfirm --onefile --paths scripts --hidden-import shared.updater --hidden-import cli_update --name aali-cli --icon "%~dp0..\build-desktop\icon.ico" --distpath build-desktop\dist --workpath build-desktop\work --specpath build-desktop scripts\aali_cli.py
 if errorlevel 1 goto :fail
 
 where ISCC.exe >nul 2>&1

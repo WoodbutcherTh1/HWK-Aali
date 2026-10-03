@@ -35,6 +35,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Auto-update lives next to the client so the frozen exe bundles it; the
+# import is lazy inside repl() only where it is used — the REPL must still
+# start on a machine with no verification key and no install directory.
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+try:
+    import cli_update
+except Exception as _cli_update_exc:  # noqa: BLE001 - /update degrades, REPL never dies
+    cli_update = None  # type: ignore[assignment]
+
 # Windows consoles/pipes default to cp1252 — force UTF-8 so Arabic and box
 # glyphs always survive (esp. inside the PyInstaller exe).
 for _stream in (sys.stdout, sys.stderr):
@@ -1351,7 +1361,8 @@ HISTORY_MAX = 500
 _KEYS = {"UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "BS", "DEL", "HOME", "END"}
 _SLASH_COMMANDS = ("/exit", "/quit", "/q", "/help", "/new", "/open", "/clear", "/projects",
                    "/theme", "/tools", "/multi", "/sid", "/bidi", "/jobs",
-                   "/share", "/prompts", "/assistants", "/search", "/voice", "/say")
+                   "/share", "/prompts", "/assistants", "/search", "/voice", "/say",
+                   "/update")
 
 
 def _jobs_panel(base: str, color: bool) -> None:
@@ -1727,6 +1738,10 @@ def repl(base: str, api_key: str = "") -> None:
     color = _supports_color()
     width = shutil.get_terminal_size((100, 24)).columns
     banner(width)
+    # Auto-update bookkeeping FIRST: a payload that cannot reach a working
+    # prompt twice in a row is rolled back before the owner types anything.
+    if cli_update is not None:
+        cli_update.startup()
     sid = "cli-" + str(int(time.time()))
     last_suggestions: list[str] = []
     cols = {"user": "gold", "aali": "green", "info": "cyan", "warn": "red"}
@@ -1770,6 +1785,17 @@ def repl(base: str, api_key: str = "") -> None:
         body = fx(text, _term_width()) if BIDI_MODE else text
         print(paint(f"{tag} ", style, "bold", enabled=color) + body)
 
+    if cli_update is not None:
+        # The launch-time check runs in a BACKGROUND thread so an unreachable
+        # hub never delays the banner or the prompt.
+        def _announce(pair) -> None:
+            say("🎉", pair[0], "gold")
+            if cli_update.load_config().get("lang") != "ar":
+                say(" ", pair[1], "dim")
+
+        cli_update.start_background_check(_announce)
+        say(" ", f"v{cli_update.CLI_VERSION} — /update", "dim")
+
     while True:
         try:
             prompt = paint("❯ ", "gold", enabled=color)
@@ -1798,6 +1824,7 @@ def repl(base: str, api_key: str = "") -> None:
                         ("/search", "FTS across conversations (--all / --session <sid>)"),
                         ("/voice", "TTS settings: on|off|list|set <id>|speed <n>"),
                         ("/say", "speak text aloud via Piper (/say <text>)"),
+                        ("/update", "self-update: check|apply|version|auto on|off|channel"),
                         ("/multi", "paste a multi-line block"),
                         ("/sid", "show session id"),
         		("/bidi", "Arabic display fix (on/off/auto)"),
@@ -1887,6 +1914,21 @@ def repl(base: str, api_key: str = "") -> None:
                         # the user complete it on the next read
                         say("✻", "الصق الموجّه في المحادثة وأكمله:", "info")
                         print(fx(_out, _term_width()))
+                    continue
+                if cmd == "/update":
+                    if cli_update is None:
+                        say("✗", "وحدة التحديث غير متوفرة في هذه النسخة "
+                                 "(update module missing)", "warn")
+                        continue
+                    # The CLI's own auto-update (scripts/cli_update.py) — same
+                    # signed contract as Studio/Desktop/Node. `confirm` is
+                    # injected so /update apply can ASK before it relaunches:
+                    # a terminal client that respawns itself behind your back
+                    # is a surprise, not a feature.
+                    cli_update.run_command(
+                        arg, say=say, color=color,
+                        confirm=lambda prompt: input(
+                            paint(f"   {prompt} [y/N] ", "gold", enabled=color)))
                     continue
                 if cmd == "/voice":
                     cli_voice(base, arg, api_key, color, say)
