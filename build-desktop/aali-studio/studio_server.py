@@ -31,6 +31,22 @@ sandbox (``file_tools._resolve``) rather than a second, weaker one.
 
 from __future__ import annotations
 
+# The Arabic --help must print on every console, including a cp1252 Windows
+# pipe: without this the entry-point dies inside argparse itself
+# (UnicodeEncodeError before main() ever runs). Same block as studio_app.py.
+import sys as _sys
+
+for _stream_name in ("stdout", "stderr"):
+    try:
+        _stream = getattr(_sys, _stream_name)
+        if _stream.encoding and _stream.encoding.lower().replace("-", "") != "utf8":
+            import io as _io
+            setattr(_sys, _stream_name,
+                    _io.TextIOWrapper(_stream.buffer, encoding="utf-8",
+                                      errors="replace", line_buffering=True))
+    except Exception:  # noqa: BLE001 - a console quirk must not stop boot
+        pass
+
 import json
 import os
 import re
@@ -564,6 +580,28 @@ def create_app() -> Flask:
         except mp.StudioError as exc:
             return _fail(exc, 400)
         return jsonify({"ok": True, "settings": saved})
+
+    @app.get("/api/prefs")
+    def api_prefs_get() -> Response:
+        """The UI comfort settings (font, wrap, terminal, thinking)."""
+        s = mp.settings()
+        return jsonify({"font_size": str(s.get("font_size") or "14"),
+                        "word_wrap": s.get("word_wrap") or "on",
+                        "terminal_visible": s.get("terminal_visible") or "1",
+                        "show_thinking": s.get("show_thinking") or "1"})
+
+    @app.post("/api/prefs")
+    def api_prefs_post() -> Response:
+        """Same whitelist as /api/settings — prefs are settings."""
+        try:
+            saved = mp.save_settings(request.get_json(silent=True) or {})
+        except mp.StudioError as exc:
+            return _fail(exc, 400)
+        return jsonify({"ok": True, "prefs": {
+            "font_size": str(saved.get("font_size") or "14"),
+            "word_wrap": saved.get("word_wrap") or "on",
+            "terminal_visible": saved.get("terminal_visible") or "1",
+            "show_thinking": saved.get("show_thinking") or "1"}})
 
     @app.get("/api/keys/status")
     def api_keys_status() -> Response:

@@ -24,8 +24,18 @@
 html, body {
   margin: 0; height: 100%; overflow: hidden;
   background: var(--bg); color: var(--fg);
-  font-family: var(--sans); font-size: 14px;
+  font-family: var(--sans); font-size: var(--ui-font, 14px);
 }
+
+/* ————— UI comfort scale (2026-10-03) —————
+   One knob on :root scales every size in the chrome. Monaco and the terminal
+   read the same variable, so nothing drifts out of step with the rest. */
+:root[data-fs="12"] { --ui-font: 12px; --ed-font: 12px; }
+:root[data-fs="13"] { --ui-font: 13px; --ed-font: 12.5px; }
+:root[data-fs="14"] { --ui-font: 14px; --ed-font: 13px; }
+:root[data-fs="15"] { --ui-font: 15px; --ed-font: 14px; }
+:root[data-fs="16"] { --ui-font: 16px; --ed-font: 15px; }
+:root[data-fs="18"] { --ui-font: 18px; --ed-font: 16.5px; }
 
 button, select, input, textarea {
   font-family: inherit; font-size: inherit; color: inherit;
@@ -84,11 +94,22 @@ button.danger-ghost:hover { background: #4a2626; }
 .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .pane + .pane { border-inline-start: 1px solid var(--line); }
 
-#tree-pane { width: 250px; background: var(--bg-2); flex: 0 0 auto; }
+#tree-pane { width: 262px; background: var(--bg-2); flex: 0 0 auto; }
 #editor-pane { flex: 1 1 auto; background: var(--bg); }
 #agent-pane {
-  width: 430px; flex: 0 0 auto; background: var(--bg-2);
+  width: 440px; flex: 0 0 auto; background: var(--bg-2);
   border-inline-start: 1px solid var(--line);
+}
+
+/* narrow windows: panes shrink with the window instead of clipping */
+@media (max-width: 1250px) {
+  #tree-pane { width: 210px; }
+  #agent-pane { width: 380px; }
+}
+@media (max-width: 1050px) {
+  #tree-pane { width: 172px; }
+  #agent-pane { width: 330px; }
+  #model { min-width: 150px; }
 }
 
 .pane-head {
@@ -111,19 +132,34 @@ button.danger-ghost:hover { background: #4a2626; }
 }
 .path { color: var(--fg-faint); font-size: 11px; font-family: var(--mono); direction: ltr; display: block; text-align: left; }
 
+/* ————— workspace switcher row ————— */
+.ws-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px; border-bottom: 1px solid var(--line);
+  background: rgba(216, 180, 106, .05);
+}
+.ws-name {
+  flex: 1; min-width: 0; direction: ltr; text-align: left;
+  font-family: var(--mono); font-size: 12px; color: var(--gold);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-btn { padding: 3px 8px; font-size: 13px; }
+
 /* ————— file tree ————— */
 
-.tree { list-style: none; margin: 0; padding: 6px 4px; overflow: auto; flex: 1; }
+.tree { list-style: none; margin: 0; padding: 6px 4px; overflow: auto; flex: 1; outline: none; }
 .tree li { border-radius: 6px; }
 .tree .row {
   display: flex; align-items: center; gap: 6px; width: 100%;
   background: none; border: none; text-align: start;
-  padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
 }
 .tree .row:hover { background: var(--bg-3); }
 .tree .row.active { background: var(--gold-soft); color: var(--gold); }
+/* keyboard: the tree is a listbox — arrows walk it, Enter opens. */
+.tree:focus-within .row.active { outline: 1px solid var(--gold); outline-offset: -1px; }
 .tree .row .size { margin-inline-start: auto; color: var(--fg-faint); font-size: 10px; }
-.tree .caret { width: 12px; color: var(--fg-faint); }
+.tree .caret { width: 12px; color: var(--fg-faint); font-size: 10px; }
 .tree .folder { color: var(--gold); }
 
 /* ————— tabs ————— */
@@ -173,7 +209,7 @@ button.danger-ghost:hover { background: #4a2626; }
 .link-row { display: flex; gap: 6px; margin-bottom: 7px; }
 .link-row input {
   flex: 1; min-width: 0;
-  background: var(--bg-1); border: 1px solid var(--line);
+  background: var(--bg-3); border: 1px solid var(--line);
   border-radius: 8px; padding: 6px 9px;
   color: var(--fg); font-size: 12px; font-family: var(--mono);
 }
@@ -276,6 +312,7 @@ button.danger-ghost:hover { background: #4a2626; }
 .hint { color: var(--fg-faint); font-size: 11px; }
 
 .panel { overflow: auto; flex: 1; padding: 10px; }
+.panel .thinking.hidden { display: none; }
 .turn {
   border: 1px solid var(--line); border-radius: var(--r);
   margin-bottom: 12px; overflow: hidden; background: var(--bg);
@@ -413,6 +450,18 @@ button.danger-ghost:hover { background: #4a2626; }
 .brain-banner button:hover { background: rgba(214, 168, 92, .28); }
 
 /* ————— dialogs + toast ————— */
+
+.sect { margin: 16px 0 8px; font-size: 14px; color: var(--gold); }
+.pref-grid { display: flex; flex-direction: column; gap: 8px; }
+.pref-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 13px;
+}
+.pref-row select {
+  background: var(--bg-3); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 8px; min-width: 110px;
+}
+.pref-row select:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 .dialog {
   background: var(--bg-2); color: var(--fg); border: 1px solid var(--line);

@@ -194,7 +194,7 @@ async function loadTree(path = ".") {
     const parts = path.split("/");
     const up = el("li");
     const row = el("button", "row");
-    row.append(el("span", "caret", "▾"), el("span", "", "📁 .."));
+    row.append(el("span", "caret", "▾"), el("span", "", "📁 المجلد الأعلى"));
     row.onclick = () => loadTree(parts.slice(0, -1).join("/") || ".");
     up.append(row);
     list.append(up);
@@ -203,13 +203,32 @@ async function loadTree(path = ".") {
     const item = el("li");
     const row = el("button", "row");
     if (entry.type === "dir") {
-      row.append(el("span", "caret", "▸"), el("span", "folder", "📁 " + entry.name));
-      row.onclick = () => loadTree(entry.path);
+      const caret = el("span", "caret", "▸");
+      row.append(caret, el("span", "folder", "📁 " + entry.name));
+      row.onclick = () => {
+        caret.textContent = caret.textContent === "▸" ? "▾" : "▸";
+        loadTree(entry.path);
+      };
+      row.dataset.dir = "1";
     } else {
       row.append(el("span", "caret", ""), el("span", "", "📄 " + entry.name));
       row.onclick = () => openFile(entry.path);
       if (state.openPath === entry.path) row.classList.add("active");
     }
+    // Keyboard: ↑↓ walk the tree, Enter opens, → expands a folder.
+    row.onkeydown = (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const rows = [...list.querySelectorAll(".row")];
+        const i = rows.indexOf(row);
+        const next = rows[event.key === "ArrowDown" ? i + 1 : i - 1];
+        if (next) next.focus();
+      } else if (event.key === "Enter" ||
+                 (event.key === "ArrowRight" && row.dataset.dir)) {
+        event.preventDefault();
+        row.click();
+      }
+    };
     item.append(row);
     list.append(item);
   }
@@ -670,9 +689,13 @@ async function ask(question) {
         view.meta.textContent = "سياق: " + (data.paths || []).join(" · ");
         break;
       case "thinking": {
+        const reveal = document.documentElement.dataset.think !== "0";
+        view.turn.querySelector(".thinking").classList.toggle("hidden", !reveal);
         view.thinking.textContent += data.token || "";
-        view.label.textContent = "💭 تفكير آلي… (" +
-          view.thinking.textContent.length + " حرف)";
+        /* The label carries the tail of the thought, not a number: the last
+           words say more than any count ever did. */
+        const tail = (view.thinking.textContent || "").trim().slice(-70);
+        view.label.textContent = "💭 تفكير آلي… " + (tail ? "· " + tail : "");
         state.turnBlocks.push({ kind: "thinking", text: data.token || "" });
         break;
       }
@@ -731,6 +754,10 @@ async function ask(question) {
         if (data.sid) state.lastSid = data.sid;
         view.retry.hidden = !!data.ok;
         view.answer.querySelector(".cursor")?.remove();
+        const shown = (document.documentElement.dataset.think === "0")
+          ? "💭 مُختصر" : null;
+        view.meta.textContent = shown || view.meta.textContent ||
+          (new Date().toLocaleTimeString("ar"));
         saveTurn(question, data.reply || answerSoFar, view.files);
         break;
       }
@@ -813,7 +840,11 @@ async function openTurn(turnId) {
     }
   }
   view.thinking.textContent = thinking;
-  view.label.textContent = "💭 تفكير آلي (" + thinking.length + " حرف)";
+  const tail = thinking.trim().slice(-70);
+  view.label.textContent = "💭 تفكير آلي " + (tail ? "· " + tail : "");
+  if (document.documentElement.dataset.think === "0") {
+    view.turn.querySelector(".thinking").classList.add("hidden");
+  }
   view.answer.innerHTML = renderMarkdown(turn.reply || "");
   view.meta.textContent = (turn.model || "") + " · " + (turn.ts || "");
   view.retry.onclick = () => ask(turn.question);
@@ -944,6 +975,12 @@ async function openKeys() {
   $("custom-url").value = (settings.custom && settings.custom.base_url) || "";
   $("custom-model").value = (settings.custom && settings.custom.model) || "";
   await checkBrain();
+  // The comfort settings read their CURRENT values, never defaults.
+  const prefs = await api("/api/prefs");
+  $("pref-font").value = String(prefs.font_size || "14");
+  $("pref-wrap").value = prefs.word_wrap === "off" ? "off" : "on";
+  $("pref-term").value = prefs.terminal_visible === "0" ? "0" : "1";
+  $("pref-think").value = prefs.show_thinking === "0" ? "0" : "1";
   $("keys-dialog").showModal();
 }
 
@@ -960,6 +997,16 @@ async function saveKeys() {
     custom_model: $("custom-model").value.trim(),
     brain_url: $("brain-url").value.trim(),
   }});
+  const prefs = {
+    font_size: $("pref-font").value,
+    word_wrap: $("pref-wrap").value,
+    terminal_visible: $("pref-term").value,
+    show_thinking: $("pref-think").value,
+  };
+  await api("/api/prefs", { method: "POST", body: prefs });
+  applyPrefs(prefs);
+  syncMonacoPrefs();
+  toggleTerminal(prefs.terminal_visible !== "0");
   $("keys-dialog").close();
   await loadModels();
   const brain = await checkBrain();
@@ -1064,6 +1111,9 @@ async function injectUpdateScript() {
 async function loadWorkspace() {
   const data = await api("/api/workspace");
   state.workspace = data.path;
+  const name = (data.path || "").split(/[\\/]/).filter(Boolean).pop();
+  $("ws-name").textContent = name || data.path || "—";
+  $("ws-name").title = data.path || "";
   await loadTree(".");
   await loadAllFiles();
 }
@@ -1090,10 +1140,13 @@ async function initMonaco() {
         "editorCursor.foreground": "#d8b46a",
       },
     });
+    const edFont = parseFloat(getComputedStyle(document.documentElement)
+      .getPropertyValue("--ed-font")) || 13;
     state.editor = monaco.editor.create($("editor"), {
       value: "", language: "plaintext", theme: "aali-studio",
-      fontSize: 13, fontFamily: '"Cascadia Mono", Consolas, monospace',
-      automaticLayout: true, minimap: { enabled: false }, wordWrap: "on",
+      fontSize: edFont, fontFamily: '"Cascadia Mono", Consolas, monospace',
+      automaticLayout: true, minimap: { enabled: false },
+      wordWrap: document.documentElement.dataset.wrap === "off" ? "off" : "on",
       scrollBeyondLastLine: false, tabSize: 4,
     });
     state.editor.onDidChangeContent(() => {
@@ -1122,6 +1175,44 @@ async function saveCurrent() {
 
 function toggleTerminal(show) {
   $("terminal-pane").hidden = !show;
+}
+
+/* ————— UI preferences (2026-10-03) —————
+   Saved server-side in settings.json and echoed through the boot URL, so the
+   window, a browser tab and a future second window all agree on the owner's
+   choices. :root[data-*] drives the CSS; Monaco reads the same variables. */
+
+const FONT_SIZES = ["12", "13", "14", "15", "16", "18"];
+
+function applyPrefs(prefs) {
+  const root = document.documentElement;
+  const font = String(prefs.font_size || "14");
+  root.dataset.fs = FONT_SIZES.includes(font) ? font : "14";
+  root.dataset.wrap = prefs.word_wrap === "off" ? "off" : "on";
+  root.dataset.term = prefs.terminal_visible === "0" ? "0" : "1";
+  root.dataset.think = prefs.show_thinking === "0" ? "0" : "1";
+}
+
+function applyUrlPrefs() {
+  try {
+    const query = new URLSearchParams(location.search);
+    if (![...query.keys()].length) return;
+    applyPrefs({
+      font_size: query.get("fs") || "14",
+      word_wrap: query.get("wrap") || "on",
+      terminal_visible: query.get("term") || "1",
+      show_thinking: "1",
+    });
+  } catch (_) { /* prefs are cosmetic — never block boot */ }
+}
+
+function syncMonacoPrefs() {
+  if (!state.editor) return;
+  const size = parseFloat(getComputedStyle(document.documentElement)
+    .getPropertyValue("--ed-font")) || 13;
+  const wrap = document.documentElement.dataset.wrap === "off" ? "off" : "on";
+  state.editor.updateOptions({ fontSize: size, wordWrap: wrap });
+  state.tabs.forEach((t) => t.model && t.model.updateOptions({ wordWrap: wrap }));
 }
 
 function wire() {
@@ -1172,6 +1263,7 @@ function wire() {
       toast("المجلد: " + data.path);
     }
   };
+  $("ws-name").onclick = () => $("btn-folder").click();
   $("btn-newfile").onclick = async () => {
     const name = prompt("اسم الملف الجديد (داخل مجلد المشروع):");
     if (!name) return;
@@ -1262,12 +1354,21 @@ function wire() {
       closeTab(state.openPath);
     }
     if (event.key === "Escape" && !$("palette").hidden) closePalette();
+    // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs like every real IDE.
+    if (event.key === "Tab" && ctrl && state.tabs.length > 1) {
+      event.preventDefault();
+      const i = state.tabs.findIndex((t) => t.path === state.openPath);
+      const step = event.shiftKey ? -1 : 1;
+      const next = state.tabs[(i + step + state.tabs.length) % state.tabs.length];
+      switchTab(next.path);
+    }
   });
 }
 
-(async function boot() {
+async function boot() {
   wire();
-  toggleTerminal(true);
+  applyUrlPrefs();
+  toggleTerminal(document.documentElement.dataset.term !== "0");
   renderChips();
   renderTabs();
   await loadModels().catch((e) => toast(e.message));
@@ -1276,6 +1377,9 @@ function wire() {
   await loadHistory().catch(() => {});
   await initMonaco();
   setContent("", "");
+  syncMonacoPrefs();
   await injectUpdateScript().catch(() => {});
   await mountUpdateUi().catch((e) => toast(e.message));
-})();
+}
+
+boot();

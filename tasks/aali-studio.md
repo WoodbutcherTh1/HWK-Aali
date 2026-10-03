@@ -142,3 +142,71 @@ A Cursor/Freebuff-style **desktop IDE** where Aali is the default model.
 
 ## status: done (PART 2) — PART 3 (Aali Reach) awaits the owner's go
 
+---
+
+# UI/UX COMFORT PASS + Desktop-Apps bundle (2026-10-03, Buffy)
+
+status: done
+
+Owner's session ask: "improve [Aali Studio mac app] for best UI&UX", "the iOS
+version of aali wheres it?", "copy them into the desktop".
+
+## What changed (Studio, both platforms)
+
+1. **Comfort prefs, one channel**: font_size (12–18) / word_wrap /
+   terminal_visible / show_thinking added to models_proxy's settings
+   whitelist (same validated channel, no second config file), served via
+   new GET/POST `/api/prefs`, edited in the keys dialog (🪟 المظهر والسلوك
+   section), applied through `:root[data-fs]` CSS scale so the chrome and
+   Monaco never drift apart, and carried into the pywebview window through
+   the boot URL (`?fs=&wrap=&term=`).
+2. **Keyboard reachability**: file tree is a real listbox (↑↓ walk, Enter
+   open, → expand), `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle tabs.
+3. **Honest thinking label**: the label now shows the TAIL of the model's
+   actual thought (last 70 chars) instead of the useless «(N حرف)» counter;
+   a show_thinking=0 pref hides the block entirely («💭 مُختصر» in meta).
+4. **macOS chrome fixes**: tree carets are text triangles (▸/▾) instead of
+   colored emoji that clash with the chrome on a Mac; the up-row says
+   «📁 المجلد الأعلى» (the bare "📁 .." was cryptic); a workspace row
+   (ws-name + 📂) shows/switches the open folder; pane widths grew
+   (262/440px) and shrink at 1250/1050px instead of clipping; the link
+   input's dead `var(--bg-1)` (undefined) is now `var(--bg-3)`.
+5. **REAL pre-existing bug found & fixed**: on this box, `studio_app.py
+   --help` and `studio_server.py --help` died with UnicodeEncodeError
+   (cp1252 console, Arabic help text) — the entrypoint tripwire test
+   "passed" only in UTF-8 suite shells. Both entrypoints now force UTF-8 on
+   stdout/stderr (errors=replace), matching the repo's UTF-8-forcing
+   convention (aali_cli does the same for the exe).
+
+Tests: test_aali_studio.py **113** (was 101; 12 new UI contracts incl.
+prefs whitelist refusal, endpoints, boot-URL contract, keyboard nav,
+counter-label ban, caret style). Suite run below.
+
+## iOS app (found + fixed)
+
+It lives at `ios/Aali.xcodeproj` (5 SwiftUI files: AaliApp, ChatView,
+SettingsView, APIClient, Theme; bundle com.hwkaali.aali, iOS 16+, Arabic
+first). Fixes this session: explicit `Theme.text` on every Text surface
+(default label color can render near-black on the ink background since the
+app forces dark), user/assistant name colors distinguished (muted vs gold),
+success/danger theme colors, an actionable «اضبط الاتصال» button in the
+status bar when disconnected, composer text color, and a re-ping after a
+failed ask so the reconnect affordance actually appears. SwiftUI cannot be
+compiled on this PC — the owner's MacBook with Xcode is the only honest
+verification path (stated in Desktop-Apps/README.md).
+
+## Desktop-Apps (the "copy them into the desktop" ask)
+
+`Desktop-Apps/` in the repo root + copied to `C:/Users/HmamK/OneDrive/
+Desktop/Aali-Apps/`: `Aali-Studio-macOS/` (build-mac.sh + spec),
+`Aali-iOS/` (5 Swift files + project.pbxproj), bilingual README with the
+exact MacBook commands. A real native .app/.ipa can only be produced on the
+Mac — the bundle is the honest copyable form, not a fake binary.
+
+## Also this session
+
+- PART 5 hub per-app work found UNCOMMITTED in the tree (aali_hub/
+  app_updates.py + tests, 30 green in .venv-hub, skip in training venv by
+  design) — committed as d0d16ee before this pass started.
+- docs/features/aali_studio.md §9 documents the comfort layer.
+

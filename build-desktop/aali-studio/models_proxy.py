@@ -173,20 +173,29 @@ def _save_json(path: str, data: dict[str, Any]) -> None:
 
 
 def settings() -> dict[str, Any]:
-    """Non-secret Studio settings (last model, brain URL, custom endpoint)."""
+    """Non-secret Studio settings (last model, brain URL, custom endpoint,
+    and the UI preferences the owner set in the keys dialog)."""
     data = _load_json(settings_file())
     data.setdefault("model", DEFAULT_MODEL_ID)
     data.setdefault("brain_url", os.getenv("AALI_BRAIN_URL", DEFAULT_BRAIN_URL))
     data.setdefault("workspace", "")
     data.setdefault("custom_base_url", "")
     data.setdefault("custom_model", "")
+    # UI/UX preferences (2026-10-03): the owner asked for a comfortable IDE,
+    # not a dense one. Server-side defaults so a fresh install is readable.
+    data.setdefault("font_size", "14")
+    data.setdefault("word_wrap", "on")
+    data.setdefault("terminal_visible", "1")
+    data.setdefault("show_thinking", "1")
     return data
 
 
 def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
     """Merge `patch` into the settings file. Unknown keys are refused."""
     allowed = {"model", "brain_url", "workspace", "custom_base_url",
-               "custom_model"}
+               "custom_model",
+               # UI preferences — still strings, still length-capped below.
+               "font_size", "word_wrap", "terminal_visible", "show_thinking"}
     clean: dict[str, Any] = {}
     for key, value in (patch or {}).items():
         if key not in allowed:

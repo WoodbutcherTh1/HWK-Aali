@@ -1182,3 +1182,104 @@ def test_the_ui_sends_tokens_and_never_page_text():
     assert "message" in keys
     assert "text" not in keys, "the client must not post page text"
     assert "excerpt" not in keys
+
+# ————— 8. the UI/UX pass (2026-10-03) —————
+#
+# The owner called v1 «ضعيف، بسيط». The comfort layer is pinned here: prefs
+# travel the SAME whitelisted settings channel (never a second config file),
+# the editor reads the same font scale as the chrome, the tree is keyboard
+# reachable, and the thinking label shows the model's words, not a counter.
+
+def test_ui_prefs_roundtrip_through_the_whitelist():
+    saved = mp.save_settings({"font_size": "16", "word_wrap": "off",
+                              "terminal_visible": "0", "show_thinking": "1"})
+    assert saved["font_size"] == "16" and saved["word_wrap"] == "off"
+    s = mp.settings()
+    assert s["terminal_visible"] == "0" and s["show_thinking"] == "1"
+
+
+def test_ui_prefs_default_to_a_readable_studio():
+    s = mp.settings()
+    assert s["font_size"] == "14" and s["word_wrap"] == "on"
+    assert s["terminal_visible"] == "1" and s["show_thinking"] == "1"
+
+
+def test_ui_prefs_refuse_unknown_keys_and_junk_values():
+    with pytest.raises(mp.StudioError):
+        mp.save_settings({"evil": "1"})                 # unknown key
+    with pytest.raises(mp.StudioError):
+        mp.save_settings({"font_size": "x" * 401})    # over the length cap
+
+
+def test_prefs_endpoints_serve_and_save(client):
+    got = client.get("/api/prefs").get_json()
+    assert got["font_size"] == "14" and got["word_wrap"] == "on"
+    saved = client.post("/api/prefs", json={"font_size": "18",
+                                            "word_wrap": "off"}).get_json()
+    assert saved["ok"] is True
+    assert client.get("/api/prefs").get_json()["font_size"] == "18"
+    bad = client.post("/api/prefs", json={"font_size": "18", "evil": "1"})
+    assert bad.status_code == 400
+
+
+def test_boot_url_carries_the_saved_prefs_into_the_window():
+    """The pywebview window opens on a URL that already speaks the prefs."""
+    source = (STUDIO_DIR / "studio_app.py").read_text(encoding="utf-8")
+    assert "_ui_prefs" in source and "fs=" in source
+    assert "wrap=" in source and "term=" in source
+
+
+def test_the_client_applies_prefs_from_the_url_and_the_css_scale():
+    js = (STUDIO_DIR / "web" / "app.js").read_text(encoding="utf-8")
+    css = (STUDIO_DIR / "web" / "style.css").read_text(encoding="utf-8")
+    assert "applyUrlPrefs" in js and "applyPrefs" in js
+    assert "syncMonacoPrefs" in js          # Monaco follows the same scale
+    assert "updateOptions" in js
+    assert ':root[data-fs="18"]' in css      # every size has a real scale entry
+    for size in ("12", "13", "14", "15", "16", "18"):
+        assert f'[data-fs="{size}"]' in css
+
+
+def test_the_thinking_label_shows_words_not_a_counter():
+    js = (STUDIO_DIR / "web" / "app.js").read_text(encoding="utf-8")
+    assert "حرف)" not in js.split("case \"thinking\"")[1][:900], (
+        "the counter label was the complaint — the tail of the thought instead")
+    assert ".slice(-70)" in js
+
+
+def test_thinking_can_be_collapsed_by_the_owner():
+    js = (STUDIO_DIR / "web" / "app.js").read_text(encoding="utf-8")
+    html = (STUDIO_DIR / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'id="pref-think"' in html
+    assert 'classList.toggle("hidden"' in js
+
+
+def test_the_file_tree_is_keyboard_reachable():
+    js = (STUDIO_DIR / "web" / "app.js").read_text(encoding="utf-8")
+    assert "row.onkeydown" in js
+    assert "ArrowDown" in js and "ArrowUp" in js
+    assert "next.focus()" in js
+
+
+def test_tabs_cycle_with_ctrl_tab():
+    js = (STUDIO_DIR / "web" / "app.js").read_text(encoding="utf-8")
+    assert 'event.key === "Tab" && ctrl' in js
+    assert "switchTab(next.path)" in js
+
+
+def test_tree_caret_is_the_os_native_triangle():
+    """Emoji arrows render as colored emoji on macOS and look wrong in a
+    chrome list; the text triangle inherits the UI color."""
+    html = (STUDIO_DIR / "web" / "index.html").read_text(encoding="utf-8")
+    js = (STUDIO_DIR / "web" / "app.js").read_text(encoding="utf-8")
+    assert '"▸"' in js and '"▾"' in js          # carets stay text triangles
+    assert "📁 .." not in js                     # the up-row loses the ellipsis
+    assert 'class="ws-row"' in html              # the workspace row exists
+    assert 'id="ws-name"' in html
+
+
+def test_prefs_dialog_exists_in_the_markup():
+    html = (STUDIO_DIR / "web" / "index.html").read_text(encoding="utf-8")
+    for anchor in ('id="pref-font"', 'id="pref-wrap"', 'id="pref-term"',
+                   'id="pref-think"'):
+        assert anchor in html, anchor

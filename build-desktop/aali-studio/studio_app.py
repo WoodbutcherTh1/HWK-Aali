@@ -14,6 +14,22 @@ Studio is named after Azeza (عزيزة), the owner's grandmother.
 
 from __future__ import annotations
 
+# The Arabic --help must print on every console, including a cp1252 Windows
+# pipe: without this the entry-point dies inside argparse itself
+# (UnicodeEncodeError before main() ever runs).
+import sys as _sys
+
+for _stream_name in ("stdout", "stderr"):
+    try:
+        _stream = getattr(_sys, _stream_name)
+        if _stream.encoding and _stream.encoding.lower().replace("-", "") != "utf8":
+            import io as _io
+            setattr(_sys, _stream_name,
+                    _io.TextIOWrapper(_stream.buffer, encoding="utf-8",
+                                      errors="replace", line_buffering=True))
+    except Exception:  # noqa: BLE001 - a console quirk must not stop boot
+        pass
+
 import argparse
 import sys
 import threading
@@ -87,7 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     if not _wait_ready(args.port):
         print(f"[studio] the server did not come up on :{args.port}")
         return 1
-    url = f"http://127.0.0.1:{args.port}/"
+    # UI preferences live server-side (settings.json), so the window, the
+    # browser and a future second window all agree on the owner's choices.
+    ui = _ui_prefs()
+    url = f"http://127.0.0.1:{args.port}/?fs={ui['font_size']}&wrap={ui['word_wrap']}&term={ui['terminal_visible']}"
     print(f"[studio] workspace: {workspace or '(home)'}")
     print(f"[studio] open: {url}")
 
@@ -119,6 +138,20 @@ def main(argv: list[str] | None = None) -> int:
         webbrowser.open(url)
         _idle()
     return 0
+
+
+def _ui_prefs() -> dict[str, str]:
+    """The owner's UI preferences from settings.json, already validated."""
+    try:
+        s = mp.settings()
+    except Exception:  # noqa: BLE001 - prefs must never block the window
+        s = {}
+    font = str(s.get("font_size") or "14")
+    if not font.isdigit() or not 11 <= int(font) <= 24:
+        font = "14"
+    wrap = "off" if str(s.get("word_wrap")) == "off" else "on"
+    term = "0" if str(s.get("terminal_visible")) == "0" else "1"
+    return {"font_size": font, "word_wrap": wrap, "terminal_visible": term}
 
 
 def _idle() -> None:

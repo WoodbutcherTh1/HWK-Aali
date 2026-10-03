@@ -53,9 +53,12 @@
       <span>الملفات</span>
       <span class="spacer"></span>
       <button id="btn-refresh" title="تحديث الشجرة">⟳</button>
-      <button id="btn-folder" title="افتح مجلداً آخر">📂</button>
     </div>
     <div class="pathbar"><span id="root-label" class="path">—</span></div>
+    <div class="ws-row" title="مجلد العمل الحالي — اضغط لتغييره">
+      <span id="ws-name" class="ws-name">—</span>
+      <button id="btn-folder" class="ghost ws-btn" title="افتح مجلداً آخر">📂</button>
+    </div>
     <ul id="tree" class="tree" role="tree"></ul>
     <div class="pane-foot">
       <button id="btn-save" class="ghost" title="احفظ الملف (Ctrl+S)">💾 حفظ</button>
@@ -90,14 +93,14 @@
     </div>
 
     <div id="terminal-pane" class="pane" hidden>
-      <div class="pane-head">
-        <span>الطرفية</span>
-        <span class="spacer"></span>
-        <input id="cmd" placeholder="python --version" spellcheck="false" />
-        <button id="btn-cmd" class="ghost">⏎</button>
-        <button id="btn-cmd-stop" class="ghost danger-ghost" hidden>⏹️</button>
-        <button id="btn-term-toggle" class="ghost">▴</button>
-      </div>
+    <div class="pane-head">
+      <span>الطرفية</span>
+      <span class="spacer"></span>
+      <input id="cmd" placeholder="python --version" spellcheck="false" />
+      <button id="btn-cmd" class="ghost">⏎</button>
+      <button id="btn-cmd-stop" class="ghost danger-ghost" hidden>⏹️</button>
+      <button id="btn-term-toggle" class="ghost" title="إظهار/إخفاء الطرفية">▴</button>
+    </div>
       <pre id="terminal" class="terminal" dir="ltr"></pre>
     </div>
   </section>
@@ -159,6 +162,43 @@
   </label>
   <!-- [3] Settings → «التحديثات» — filled by /api/update/ui/settings -->
   <div id="update-settings-slot"></div>
+  <!-- ————— UI comfort settings (2026-10-03) ————— -->
+  <h2 class="sect">🪟 المظهر والسلوك</h2>
+  <div class="pref-grid">
+    <label class="pref-row">
+      <span>حجم الخط</span>
+      <select id="pref-font">
+        <option value="12">12</option>
+        <option value="13">13</option>
+        <option value="14">14</option>
+        <option value="15">15</option>
+        <option value="16">16</option>
+        <option value="18">18</option>
+      </select>
+    </label>
+    <label class="pref-row">
+      <span>التفاف الأسطر</span>
+      <select id="pref-wrap">
+        <option value="on">مُفعّل</option>
+        <option value="off">مُعطّل</option>
+      </select>
+    </label>
+    <label class="pref-row">
+      <span>الطرفية عند الإقلاع</span>
+      <select id="pref-term">
+        <option value="1">ظاهرة</option>
+        <option value="0">مخفية</option>
+      </select>
+    </label>
+    <label class="pref-row">
+      <span>تفكير آلي</span>
+      <select id="pref-think">
+        <option value="1">ظاهر</option>
+        <option value="0">مُختصر</option>
+      </select>
+    </label>
+  </div>
+  <p class="note">تُحفظ مع الإعدادات وتُطبَّق عند إعادة فتح ستوديو.</p>
   <div class="dialog-actions">
     <button id="btn-keys-close" class="ghost">إغلاق</button>
     <button id="btn-keys-save" class="primary">حفظ</button>
