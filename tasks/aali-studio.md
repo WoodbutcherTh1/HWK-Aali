@@ -209,4 +209,14 @@ Mac — the bundle is the honest copyable form, not a fake binary.
   app_updates.py + tests, 30 green in .venv-hub, skip in training venv by
   design) — committed as d0d16ee before this pass started.
 - docs/features/aali_studio.md §9 documents the comfort layer.
+- FIRST XCODE COMPILE (owner run, same day): `APIClient.swift:47` —
+  `.whitespacesAndNewline` (missing the final **s**) shipped in the original
+  iOS code and only a real Xcode build could catch it; fixed in all three
+  copies (repo, Desktop-Apps, the owner's Desktop Aali-Apps). Two more
+  iOS-17-only APIs would have errored next and were fixed proactively:
+  `.topBarLeading/.topBarTrailing` → runtime-picked placement (iOS 16 gets
+  `.navigationBarLeading/Trailing`), and the two-parameter `.onChange` →
+  the one-parameter iOS 16 form. LESSON (already stated, now proven): a
+  PC-only session can never compile Swift — the owner's Xcode IS the
+  compiler for ios/, and the first honest build is worth its round-trip.
 

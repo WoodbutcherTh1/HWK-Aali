@@ -18,6 +18,17 @@ struct ChatView: View {
     @State private var showResetPrompt = false
     private let api = APIClient.shared
 
+    /* .topBarLeading/.topBarTrailing are iOS 17+; the deployment target is
+       iOS 16, so the placement is picked at runtime. */
+    private var leadingPlacement: ToolbarItemPlacement {
+        if #available(iOS 17.0, *) { return .topBarLeading }
+        return .navigationBarLeading
+    }
+    private var trailingPlacement: ToolbarItemPlacement {
+        if #available(iOS 17.0, *) { return .topBarTrailing }
+        return .navigationBarTrailing
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -29,13 +40,13 @@ struct ChatView: View {
             .navigationTitle("آلي")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: leadingPlacement) {
                     Button { showResetPrompt = true } label: {
                         Image(systemName: "plus.bubble")
                     }
                     .accessibilityLabel("محادثة جديدة")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: trailingPlacement) {
                     Button { showSettings = true } label: {
                         Image(systemName: "gearshape")
                     }
@@ -108,7 +119,9 @@ struct ChatView: View {
                     .padding(.vertical, 16)
                 }
             }
-            .onChange(of: messages) { _, new in
+            .onChange(of: messages) { new in
+                // The two-parameter form is iOS 17+; this one-parameter form
+                // compiles on the iOS 16 deployment target.
                 if let last = new.last {
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(last.id, anchor: .bottom)

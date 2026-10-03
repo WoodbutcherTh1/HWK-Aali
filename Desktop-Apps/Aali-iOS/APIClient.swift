@@ -44,7 +44,7 @@ final class APIClient {
     func serverURL() -> String { base }
 
     func setServerURL(_ url: String) {
-        base = url.trimmingCharacters(in: .whitespacesAndNewline)
+        base = url.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
