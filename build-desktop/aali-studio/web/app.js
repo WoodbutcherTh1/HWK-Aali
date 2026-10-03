@@ -20,6 +20,8 @@ const state = {
   tabs: [],                // [{path, content, dirty, model}]  model = monaco
   allFiles: [],            // /api/files, loaded once, filtered locally
   context: [],             // [{path, selection}] the agent can see
+  links: [],               // [{token, title, url}] read by /api/link
+  lastLinks: [],
   lastAsk: "",
   lastContext: [],
   lastSid: "",
@@ -455,6 +457,65 @@ function renderChips() {
   $("btn-addcontext").classList.toggle("on", !!state.context.length);
 }
 
+/* ————— read a public link (Aali Reach) ————— */
+
+// The client NEVER receives the page text it will later send to the model: the
+// server keeps it and hands back a token. That is why a hostile page cannot
+// smuggle instructions in through this UI, and why "attach" is a token in a
+// request body rather than a blob in a textarea.
+async function readLink() {
+  const input = $("link-url");
+  const url = (input.value || "").trim();
+  if (!url) { toast("الصق رابطاً أولاً"); return; }
+  const btn = $("btn-link");
+  btn.disabled = true;
+  btn.textContent = "⏳ جارٍ القراءة…";
+  try {
+    const data = await api("/api/link", { method: "POST", body: { url } });
+    if (!data.ok) { toast("تعذّرت القراءة: " + (data.error || "?"), 5000); return; }
+    if (state.links.length >= 3) {
+      toast("٣ روابط كحدٍّ في الدور الواحد — احذف واحداً أولاً", 4200);
+      return;
+    }
+    state.links.push({
+      token: data.token, title: data.title || data.url,
+      url: data.url, chars: data.chars, engine: data.engine,
+    });
+    input.value = "";
+    renderLinkChips();
+    const where = data.chars
+      ? `${data.chars} حرف · ${data.engine} · ${data.elapsed_ms}ms`
+      : "لا نص مستخرج (قد تكون الصفحة مبنية بجافاسكربت)";
+    toast("🔗 " + (data.title || data.url) + " — " + where, 4200);
+  } catch (err) {
+    toast("تعذّرت القراءة: " + err.message, 5000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔗 قراءة";
+  }
+}
+
+function removeLink(token) {
+  state.links = state.links.filter((l) => l.token !== token);
+  renderLinkChips();
+}
+
+function renderLinkChips() {
+  const box = $("link-chips");
+  box.replaceChildren();
+  for (const link of state.links) {
+    const chip = el("span", "chip chip-link");
+    chip.append(el("span", "chip-name", link.title || link.url));
+    chip.title = link.url + (link.chars ? ` — ${link.chars} حرف` : "");
+    if (!link.chars) chip.append(el("span", "chip-tag", "بلا نص"));
+    const remove = el("span", "chip-x", "✕");
+    remove.onclick = () => removeLink(link.token);
+    chip.append(remove);
+    box.append(chip);
+  }
+  $("btn-link").classList.toggle("on", !!state.links.length);
+}
+
 /* ————— the agent panel ————— */
 
 function newTurn(question) {
@@ -587,6 +648,7 @@ async function ask(question) {
   if (!question) return;
   state.lastAsk = question;
   state.lastContext = state.context.map((c) => ({ ...c }));
+  state.lastLinks = state.links.map((l) => l.token);
   state.busy = true;
   $("btn-ask").disabled = true;
   $("btn-stop").hidden = false;
@@ -679,7 +741,7 @@ async function ask(question) {
 
   stream("/api/chat", {
     message: question, model: state.model, sid: state.lastSid,
-    context: state.lastContext,
+    context: state.lastContext, links: state.lastLinks,
   }, onEvent, controller.signal)
     .catch((err) => onEvent("error", { error: err.message }))
     .finally(() => {
@@ -1034,6 +1096,10 @@ function toggleTerminal(show) {
 
 function wire() {
   $("btn-ask").onclick = () => ask($("ask").value);
+  $("btn-link").onclick = () => readLink();
+  $("link-url").onkeydown = (event) => {
+    if (event.key === "Enter") { event.preventDefault(); readLink(); }
+  };
   $("ask").onkeydown = (event) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();

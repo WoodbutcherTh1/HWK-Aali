@@ -166,6 +166,28 @@ button.danger-ghost:hover { background: #4a2626; }
 .chip .chip-x { cursor: pointer; color: var(--fg-dim); padding: 0 4px; border-radius: 50%; }
 .chip .chip-x:hover { background: #4a2626; color: var(--red); }
 #btn-addcontext.on { border-color: var(--gold); color: var(--gold); }
+#btn-link.on { border-color: var(--gold); color: var(--gold); }
+
+/* ————— the link row (Aali Reach) ————— */
+
+.link-row { display: flex; gap: 6px; margin-bottom: 7px; }
+.link-row input {
+  flex: 1; min-width: 0;
+  background: var(--bg-1); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 9px;
+  color: var(--fg); font-size: 12px; font-family: var(--mono);
+}
+.link-row input:focus { outline: none; border-color: var(--gold); }
+.link-row button { white-space: nowrap; }
+/* A read link is DATA in the prompt, so it reads as a cooler, quieter chip
+   than a source FILE (gold) — the owner should be able to tell at a glance
+   which half of the context is his code and which half is the web. */
+.chip-link {
+  background: rgba(120, 160, 210, .14);
+  border-color: rgba(120, 160, 210, .40); color: #a9c6ea;
+}
+.chip-link .chip-tag { background: rgba(120, 160, 210, .25); }
+#link-chips:empty { display: none; }
 
 /* ————— quick open palette ————— */
 
