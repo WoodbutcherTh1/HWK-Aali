@@ -1,0 +1,6 @@
+# Jarvis runtime dependencies for the Raspberry Pi.
+#
+# Deliberately tiny: the Pi has 1GB of RAM and everything else in this repo is
+# stdlib. `requests` is optional -- jarvis.groq and jarvis.telegram both fall
+# back to urllib when it is missing, so the bot still works without it.
+requests>=2.31,<3

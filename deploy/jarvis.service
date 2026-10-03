@@ -1,0 +1,48 @@
+[Unit]
+Description=Jarvis - Aali remote control bot (Telegram)
+Documentation=https://github.com/WoodbutcherTh1/HWK-Aali
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aalici
+Group=aalici
+WorkingDirectory=/home/aalici/jarvis
+
+# The interpreter lives in the per-user venv; nothing is installed system-wide.
+Environment=AALI_JARVIS_CONFIG=/home/aalici/.aali/jarvis
+Environment=PATH=/home/aalici/jarvis/.venv-jarvis/bin:/home/aalici/bin:/usr/local/bin:/usr/bin:/bin
+Environment=LD_LIBRARY_PATH=/home/aalici/lib
+Environment=ESPEAK_DATA_PATH=/home/aalici/bin/espeak-ng-data
+Environment=PYTHONUNBUFFERED=1
+# No secret may ever reach the journal.
+Environment=PYTHONIOENCODING=utf-8
+
+ExecStart=/home/aalici/jarvis/.venv-jarvis/bin/python -m jarvis.main
+
+Restart=always
+RestartSec=10
+# Do not let a crash loop eat the Pi.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# --- hardening: the bot only ever needs to read its own code ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# ...except the two directories it genuinely writes.
+ReadWritePaths=/home/aalici/jarvis /home/aalici/.aali /home/aalici/bin /home/aalici/lib
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
