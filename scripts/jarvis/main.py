@@ -32,27 +32,38 @@ else:
     from .telegram import TelegramClient
 
 
-def build(verbose: bool = False):
-    """Assemble a ready-to-use Jarvis. Raises on missing config."""
+def build(verbose: bool = False, wait_for_token: bool = True):
+    """Assemble a ready-to-use Jarvis.
+
+    If ``telegram.json`` is missing and ``wait_for_token`` is set, this WAITS
+    for it rather than exiting, so the service can be enabled before the token
+    exists and come alive by itself the moment the owner drops the file in.
+    """
     cfg_dir = config.ensure_config_dir()
     groq_cfg = config.load_groq(cfg_dir)
     machines = load_machines(cfg_dir / "machines.json")
 
     tg = None
-    token = ""
-    try:
-        tg_cfg = config.load_telegram(cfg_dir)
-        token = tg_cfg.bot_token
-        tg = TelegramClient(tg_cfg.bot_token, tg_cfg.owner_chat_id)
-    except (FileNotFoundError, ValueError) as exc:
-        if verbose:
-            print(f"[jarvis] telegram not configured: {exc}")
-
-    if tg is None:
-        raise SystemExit(
-            "telegram.json missing or invalid — put the bot_token in "
-            f"{cfg_dir / 'telegram.json'}"
-        )
+    warned = False
+    while True:
+        try:
+            tg_cfg = config.load_telegram(cfg_dir)
+            tg = TelegramClient(tg_cfg.bot_token, tg_cfg.owner_chat_id)
+            break
+        except (FileNotFoundError, ValueError) as exc:
+            if not wait_for_token:
+                raise SystemExit(
+                    "telegram.json missing or invalid — put the bot_token in "
+                    f"{cfg_dir / 'telegram.json'}"
+                ) from exc
+            if not warned:
+                print(
+                    f"[jarvis] waiting for a bot token: {cfg_dir / 'telegram.json'}"
+                    " — create it and this starts by itself",
+                    flush=True,
+                )
+                warned = True
+            time.sleep(60)
 
     jarvis = Jarvis(groq_cfg, tg, machines)
     log_event("startup", count=len(machines), model=groq_cfg.chat_model)

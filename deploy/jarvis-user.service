@@ -1,0 +1,56 @@
+# systemd USER unit for Jarvis — installs with NO sudo.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp jarvis-user.service ~/.config/systemd/user/jarvis.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now jarvis.service
+#
+# Auto-start at boot needs lingering, which this user CAN enable for itself:
+#   loginctl enable-linger aalici
+#
+# Why a user unit rather than the system one: the aalici account has no sudo,
+# and a root-owned unit would need a password the bot never sees. A user unit
+# with the same hardening gives the same protection.
+
+[Unit]
+Description=Jarvis - Aali remote control bot (Telegram)
+Documentation=https://github.com/WoodbutcherTh1/HWK-Aali
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/jarvis
+
+Environment=AALI_JARVIS_CONFIG=%h/.aali/jarvis
+Environment=PATH=%h/jarvis/.venv-jarvis/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=LD_LIBRARY_PATH=%h/lib
+Environment=ESPEAK_DATA_PATH=%h/bin/espeak-ng-data
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+
+ExecStart=%h/jarvis/.venv-jarvis/bin/python -m jarvis.main
+
+# The bot waits for telegram.json rather than crash-looping before the token
+# exists, so Restart=always is a safety net, not a busy loop.
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# --- hardening available without root ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# ...except the directories it genuinely writes.
+ReadWritePaths=%h/jarvis %h/.aali %h/bin %h/lib
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=default.target
