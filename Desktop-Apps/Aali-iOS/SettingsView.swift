@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var connected: Bool?
     @State private var serverText = APIClient.shared.serverURL()
+    @State private var keyText = APIClient.shared.apiKeyValue()
     @State private var testing = false
     @State private var testResult: String?
 
@@ -20,7 +21,19 @@ struct SettingsView: View {
                 } header: {
                     Text("عنوان الخادم (على حاسوبك)")
                 } footer: {
-                    Text("من حاسوبك شغّل: scripts\\start_all.bat ثم اعرف عنوان الحاسوب (مثال: 192.168.1.10). الجوال والحاسوب يجب أن يكونا على نفس شبكة Wi-Fi.")
+                    Text("في البيت: عنوان الحاسوب مثل http://192.168.1.13:5055 · خارج البيت: عنوان Tailscale مثل http://100.94.100.57:5055")
+                }
+
+                Section {
+                    SecureField("ألصق المفتاح هنا", text: $keyText)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .foregroundColor(Theme.text)
+                        .environment(\.layoutDirection, .leftToRight)
+                } header: {
+                    Text("مفتاح آلي (X-API-Key)")
+                } footer: {
+                    Text("على الحاسوب افتح الملف: D:\\hwk-data\\aali_master_key.txt وانسخ السطر كله هنا. بدون المفتاح سيقول الخادم لا.")
                 }
 
                 Section {
@@ -49,6 +62,7 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("حفظ") {
                         APIClient.shared.setServerURL(serverText)
+                        APIClient.shared.setAPIKey(keyText)
                         dismiss()
                     }
                     .disabled(serverText.isEmpty)

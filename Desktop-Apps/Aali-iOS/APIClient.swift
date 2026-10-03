@@ -17,6 +17,10 @@ enum APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .badURL: return "عنوان الخادم غير صالح"
+        case .http(404):
+            // The brain answers 404 when the key is missing or wrong — say
+            // that instead of a bare code (the owner's iPhone hit exactly this).
+            return "الخادم يعمل لكن رفض الطلب — عادةً المفتاح ناقص أو خطأ. افتح الإعدادات وأضف المفتاح ⚙︎"
         case .http(let code): return "الخادم أرجع خطأ (\(code))"
         case .network: return "تعذّر الاتصال بالخادم — تأكد أن الحاسوب والجوال على نفس الشبكة"
         case .decoding: return "رد غير مفهوم من الخادم"
@@ -37,6 +41,20 @@ final class APIClient {
     private var sessionID: String {
         get { UserDefaults.standard.string(forKey: "aali.sid") ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: "aali.sid") }
+    }
+
+    /// The brain runs in KEY MODE: /api/ask answers 404 without X-API-Key
+    /// (2026-10-03 — the iPhone had NO key field at all, so it could never
+    /// talk to a key-mode brain).
+    private var apiKey: String {
+        get { UserDefaults.standard.string(forKey: "aali.key") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "aali.key") }
+    }
+
+    func apiKeyValue() -> String { apiKey }
+
+    func setAPIKey(_ key: String) {
+        apiKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var isConfigured: Bool { !base.isEmpty }
@@ -70,6 +88,9 @@ final class APIClient {
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         if !sessionID.isEmpty {
             request.setValue(sessionID, forHTTPHeaderField: "X-Session-Id")
+        }
+        if !apiKey.isEmpty {
+            request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         }
         var payload: [String: Any] = ["message": message]
         if !sessionID.isEmpty { payload["sid"] = sessionID }
