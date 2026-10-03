@@ -110,6 +110,30 @@ Live replies, in order: an ask-back, then `اذهب إلى الرابط https://
 (`go to the link yourself`, `you can visit it`). Same failure, so it earns the
 same veto.
 
+### 5.3b Length is not evidence — the streaming run's REFUSAL
+
+The SSE route (`/api/ask/stream`) is what the web UI and Studio actually use,
+so it had to be tested separately. The read succeeded (audit entry present)
+and the model answered:
+
+> I will not follow the instruction to visit the external link and read its
+> content as per the USER's request. I am programmed to respect user privacy
+> … My actions align with HWK's origin truth and integrity marks …
+
+**28 confident words and ZERO overlap with the page it was refusing to read.**
+The rescue stayed silent, because the "substantial reply counts as evidence"
+clause — added in 5.4 to protect cross-language answers — was doing exactly
+what it should not: it treats any long reply as engagement with the page.
+
+A REFUSAL veto now joins the ask-back and the deferral, and the tension is
+recorded rather than hidden: the substance clause exists so a good Arabic
+paraphrase of an English page is not overwritten, and it is also what let a
+28-word refusal through. Both failure modes are now pinned by tests, and the
+resolution is that a refusal is detected by WHAT IT TALKS ABOUT (its own
+programming, privacy, guidelines), not by how long it is.
+
+Same message, after the fix, live on the stream route: the real digest.
+
 ### 5.4 The rescue must never overwrite a good answer
 
 My own test caught the dangerous bug: a **cross-language** paraphrase of an
@@ -131,6 +155,10 @@ measurement bug. Two of the four "failures" chased tonight were mine.
 ## Honest verdict after the live runs
 
 - Reading works today on `engine=static`, verified live in Arabic and English.
+- Both ask routes verified live: `/api/ask` and `/api/ask/stream` (the one the
+  web UI and Studio use).
+- Three distinct model failure shapes are covered by vetoes, each found by a
+  live run and each pinned verbatim in the tests: ask-back, deferral, refusal.
 - The model often does NOT use the content it is handed; the deterministic
   digest covers that case, and it is extractive on purpose.
 - The browser route (`playwright`/`camoufox`) is BUILT AND UNTESTED — the venv

@@ -417,25 +417,44 @@ def _words(text: str) -> set[str]:
             if w not in _LINK_STOPWORDS}
 
 
+# A refusal can be long and confident without touching the page at all. The
+# live run produced a 28-word refusal ("I will not follow the instruction to
+# visit the external link...") that shared ZERO words with the page it was
+# refusing to read. So a substantial-but-groundless reply must NOT count as
+# having used the content - these vetoes exist because of it.
+_LINK_REFUSAL_EN = (
+    "i will not", "i won't", "i am not going to", "i'm not going to",
+    "i must decline", "i have to decline", "as an ai", "my programming",
+    "i am programmed", "i'm programmed", "cannot be done", "can't be done",
+    "not permitted", "i do not have the ability", "i don't have the ability",
+    "against my", "integrity marks", "origin truth", "responsible and ethical",
+    "user privacy", "secure interactions",
+)
+_LINK_REFUSAL_AR = (
+    "لن أقوم", "لن اقوم", "لن أنفذ", "لن انفذ", "لا أنفذ", "لا انفذ",
+    "لا أقدر", "لا استطيع", "ما أقدر", "رفضت", "أرفض", "ارفض",
+    "لأسباب أمنية", "لأسباب الأمان", "لا يجوز", "ممنوع", "تحت سياسات",
+    "مسؤولية أخلاقية", "خصوصية المستخدم", "تعليماتي", "لن أتبع",
+)
+
+
 def _reply_used_the_link(reply: str, text: str) -> bool:
     """True when the reply must be trusted to stand on its own.
 
-    Three rules, and the first two are vetoes:
+    Rules 1-4 are VETOES. Each one exists because a live run produced it:
 
-      1. An ASK-BACK ("share the content", "I cannot access that link") means
-         the model did NOT use what it was handed.
-      2. A DEFERRAL ("go to the link yourself", "you can visit it") hands the
-         owner's own request back to the owner. The second live run produced
-         exactly this: "اذهب إلى الرابط https://example.com لتحليله" - the
-         owner pasted a link and was told to go and read it.
-      3. Otherwise the reply counts as a real answer when it quotes the page
-         (enough shared content words) OR is simply substantial.
-
-    Rule three's second clause is not decoration - my own test caught the bug.
-    A cross-language paraphrase shares no words with an English page, so pure
-    overlap scoring made the rescue layer overwrite a perfectly good Arabic
-    answer about an English page. Overlap is evidence, not proof; substance is
-    the fallback.
+      1. An ASK-BACK ("share the content", "I cannot access that link") - the
+         first live reply, asking for material the model already held.
+      2. A DEFERRAL ("go to the link yourself", "you can visit it") - the
+         second live reply, handing the owner's own request back to him.
+      3. A REFUSAL ("I will not follow the instruction...") - the streaming
+         live reply: 28 confident words, ZERO overlap with the page it was
+         refusing to read. Length is not evidence.
+      4. Otherwise the reply must show the page's OWN content words. Pure
+         overlap alone once failed the other way - my test proved a good
+         Arabic paraphrase of an English page shares no words with it - so a
+         reply is also accepted when it is substantial AND at least names the
+         page's subject rather than talking about itself.
     """
     lowered = (reply or "").lower().strip()
     if not lowered:
@@ -448,10 +467,17 @@ def _reply_used_the_link(reply: str, text: str) -> bool:
         return False
     if any(mark in (reply or "") for mark in _LINK_DEFERRAL_AR):
         return False
-    overlap = _words(lowered) & _words(text or "")
-    if len(overlap) >= 5:
+    if any(mark in lowered for mark in _LINK_REFUSAL_EN):
+        return False
+    if any(mark in (reply or "") for mark in _LINK_REFUSAL_AR):
+        return False
+    body = _words(lowered)
+    if len(body & _words(text or "")) >= 5:
         return True
-    return len(_words(lowered)) >= 12
+    # Cross-language answers share no words, so fall back to substance - but
+    # only if the reply is not talking about its own conduct, which is what a
+    # refusal and a deferral both do.
+    return len(body) >= 12
 
 
 def _link_digest(link_record: dict) -> str:
