@@ -156,7 +156,7 @@ def header(d: ImageDraw.ImageDraw, title: str, subtitle: str) -> None:
 def guide_home(out: Path) -> None:
     img = base()
     d = ImageDraw.Draw(img)
-    header(d, "كيف تتكلم مع آلي في البيت", "٣ خطوات فقط — اتبع الأرقام")
+    header(d, "كيف تتكلم مع آلي في البيت", "عنوان واحد يعمل من أي مكان")
 
     # the map: PC —(Wi-Fi)→ iPhone + Mac
     card(d, (70, 190, 620, 560))
@@ -207,9 +207,11 @@ def guide_home(out: Path) -> None:
                 fill=MUT)
         x += 500
 
-    draw_ar(d, (W // 2, 990),
-            "مفتاح آلي على الحاسوب في هذا الملف: D:\\hwk-data\\aali_master_key.txt",
-            20, fill=MUT)
+    d.text((W // 2, 975), "https://aali.dpdns.org", font=font(34), fill=GREEN,
+           anchor="mm")
+    draw_ar(d, (W // 2, 1015),
+            "هذا العنوان يعمل في البيت وخارجه — والمفتاح في: D:\\hwk-data\\aali_master_key.txt",
+            19, fill=MUT)
     img.save(out)
 
 
@@ -217,7 +219,7 @@ def guide_home(out: Path) -> None:
 def guide_anywhere(out: Path) -> None:
     img = base()
     d = ImageDraw.Draw(img)
-    header(d, "خارج البيت + حل المشاكل", "Tailscale = شبكة سحرية خاصة بك")
+    header(d, "خارج البيت + حل المشاكل", "الأسهل: نفس العنوان في كل مكان")
 
     # left: the tailscale path
     card(d, (70, 170, 780, 560))
@@ -236,15 +238,18 @@ def guide_anywhere(out: Path) -> None:
 
     card(d, (70, 590, 780, 940))
     num_badge(d, (100, 615), 1)
-    draw_ar(d, (740, 645), "حمّل تطبيق Tailscale من المتجر", 24, fill=GOLD)
-    num_badge(d, (100, 690), 2)
-    draw_ar(d, (740, 720), "سجّل بنفس الحساب المسجّل عندك", 24, fill=GOLD)
-    num_badge(d, (100, 765), 3)
-    draw_ar(d, (740, 795), "افتح Tailscale (زر ON) في أي مكان", 24, fill=GOLD)
-    num_badge(d, (100, 840), 4)
-    draw_ar(d, (740, 870), "في تطبيق آلي استعمل العنوان السحري:", 24, fill=GOLD)
-    d.text((740, 905), "http://100.94.100.57:5055", font=font(24),
+    draw_ar(d, (740, 645), "في أي مكان (الأسهل) استعمل نفس العنوان:", 22,
+            fill=GOLD)
+    d.text((740, 688), "https://aali.dpdns.org", font=font(30),
+           fill=GREEN, anchor="rm")
+    num_badge(d, (100, 720), 2)
+    draw_ar(d, (740, 750), "لا يحتاج واي فاي ولا Tailscale — يعمل من أي مكان", 21,
+            fill=TEXT)
+    num_badge(d, (100, 790), 3)
+    draw_ar(d, (740, 820), "إن لم يعمل: بدّل Tailscale ON واستعمل:", 21, fill=MUT)
+    d.text((740, 862), "http://100.94.100.57:5055", font=font(22),
            fill=BLUE, anchor="rm")
+    draw_ar(d, (740, 905), "والحاسوب يجب أن يكون مشغّلاً وقيد طاقته", 18, fill=MUT)
 
     # right: when it says OFFLINE
     card(d, (830, 170, 1610, 940))
