@@ -56,6 +56,9 @@ for _extra in (_REPO / "file-agent", HERE):
 from flask import Flask, Response, jsonify, request  # noqa: E402
 
 import models_proxy as mp  # noqa: E402
+import update_ui  # noqa: E402
+import updater as studio_updater  # noqa: E402
+import version as studio_version  # noqa: E402
 from file_agent import file_tools, hwk_paths  # noqa: E402
 
 DEFAULT_PORT = int(os.getenv("AALI_STUDIO_PORT", "5070") or 5070)
@@ -94,6 +97,10 @@ def _host_allowed() -> bool:
 def create_app() -> Flask:
     app = Flask(__name__, static_folder=None)
     web_dir = HERE / "web"
+    # Auto-update bookkeeping belongs to the PROCESS, not the request: a
+    # freshly applied payload that cannot reach a working UI twice in a row
+    # is rolled back here, before any endpoint is even served.
+    studio_updater.startup()
 
     @app.before_request
     def _guard() -> Response | None:
@@ -572,14 +579,77 @@ def create_app() -> Flask:
             return _fail(exc, 400)
         return jsonify({"ok": True, **mp.key_status()})
 
+    # ————— auto-update (آلي ستوديو) —————
+
+    @app.get("/api/update/status")
+    def api_update_status() -> Response:
+        """Everything the four update surfaces need, in one honest payload."""
+        return jsonify(studio_updater.status())
+
+    @app.post("/api/update/check")
+    def api_update_check() -> Response:
+        force = bool((request.get_json(silent=True) or {}).get("force"))
+        return jsonify(studio_updater.check(force=force))
+
+    @app.post("/api/update/download")
+    def api_update_download() -> Response:
+        return jsonify(studio_updater.start_download())
+
+    @app.post("/api/update/activate")
+    def api_update_activate() -> Response:
+        """Swap the verified payload in and relaunch Studio from current/.
+
+        The response MUST reach the browser before the process goes away, so
+        the exit is scheduled on a short timer rather than done inline.
+        """
+        result = studio_updater.activate()
+        if result.get("ok"):
+            studio_updater.schedule_exit()
+        return jsonify(result)
+
+    @app.post("/api/update/rollback")
+    def api_update_rollback() -> Response:
+        return jsonify(studio_updater.rollback())
+
+    @app.post("/api/update/config")
+    def api_update_config() -> Response:
+        try:
+            saved = studio_updater.save_config(
+                request.get_json(silent=True) or {})
+        except studio_updater.StudioUpdateError as exc:
+            return _fail(exc, 400)
+        except Exception as exc:  # noqa: BLE001 - a bad hub url is user input
+            return _fail(str(exc), 400)
+        return jsonify({"ok": True, "config": saved,
+                        **studio_updater.status()})
+
+    @app.get("/api/update/ui/<part>")
+    def api_update_ui(part: str) -> Response:
+        """Server-rendered fragments: the banner/dialog/settings/status chip.
+
+        Rendered HERE so every label and id is assertable in pytest without a
+        browser (tests/test_studio_update_ui.py), and so a hub-supplied version
+        string or release note is escaped in exactly one place.
+        """
+        payload = update_ui.mount_payload()
+        alias = {"bar": "status_bar"}
+        part = alias.get(part, part)
+        if part not in payload:
+            return _fail("سطح غير معروف", 404)
+        body = payload[part]
+        kind = ("application/javascript; charset=utf-8" if part == "script"
+                else "text/html; charset=utf-8")
+        return Response(body, mimetype=kind)
+
     @app.get("/api/about")
     def api_about() -> Response:
-        return jsonify({"ok": True, **ABOUT})
+        return jsonify({"ok": True, **ABOUT, **studio_version.build_info()})
 
     @app.get("/api/health")
     def api_health() -> Response:
         return jsonify({"ok": True, "app": "aali-studio", "port": DEFAULT_PORT,
-                        "workspace": str(_root())})
+                        "workspace": str(_root()),
+                        "version": studio_version.__version__})
 
     return app
 
@@ -588,7 +658,7 @@ ABOUT = {
     "name": "آلي ستوديو",
     "name_en": "Aali Studio",
     "model": "HWK-AZiZA",
-    "version": "1.0.0",
+    "version": studio_version.__version__,
     "grandmother": "عزيزة",
     "about_ar": (
         "آلي ستوديو — محرر آلي على اسم عزيزة (جدّته رحمها الله)، "
@@ -1303,8 +1373,11 @@ def main(argv: list[str] | None = None) -> int:
             f"http://127.0.0.1:{port}/")).start()
     print(f"Aali Studio server on http://127.0.0.1:{port} "
           f"(config: {mp.cfg_dir()})")
-    create_app().run(host=HOST, port=port, debug=False, threaded=True,
-                     use_reloader=False)
+    server = create_app()
+    # The server is up: the new payload (if any) is accepted.
+    studio_updater.launch_ok()
+    server.run(host=HOST, port=port, debug=False, threaded=True,
+               use_reloader=False)
     return 0
 
 

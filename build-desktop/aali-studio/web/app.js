@@ -31,6 +31,7 @@ const state = {
   watchSource: null,
   turnBlocks: [],          // the current turn's blocks, for history saving
   paletteMode: "quick",    // quick | mention
+  update: null,           // /api/update/status — the four update surfaces
 };
 
 /* ————— tiny helpers ————— */
@@ -1029,6 +1030,35 @@ function choosePalette(path) {
   closePalette();
 }
 
+/* ————— auto-update —————
+   The four surfaces are RENDERED BY THE SERVER (update_ui.py) so their
+   Arabic labels and ids are assertable in pytest without a browser, and so a
+   hub-supplied version string is HTML-escaped in exactly one place. This
+   section only wires ids -> /api/update/*. The definitions themselves arrive
+   as text from /api/update/ui/script and are evaluated on boot — one source
+   of truth, no second copy to drift. */
+
+async function mountUpdateUi() {
+  const settingsSlot = $("update-settings-slot");
+  if (settingsSlot) {
+    settingsSlot.innerHTML = await api("/api/update/ui/settings");
+  }
+  const dialogSlot = $("update-dialog-slot");
+  if (dialogSlot && !dialogSlot.firstElementChild) {
+    dialogSlot.innerHTML = await api("/api/update/ui/dialog");
+  }
+  await updateMount();
+  if (state.update && state.update.can_update && state.update.config.auto_check) {
+    await updateCheck(false).catch(() => {});
+  }
+}
+
+async function injectUpdateScript() {
+  const code = await api("/api/update/ui/script");
+  // eslint-disable-next-line no-new-func
+  new Function(code)();
+}
+
 /* ————— boot ————— */
 
 async function loadWorkspace() {
@@ -1246,4 +1276,6 @@ function wire() {
   await loadHistory().catch(() => {});
   await initMonaco();
   setContent("", "");
+  await injectUpdateScript().catch(() => {});
+  await mountUpdateUi().catch((e) => toast(e.message));
 })();

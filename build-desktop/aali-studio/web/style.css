@@ -458,3 +458,57 @@ button.danger-ghost:hover { background: #4a2626; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #3d3d37; border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: #4f4f47; }
+
+/* ————— auto-update surfaces (آلي ستوديو) —————
+   Gold = an update is waiting, the same accent the rest of the IDE uses for
+   "the owner should look at this". The status chip stays quiet until it has
+   something to say: a tick means "checked and current", never a tick for a
+   build that could not verify anything. */
+
+.update-status-slot { display: inline-flex; align-items: center; }
+
+.update-status {
+  background: transparent;
+  border: 1px solid var(--line, #3d3d37);
+  color: var(--text-dim, #9a968b);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+}
+.update-status:hover { border-color: var(--gold, #d8b46a); color: var(--gold, #d8b46a); }
+.update-status.ok { color: #7fbf7f; border-color: #35502f; }
+.update-status.new { color: #1c1a14; background: var(--gold, #d8b46a); border-color: var(--gold, #d8b46a); font-weight: 600; }
+.update-status.off, .update-status.idle { opacity: 0.65; }
+
+.update-banner {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 16px;
+  background: linear-gradient(90deg, rgba(216, 180, 106, 0.16), rgba(216, 180, 106, 0.04));
+  border-bottom: 1px solid rgba(216, 180, 106, 0.35);
+  color: var(--text, #e8e4d8);
+}
+.update-banner-text { flex: 1 1 320px; min-width: 0; }
+.update-banner-text b { color: var(--gold, #d8b46a); }
+.update-banner-actions { display: flex; gap: 8px; }
+.update-notes { margin-top: 4px; font-size: 12.5px; opacity: 0.85; white-space: pre-wrap; }
+.update-notice { margin-top: 4px; font-size: 12.5px; color: #e2b06a; }
+
+.update-settings, #update-settings { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line, #3d3d37); }
+#update-settings h3 { margin: 0 0 8px; font-size: 14px; color: var(--gold, #d8b46a); }
+.update-settings .kv, #update-settings .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 2px 0; }
+#update-settings .kv span { opacity: 0.7; }
+#update-settings .kv b { font-weight: 500; word-break: break-all; }
+.update-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; font-size: 12.5px; }
+.update-row input[type="text"], .update-row input:not([type]), .update-row select, #update-hub {
+  flex: 0 1 220px; min-width: 120px;
+  background: #1b1b19; color: var(--text, #e8e4d8);
+  border: 1px solid var(--line, #3d3d37); border-radius: 6px; padding: 4px 8px;
+}
+.update-job { margin: 6px 0; font-size: 12px; opacity: 0.75; }
+.update-job[data-phase="error"] { color: #e08a7a; opacity: 1; }
+.update-job[data-phase="staged"] { color: #7fbf7f; opacity: 1; }
+.update-warn { margin: 4px 0 8px; font-size: 12.5px; color: #e2b06a; }
+#update-done-dialog code { direction: ltr; }

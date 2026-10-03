@@ -22,6 +22,8 @@
   </div>
 
   <div class="actions">
+    <!-- [1] the status bar chip — filled by /api/update/ui/bar -->
+    <span id="update-status-slot" class="update-status-slot"></span>
     <button id="btn-ask" class="primary" title="أرسل الطلب إلى الوكيل">إرسال ⏎</button>
     <button id="btn-stop" class="danger" hidden title="أوقف العمل الجاري">⏹️ إيقاف</button>
     <button id="btn-retry" class="warn" hidden title="أعد آخر طلب بعد الفشل">▶️ إعادة المحاولة</button>
@@ -36,6 +38,12 @@
      an Arabic error event and the client then wiped it. This banner says it
      out loud, with the address that was tried and the fix. -->
 <div id="brain-banner" class="brain-banner" hidden></div>
+
+<!-- ————— update surfaces (rendered by update_ui.py, mounted by app.js) ————— -->
+<!-- [2] the top banner: an empty slot means NO banner. The HTML comes from
+     the server so every Arabic label and every id is assertable in pytest,
+     and so a hub-supplied version string is escaped in one place. -->
+<div id="update-banner-slot" hidden></div>
 
 <main id="panes">
 
@@ -149,6 +157,8 @@
     <input id="custom-url" placeholder="https://my-endpoint/v1" />
     <input id="custom-model" placeholder="اسم النموذج" />
   </label>
+  <!-- [3] Settings → «التحديثات» — filled by /api/update/ui/settings -->
+  <div id="update-settings-slot"></div>
   <div class="dialog-actions">
     <button id="btn-keys-close" class="ghost">إغلاق</button>
     <button id="btn-keys-save" class="primary">حفظ</button>
@@ -165,6 +175,9 @@
     <button id="btn-about-close" class="ghost">إغلاق</button>
   </div>
 </dialog>
+
+<!-- [4] the post-download dialog host (filled by /api/update/ui/dialog) -->
+<div id="update-dialog-slot"></div>
 
 <div id="toast" class="toast" hidden></div>
 

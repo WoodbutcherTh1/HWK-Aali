@@ -75,6 +75,7 @@ __all__ = [
     "verify_detached",
     "verify_manifest",
     "normalize_hub_url",
+    "check_secure_url",
     "update_log_path",
     "read_log_tail",
 ]
@@ -399,6 +400,15 @@ def normalize_hub_url(hub_url: Any) -> str:
     if not parsed.hostname:
         raise UpdateError(f"hub url has no host: {hub_url!r}")
     return text
+
+
+def check_secure_url(url: Any) -> str:
+    """Public HTTPS policy check (normalize + enforce), for UIs that save a hub URL.
+
+    Saves the "you typed http:// and only found out three clicks later" class
+    of surprise: the same rule the transport enforces, callable at save time.
+    """
+    return _require_secure(normalize_hub_url(url))
 
 
 def _require_secure(url: str) -> str:

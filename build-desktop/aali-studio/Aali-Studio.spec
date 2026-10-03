@@ -42,7 +42,12 @@ ICO = icon_or_none("icon.ico")
 
 datas = [(os.path.join(STUDIO, "web"), "web")]
 
-hi = ["webview", "models_proxy", "studio_server"]
+hi = ["webview", "models_proxy", "studio_server",
+      # The auto-update layer: imported by name from build-desktop/aali-studio
+      # and from scripts/, so neither PyInstaller's static analysis nor the
+      # frozen sys.path can find it on its own. Without these the frozen IDE
+      # builds fine and then refuses every update with an ImportError.
+      "updater", "update_ui", "version", "shared", "shared.updater"]
 if sys.platform == "win32":
     hi += ["webview.platforms.winforms", "webview.platforms.edgechromium"]
 elif sys.platform == "darwin":
@@ -53,7 +58,8 @@ elif sys.platform == "darwin":
 
 a = Analysis(
     [os.path.join(STUDIO, "studio_app.py")],
-    pathex=[ROOT, STUDIO, os.path.join(ROOT, "file-agent")],
+    pathex=[ROOT, STUDIO, os.path.join(ROOT, "file-agent"),
+            os.path.join(ROOT, "scripts")],
     binaries=[],
     datas=datas,
     hiddenimports=hi,
@@ -106,6 +112,10 @@ elif sys.platform == "darwin":
             "CFBundleName": "Aali Studio",
             "CFBundleShortVersionString": "1.0.0",
             "CFBundleVersion": "1.0.0",
+            # The updater launches the freshly activated payload with `open`,
+            # and macOS asks once per app. Say WHY, in Arabic, or the owner
+            # clicks Deny and the restart silently never happens.
+            "LSApplicationCategoryType": "public.app-category.developer-tools",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "10.13",
             # The IDE binds 127.0.0.1 and opens no files the owner did not ask

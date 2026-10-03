@@ -90,6 +90,44 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **[PART 2/10] آلي ستوديو auto-update LIVE in code (2026-10-03, Buffy)**:
+  `build-desktop/aali-studio/version.py` (`__version__`/`BUILD_DATE`/`COMMIT`
+  + the bundled Ed25519 PUBLIC key — resolution order baked value -> env ->
+  `D:/hwk-data/aali-hub-secrets/update_pub_hex.txt` -> none, and “none” means
+  updates are REFUSED, because a client that fetched its key from the hub
+  would trust whatever the hub served), `updater.py` (the Studio bridge:
+  `%APPDATA%/AaliStudio/config.json` with `auto_check` default ON, channel
+  stable/beta, editable hub URL, saved through the shared HTTPS policy so an
+  http:// hub is refused at SAVE time), `update_ui.py` (the four surfaces
+  RENDERED SERVER-SIDE so every Arabic label and id is assertable in pytest
+  without a browser — status chip `v1.0.0 ✓`/status-bar click → check, the
+  banner «🎉 إصدار جديد v1.1.0 متوفر — [تحديث الآن] [لاحقاً]», the Settings →
+  «التحديثات» section, and the post-download dialog «تم تنزيل التحديث.
+  [إعادة التشغيل الآن] [لاحقاً]»), plus routes `/api/update/{status,check,
+  download,activate,rollback,config}` and `/api/update/ui/<part>`. JS wiring
+  is FETCHED from `/api/update/ui/script` and evaluated at boot, so there is
+  exactly ONE copy of the Arabic update copy (a test pins that app.js contains
+  none of it). ACTIVATION MODEL: the verified payload is swapped into
+  `<install>/updates/current/` and THAT copy is launched — the running binary
+  is never overwritten while it runs, and it works the same for a onefile
+  .exe and a macOS .app. Spec gained hiddenimports (updater/update_ui/version/
+  shared.updater) + `scripts/` on pathex: the frozen IDE otherwise builds fine
+  and then refuses every update with an ImportError. TWO REAL BUGS FOUND BY
+  THE TESTS: (1) the activate route called `os._exit(0)` inline with no kill
+  switch — it silently took the whole pytest runner down (exit 0, one dot
+  printed, no traceback); now `schedule_exit()` on a 0.5s timer so the HTTP
+  response lands first, guarded by `AALI_STUDIO_UPDATE_NO_EXIT=1` and pinned
+  by a test; (2) a test's own `delenv` ordering wrote a real
+  `%APPDATA%/AaliStudio/config.json` on the owner's PC (deleted; the config
+  path is now asserted to stay inside tmp_path). Tests:
+  tests/test_studio_update_ui.py 33 (routes hit against a REAL loopback hub
+  publishing a REAL signed manifest: check → download → verify → stage →
+  activate, two failed launches → rollback, the force-rollback button, a
+  healthy launch accepting the payload, XSS escaping of a hostile
+  version/release-note, the unkeyed build refusing instead of pretending, the
+  source run saying it cannot self-update). Suite 1644 green / 15 skipped.
+  NEXT: [3] Desktop, [4] CLI, [5] hub per-app routes, [6] publish scripts.
+
 - **[PART 1/10] Universal updater module DONE — the signed-update contract the
   three clients will share (2026-10-03, Buffy)**: `scripts/shared/updater.py`
   (+ `scripts/shared/__init__.py`, so `from shared.updater import ...` works in
