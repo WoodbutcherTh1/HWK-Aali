@@ -7,6 +7,7 @@ this file is wiring + small request handlers with tests.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from aali_hub import admin_api, audit as audit_mod
@@ -45,10 +46,19 @@ class HubState:
         # parses as an Ed25519 seed hex selects Ed25519 automatically
         # (production; load_signing_key); anything else stays HMAC.
         self.updates: UpdateStore | None = None
+        # Per-app store (studio / desktop / cli): one version with a different
+        # artifact per platform. Separate directory, separate class, ZERO
+        # impact on the Node's single-artifact store above.
+        self.app_updates: Any = None
         if config.update_signing_key:
             from aali_hub.update_server import load_signing_key
+            key = load_signing_key(config.update_signing_key)
             self.updates = UpdateStore(
-                config.update_dir, load_signing_key(config.update_signing_key),
+                config.update_dir, key,
+                keep_versions=config.update_keep_versions)
+            from aali_hub.app_updates import AppUpdateStore
+            self.app_updates = AppUpdateStore(
+                Path(config.update_dir).parent / "app_updates", key,
                 keep_versions=config.update_keep_versions)
 
 
@@ -86,15 +96,26 @@ def create_app(config: HubConfig | None = None):  # noqa: ANN201
         from aali_hub import update_api
         update_router = update_api.build_update_router(state.updates)
         update_admin_router = update_api.build_update_admin_router(
-            state.updates, state.users_db, state.audit_log)
+            state.updates, state.users_db, state.audit_log,
+            app_store=state.app_updates)
         app.include_router(update_router)
         app.include_router(update_admin_router)
         update_router.set_jwt_secret(config.jwt_secret)          # type: ignore[attr-defined]
         update_admin_router.set_jwt_secret(config.jwt_secret)    # type: ignore[attr-defined]
+    if state.app_updates is not None:
+        # The per-app surface is PUBLIC: these clients update themselves before
+        # anyone logs in, and the artifacts are not secrets — they are signed.
+        from aali_hub import update_api
+        app.include_router(update_api.build_app_update_router(
+            state.app_updates))
 
     # ---- health / metrics ------------------------------------------------
     @app.get("/health")
     def health() -> dict:
+        apps = {}
+        if state.app_updates is not None:
+            apps = {name: info["latest"] or ""
+                    for name, info in state.app_updates.list_apps().items()}
         return {
             "ok": True,
             "service": "aali-hub",
@@ -102,6 +123,9 @@ def create_app(config: HubConfig | None = None):  # noqa: ANN201
             "update_sig_alg":
                 "ed25519" if (state.updates is not None and HAS_ED25519)
                 else ("hmac-sha256" if state.updates is not None else ""),
+            # what each self-updating client can fetch right now
+            "update_apps": apps,
+            "update_apps_latest": apps,
             "brain_connected": state.manager.brain() is not None,
             "nodes_connected": state.manager.live_count("node"),
             "queue_depth": state.queue.queue_depth(),

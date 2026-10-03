@@ -565,9 +565,13 @@ def check_for_update(hub_url: str, current_version: str, *,
     key = public_key if public_key is not None else _CONFIG.get("public_key")
     base = normalize_hub_url(hub_url or _CONFIG.get("hub_url")
                              or DEFAULT_HUB_URL)
-    path = f"/updates/{client_app}/latest"
+    # The hub answers with the artifact for THIS platform only: a Windows
+    # client must never be handed the macOS build (it would "update" into
+    # something it cannot run). Older hubs ignore the parameter.
+    params = [f"platform={urllib.parse.quote(plat)}"]
     if channel:
-        path += f"?channel={urllib.parse.quote(str(channel))}"
+        params.append(f"channel={urllib.parse.quote(str(channel))}")
+    path = f"/updates/{client_app}/latest?" + "&".join(params)
     url = f"{base}{path}"
     headers = {"Accept": "application/json"}
     if token:
