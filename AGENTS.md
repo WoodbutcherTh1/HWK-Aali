@@ -90,6 +90,41 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **[PART 5/10] hub per-app manifests verified + committed · Studio comfort
+  pass · iOS fixes · Desktop-Apps bundle (2026-10-03, Buffy)**: (0) The PART 5
+  hub work was sitting UNCOMMITTED in the tree from the prior session —
+  verified 30 green in `.venv-hub` (the training venv skips the module by
+  design, no FastAPI) and committed as d0d16ee before anything else. NEXT:
+  [6] publish scripts. (1) STUDIO UI/UX comfort pass, the third answer to the
+  owner's «الضعيف، بسيط»: prefs (font_size 12–18, word_wrap, terminal_visible,
+  show_thinking) ride the SAME whitelisted settings channel (models_proxy
+  whitelist + new GET/POST `/api/prefs` — no second config file, test-pinned
+  refusal of unknown keys), one `:root[data-fs]` CSS scale drives chrome AND
+  Monaco together (`syncMonacoPrefs`), the pywebview window receives them via
+  the boot URL (`?fs=&wrap=&term=`), the file tree is a real keyboard listbox
+  (↑↓ walk, Enter open, → expand), `Ctrl+Tab`/`Ctrl+Shift+Tab` cycle tabs, the
+  💭 label shows the TAIL of the model's actual thought (last 70 chars) instead
+  of the useless «(N حرف)» counter (ban test-pinned) with a full-hide pref,
+  tree carets are text triangles (▸/▾) because colored emoji clash with macOS
+  chrome, a workspace row (ws-name + 📂) shows/switches the folder, panes grew
+  and shrink at 1250/1050px instead of clipping, and the link input's dead
+  `var(--bg-1)` is now `var(--bg-3)`. REAL PRE-EXISTING BUG the run exposed:
+  `studio_app.py --help`/`studio_server.py --help` died UnicodeEncodeError on
+  a cp1252 console (Arabic argparse help) — the entrypoint tripwire's verdict
+  was shell-encoding-dependent; both entrypoints now force UTF-8 on
+  stdout/stderr (errors=replace), the repo convention aali_cli already uses.
+  Tests: test_aali_studio.py **113** (+12). (2) iOS app (lives at
+  `ios/Aali.xcodeproj`, 5 SwiftUI files): explicit `Theme.text` on every Text
+  surface (forced-dark + default label color = near-black on ink),
+  user/assistant name colors distinguished, success/danger theme colors, an
+  actionable «اضبط الاتصال» button when disconnected + re-ping after a failed
+  ask so it appears, composer text color. SwiftUI cannot compile on this PC —
+  the MacBook is the only honest verification path. (3) `Desktop-Apps/` at the
+  repo root AND copied to `C:/Users/HmamK/OneDrive/Desktop/Aali-Apps/`:
+  Studio's build-mac.sh + spec, the 5 Swift files + project.pbxproj, a
+  bilingual README with the exact MacBook commands — a native .app/.ipa can
+  only ever be produced on the Mac, so a copy-ready bundle is the honest
+  form. Suite 1719 green / 17 skipped.
 - **[PART 4/10] آلي CLI `/update` LIVE in code (2026-10-03, Buffy)**: new
   `scripts/cli_update.py` (CLI_VERSION 1.0.0 + the third client bridge over the
   same `shared.updater`). Config `~/.aali/cli_update.json` (`AALI_CLI_UPDATE_CONFIG`
