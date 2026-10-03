@@ -14,6 +14,7 @@ therefore only ever select an action, never inject a command.
 
 from __future__ import annotations
 
+import os
 import shlex
 import socket
 import subprocess
@@ -127,7 +128,17 @@ def tcp_open(host: str, port: int, timeout: float = 1.5) -> bool:
 
 
 def ping_ok(host: str, count: int = 1, timeout: int = 2) -> bool:
-    code, _ = _runner(["ping", "-n", str(count), "-w", str(timeout * 1000), host], timeout + 3)
+    """ICMP reachability, using each platform's own flags.
+
+    Windows ping takes ``-n``/``-w`` (ms); POSIX ping takes ``-c``/``-W`` (s).
+    Hard-coding the Windows form made every machine look OFFLINE when Jarvis
+    ran on the Pi, which is where it actually runs.
+    """
+    if os.name == "nt":
+        argv = ["ping", "-n", str(count), "-w", str(timeout * 1000), host]
+    else:
+        argv = ["ping", "-c", str(count), "-W", str(timeout), host]
+    code, _ = _runner(argv, timeout + 3)
     return code == 0
 
 

@@ -225,6 +225,30 @@ def test_machine_status_uses_injected_pinger(machines):
     assert st2["api"] is None
 
 
+def test_ping_uses_platform_flags(monkeypatch):
+    """Regression: Windows flags made every machine look offline on the Pi."""
+    seen = {}
+
+    def capture(argv, timeout):
+        seen["argv"] = argv
+        return 0, ""
+
+    monkeypatch.setattr(power, "_runner", capture)
+    monkeypatch.setattr(power.os, "name", "posix")
+    assert power.ping_ok("192.168.1.13") is True
+    assert "-c" in seen["argv"] and "-W" in seen["argv"]
+    assert "-n" not in seen["argv"]
+
+    monkeypatch.setattr(power.os, "name", "nt")
+    power.ping_ok("192.168.1.13")
+    assert "-n" in seen["argv"] and "-w" in seen["argv"]
+
+
+def test_ping_failure_is_not_online(monkeypatch):
+    monkeypatch.setattr(power, "_runner", lambda argv, timeout: (1, "unreachable"))
+    assert power.ping_ok("192.168.1.99") is False
+
+
 def test_describe_status_arabic(machines):
     on = power.machine_status(machines["pc"], pinger=lambda *a, **k: True)
     assert "🟢" in power.describe_status(on)
