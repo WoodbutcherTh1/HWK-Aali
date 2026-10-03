@@ -90,6 +90,48 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **[PART 1/10] Universal updater module DONE — the signed-update contract the
+  three clients will share (2026-10-03, Buffy)**: `scripts/shared/updater.py`
+  (+ `scripts/shared/__init__.py`, so `from shared.updater import ...` works in
+  the repo AND in a frozen build whose spec puts `<repo>/scripts` on pathex).
+  Six spec functions: `check_for_update(hub_url, current_version)` (returns a
+  plain dict, never None — `update_available`/`auto_apply_allowed`/`verified`/
+  `reason` so a UI renders it unconditionally), `download_and_verify(url,
+  sha256, sig, pubkey)` (HTTPS policy -> size ceiling -> SHA256 -> detached
+  Ed25519 over the sha256 hex string, in that order, temp file removed on any
+  refusal), `stage_update(archive_path, install_dir)` (verified candidate into
+  `<install>/staged/<ver>/`, the running install untouched),
+  `apply_and_restart(staged_path, install_dir)` (moves current -> previous/<ver>
+  (never copies), activates, writes `pending_ack`, schedules a restart through
+  an INJECTABLE spawn), `rollback_if_failed()` (zero-arg per spec — works off
+  `configure()`/env), `zip_slip_guard(archive, target)` (zip + tar; refuses
+  absolute/UNC/drive-letter/`..`/`%2e`/Windows-device/trailing-dot-space/
+  NUL-byte/symlink/device members). Layout owned by the module:
+  `current/ previous/<ver>/ staged/<ver>/ update_state.json`; `register_startup()`
+  counts an un-acked launch and rolls back at 2 (`MAX_FAILURES`), `record_launch_ok()`
+  accepts it. CONTRACT MIRRORED from aali_node/updater.py: never trust the hub
+  (the manifest signature is re-verified CLIENT-side against the hub's exact
+  canonical-JSON form — pinned against the real `aali_hub.update_server` in the
+  suite), strict dotted semver so `999.garbage` never wins, manifest `url` must
+  be RELATIVE, platform+app mismatch is refused, unparsable signed version fails
+  LOUDLY, no auto-execute (the only process ever spawned is a re-exec of the
+  already-running executable; a source tripwire pins it), HTTPS-only except
+  loopback. Content-free JSONL log at `<data root>/updates/update.log`
+  (`D:/hwk-data/...` on the PC, `~/hwk-data/...` on a Mac) with a field
+  WHITELIST + sha256 truncated to 16 — URLs, tokens and content can never leak;
+  an unwritable disk must not break an update. DEP DECISION (flagged to the
+  owner): `requests` when importable + stdlib `urllib` fallback, because the
+  PyInstaller client builds run from `.venv-desktop` which has NO requests — a
+  hard dep would ship a broken Studio .exe; `cryptography` (already in both
+  venvs) is the only hard requirement. Tests: tests/test_updater.py 65, incl. a
+  REAL end-to-end over a real loopback HTTP hub (check -> download -> verify ->
+  stage -> apply -> 2 failed launches -> rollback, run twice: default transport
+  and the urllib path) and a post-signing byte-swap refusal. Suite 1611 green /
+  15 skipped. NEXT: [2] Studio auto-update (version.py + updater.py +
+  update_ui.py + the 4 UI surfaces) — then Desktop, CLI, the hub's per-app
+  routes, the publish .bat scripts, the macOS/iOS builds (OWNER MACHINE ONLY),
+  the first-transfer bundle, and docs/features/auto_update.md.
+
 - **macOS/Linux: every client is now portable + a build + a self-test
   (2026-10-03, Buffy — DONE, awaiting the owner's Mac run)**: docs/PORTING.md.
   AUDIT FIRST, guess never: آلي CLI was ALREADY cross-platform (afplay/aplay,
