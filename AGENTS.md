@@ -90,6 +90,35 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **[PART 3/10] آلي Desktop auto-update LIVE in code (2026-10-03, Buffy)**:
+  new `desktop_update.py` (the Desktop-side bridge over the same
+  `shared.updater`: `%APPDATA%/AaliDesktop/config.json` with auto-check default
+  ON + channel + editable hub URL saved through the shared HTTPS policy,
+  `Aali-Desktop.exe` / `Aali-Desktop.app` payload names, check → download →
+  verify → stage → activate → rollback, two-failed-launches roll back, and the
+  process-exit on a TIMER behind `AALI_DESKTOP_UPDATE_NO_EXIT=1`). Desktop has
+  NO html template — its UI is JS injected into Aali’s web UI, so every Arabic
+  string and every id is built in PYTHON (`status_chip_html`,
+  `banner_html`, `settings_html`, `done_dialog_html`, `UPDATE_JS`) and a test
+  pins that every id the JS clicks exists in the rendered fragments (a renamed
+  id would be a dead button in the owner’s window). `aali_desktop_app.Bridge`
+  gained `update_status / update_ui / update_check / update_download /
+  update_activate / update_rollback / update_save` — all returning JSON
+  STRINGS, because pywebview marshals plain values only (a dict crossing that
+  boundary has bitten this app before; the first draft even hit a
+  `NameError: json` doing exactly that). `launch_ok()` is called from
+  `_wait_and_inject` (window up) NOT after `webview.start()` — that returns
+  when the window CLOSES, which would accept an update on the way out. The old
+  `/api/desktop-version` pill is KEPT and renamed in the docs: it answers a
+  different question (“is the SERVED build newer?”) than this (“is this window
+  outdated?”). Spec: hiddenimports + scripts/file-agent on pathex + an
+  `NSAppleEventsUsageDescription` for the relaunch. Tests:
+  tests/test_desktop_update.py 26, end-to-end through the REAL Bridge methods
+  against a real loopback signed hub. The `os._exit` lesson from Part 2 was
+  applied as a design rule here: the kill switch is set in the AUTOUUSE
+  fixture so no test can ever take the runner down. Suite 1670 green /
+  15 skipped. NEXT: [4] CLI `/update`, [5] hub per-app routes.
+
 - **[PART 2/10] آلي ستوديو auto-update LIVE in code (2026-10-03, Buffy)**:
   `build-desktop/aali-studio/version.py` (`__version__`/`BUILD_DATE`/`COMMIT`
   + the bundled Ed25519 PUBLIC key — resolution order baked value -> env ->

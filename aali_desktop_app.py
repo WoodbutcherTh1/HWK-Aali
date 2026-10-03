@@ -4,8 +4,13 @@ pywebview window around Aali's web UI + native extras:
 - First run: pick the server (saved to the platform's own config dir).
 - SHARE: one-click Cloudflare quick-tunnel (cloudflared bundled) → a public
   URL the owner can send to friends; friends open it and create a key.
-- UPDATE: on start, asks the server /api/desktop-version — if the served
-  build is newer, a banner offers the download.
+- UPDATE: the client updates ITSELF from the Aali Hub through the shared,
+  signed-update contract (desktop_update.py): a version chip in the bottom-right
+  corner, a banner when a release is available, and a Settings box. Every
+  artifact is SHA256 + Ed25519 verified client-side before it is staged, and
+  two failed launches roll back to the previous version. The older
+  /api/desktop-version pill is a DIFFERENT question ("is the SERVED build
+  newer?") and is kept.
 
 Runs on Windows (WebView2 / .exe), macOS (WKWebView / .app) and Linux
 (GTK/WebKit2). Platform differences live in file_agent.hwk_paths and are
@@ -15,6 +20,7 @@ guarded here; no os.startfile / netsh / .exe assumptions survive.
 from __future__ import annotations
 
 import glob
+import json as _json_mod
 import os
 import re
 import subprocess
@@ -25,11 +31,23 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
+
+def _json(payload) -> str:
+    """One JSON encoder for every pywebview return value."""
+    return _json_mod.dumps(payload, ensure_ascii=False)
+
+
+def shared_UpdateError():
+    """The shared updater's error type, imported lazily (see update_save)."""
+    from shared.updater import UpdateError
+    return UpdateError
+
 _HERE = Path(__file__).resolve().parent
-for _extra in (_HERE / "file-agent", _HERE):
+for _extra in (_HERE / "file-agent", _HERE / "scripts", _HERE):
     if _extra.is_dir() and str(_extra) not in sys.path:
         sys.path.insert(0, str(_extra))
 
+import desktop_update  # noqa: E402
 from file_agent import hwk_paths  # noqa: E402
 
 APP_VERSION = "1.0.3"
@@ -262,6 +280,49 @@ class Bridge:
             return _json.dumps({"error": str(exc), "rows": [], "alerts": 0,
                                 "generated": ""}, ensure_ascii=False)
 
+    # ---- auto-update (آلي Desktop) ------------------------------------
+    # Every one of these returns JSON TEXT, not a dict: pywebview marshals
+    # plain values, and a dict/None crossing that boundary has bitten this
+    # app before. The verification itself lives in shared.updater — see
+    # desktop_update.py.
+
+    def update_status(self) -> str:
+        return _json(desktop_update.status())
+
+    def update_ui(self) -> str:
+        return _json(desktop_update.ui_payload())
+
+    def update_check(self, force: bool = True) -> str:
+        return _json(desktop_update.check(force=bool(force)))
+
+    def update_download(self) -> str:
+        return _json(desktop_update.start_download())
+
+    def update_activate(self) -> str:
+        result = desktop_update.activate()
+        if result.get("ok"):
+            # The new payload was already launched from updates/current/ by
+            # activate(); leave so it can take over. On a timer, behind an
+            # explicit switch — see desktop_update.schedule_exit.
+            desktop_update.schedule_exit()
+        return _json(result)
+
+    def update_rollback(self) -> str:
+        return _json(desktop_update.rollback())
+
+    def update_save(self, patch_json: str) -> str:
+        try:
+            patch = _json_mod.loads(patch_json or "{}")
+            if not isinstance(patch, dict):
+                raise ValueError("patch must be an object")
+            saved = desktop_update.save_config(patch)
+        except (ValueError, desktop_update.DesktopUpdateError) as exc:
+            return _json({"ok": False, "error": str(exc)})
+        except shared_UpdateError() as exc:  # an http:// hub URL, say why
+            return _json({"ok": False, "error": str(exc)})
+        return _json({"ok": True, "config": saved,
+                      **desktop_update.status()})
+
     # ---- misc ----------------------------------------------------------
     def app_version(self) -> str:
         return APP_VERSION
@@ -431,6 +492,11 @@ def _wait_and_inject(window) -> None:
         )
         time.sleep(2)
         window.evaluate_js(EXTRAS_JS)
+        window.evaluate_js(desktop_update.UPDATE_JS)
+        # The window is up and the page is ours: accept a freshly applied
+        # payload. (Called HERE, not after webview.start() — that returns when
+        # the window CLOSES, which would accept an update on the way out.)
+        desktop_update.launch_ok()
     except Exception:  # noqa: BLE001
         pass
 
@@ -459,6 +525,11 @@ def main() -> None:
             pass
 
     SERVER = _pick_url()
+
+    # Auto-update bookkeeping belongs to the PROCESS: a payload that cannot
+    # reach a working window twice in a row is rolled back before the window
+    # opens. No-op for a source run.
+    desktop_update.startup()
 
     if _is_local(SERVER):
         threading.Thread(target=_ensure_local_server, daemon=True).start()

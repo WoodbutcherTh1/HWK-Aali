@@ -17,7 +17,13 @@ for cand in (
         break
 datas = [(_cf, ".")] if _cf else []
 
-hi = ["webview"]
+hi = [
+    "webview",
+    # Auto-update: imported by name from the repo root and from scripts/, so
+    # neither PyInstaller's analysis nor the frozen sys.path finds them. Without
+    # these the exe builds cleanly and then refuses every update.
+    "desktop_update", "shared", "shared.updater",
+]
 if sys.platform == "win32":
     hi += ["webview.platforms.winforms", "webview.platforms.edgechromium"]
 elif sys.platform == "darwin":
@@ -25,7 +31,8 @@ elif sys.platform == "darwin":
 
 a = Analysis(
     ["aali_desktop_app.py"],
-    pathex=["."],
+    pathex=[".", os.path.join(".", "scripts"),
+            os.path.join(".", "file-agent")],
     binaries=[],
     datas=datas,
     hiddenimports=hi,
@@ -70,6 +77,11 @@ else:
         info_plist={
             "CFBundleDisplayName": "آلي",
             "CFBundleShortVersionString": "1.0.1",
+            # The updater relaunches the freshly activated payload with `open`,
+            # and macOS asks permission the first time. Say why.
+            "NSAppleEventsUsageDescription":
+                "آلي Desktop يفتح التطبيق نفسه بعد التحديث، ويشغّل "
+                "cloudflared عند طلبك رابطاً عاماً.",
             "NSHighResolutionCapable": True,
         },
     )
