@@ -29,6 +29,12 @@ Environment=ESPEAK_DATA_PATH=%h/bin/espeak-ng-data
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONIOENCODING=utf-8
 
+# The owner's CLONED voice (XTTS) lives on the PC: the Pi has 905 MB of RAM and
+# no torch, so it cannot host the model. tts.py falls back to reading the pc
+# machine's IP out of machines.json if this ever goes stale.
+Environment=AALI_VOICE_API=http://192.168.1.13:5082
+Environment=AALI_VOICE_CLONE=arabic_male
+
 ExecStart=%h/jarvis/.venv-jarvis/bin/python -m jarvis.main
 
 # The bot waits for telegram.json rather than crash-looping before the token

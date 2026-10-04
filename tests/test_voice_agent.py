@@ -1284,3 +1284,107 @@ def test_server_e2e_fake_pipeline():
         ws.send(json.dumps({"type": "status"}))
         st = json.loads(ws.recv(timeout=5))
         assert st["type"] == "status"
+
+
+# --------------------------------------------------------------------------
+# The token gate on the voice API.
+#
+# WHY: this endpoint renders speech in the OWNER'S CLONED VOICE. Exposed on
+# the LAN so the Pi can reach it (it has 905 MB of RAM and cannot host XTTS
+# itself), anything on the WiFi could otherwise make his machine say anything.
+# Jarvis sends the token; nothing else may.
+
+@pytest.fixture()
+def locked_studio(tmp_path, monkeypatch):
+    """Same console, but with AALI_VOICE_TOKEN armed."""
+    import urllib.request as ur
+
+    from voice.core import voices as voice_lib
+    from voice import studio_api
+    from voice.studio_api import make_server
+
+    monkeypatch.setenv("AALI_VOICE_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("AALI_VOICE_BATCH_DIR", str(tmp_path / "batch"))
+    monkeypatch.setenv("AALI_VOICE_UPLOADS", str(tmp_path / "uploads"))
+    monkeypatch.setattr(voice_lib, "STORE_PATH", tmp_path / "voices.json")
+    monkeypatch.setattr(voice_lib, "REFERENCES_DIR", tmp_path / "refs")
+    monkeypatch.setattr(voice_lib, "_piper_list", lambda: (True, []))
+    monkeypatch.setattr(studio_api, "VOICE_TOKEN", "top-secret-voice-token")
+
+    httpd = make_server(_free_port(), fake=True)
+    th = threading.Thread(target=httpd.serve_forever, daemon=True)
+    th.start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    time.sleep(0.2)
+
+    def request(path, data=None, token=None, method=None):
+        headers = {}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        if token is not None:
+            headers["X-Aali-Voice-Token"] = token
+        req = ur.Request(base + path, data=data, method=method, headers=headers)
+        try:
+            with ur.urlopen(req, timeout=30) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    try:
+        yield types.SimpleNamespace(
+            request=request,
+            base=base,
+            good="top-secret-voice-token",
+            synth=b'{"text":"All systems online.","lang":"en"}',
+        )
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_voice_api_refuses_a_request_with_no_token(locked_studio):
+    status, _ = locked_studio.request("/api/voices")
+    assert status == 401, "a cloned-voice endpoint must not be open on the LAN"
+
+
+def test_voice_api_refuses_a_wrong_token(locked_studio):
+    status, _ = locked_studio.request("/api/voices", token="guess")
+    assert status == 401
+
+
+def test_voice_api_accepts_the_right_token(locked_studio):
+    status, body = locked_studio.request("/api/voices", token=locked_studio.good)
+    assert status == 200
+    assert b"voices" in body
+
+
+def test_voice_api_refuses_unauthenticated_synthesis(locked_studio):
+    """The dangerous one: speaking in his voice without the secret."""
+    status, _ = locked_studio.request(
+        "/api/synthesize", data=locked_studio.synth, method="POST"
+    )
+    assert status == 401
+
+
+def test_voice_api_synthesizes_with_the_right_token(locked_studio):
+    status, body = locked_studio.request(
+        "/api/synthesize", data=locked_studio.synth, token=locked_studio.good,
+        method="POST",
+    )
+    assert status == 200
+    assert body[:4] == b"RIFF", "expected a real WAV clip"
+
+
+def test_console_page_stays_reachable_without_a_token(locked_studio):
+    """The token guards the API; the HTML console itself is not a secret."""
+    status, _ = locked_studio.request("/")
+    assert status == 200
+
+
+def test_no_token_configured_means_no_auth(locked_studio, monkeypatch):
+    """Unset = open, which is only safe because loopback is the default."""
+    from voice import studio_api
+
+    monkeypatch.setattr(studio_api, "VOICE_TOKEN", "")
+    status, _ = locked_studio.request("/api/voices")
+    assert status == 200

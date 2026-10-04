@@ -70,9 +70,17 @@ fi
 
 echo
 echo "== done =="
-echo "Next (needs Pi sudo for systemd):"
-echo "  $SSH $PI_USER@$PI_HOST 'sudo cp $DEST/jarvis.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now jarvis && sudo systemctl status jarvis --no-pager'"
+echo "Restart the USER unit (no sudo needed -- aalici has none):"
+echo "  $SSH $PI_USER@$PI_HOST 'systemctl --user restart jarvis.service && systemctl --user status jarvis.service --no-pager'"
 echo "Then watch the log:"
-echo "  $SSH $PI_USER@$PI_HOST 'sudo journalctl -u jarvis -f'"
+echo "  $SSH $PI_USER@$PI_HOST 'tail -f ~/.aali/jarvis/jarvis.log'"
 echo
-echo "Config lives in ~/.aali/jarvis/ (groq_key.txt, telegram.json, machines.json) and was not modified."
+echo "If the unit itself changed, copy deploy/jarvis-user.service to"
+echo "  ~/.config/systemd/user/jarvis.service, then: systemctl --user daemon-reload"
+echo
+echo "Voice: the cloned English voice is rendered on the PC (:5082), not the Pi."
+echo "  scripts/voice_server_for_jarvis.bat starts it on Windows; on the Pi it"
+echo "  silently falls back to the local espeak voice if the PC is asleep."
+echo
+echo "Config lives in ~/.aali/jarvis/ (groq_key.txt, telegram.json, machines.json,"
+echo "voice_token.txt) and was not modified."

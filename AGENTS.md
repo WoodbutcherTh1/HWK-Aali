@@ -90,6 +90,153 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **[Jarvis × Freebuff] JARVIS NOW ACCEPTS PLAIN LANGUAGE AND OBEYS (2026-10-04,
+  Buffy — LIVE on the Pi)**: the owner's ask was «let me ask jarvis everything to
+  do and he must obey me ... i want full access from outside home», and three
+  decisions were his: **(1)** the router picks from a CLOSED capability set, not
+  a free shell; **(2)** the Freebuff bridge becomes TWO-WAY (answers land on
+  Telegram by themselves); **(3)** destructive actions keep the two-step token,
+  so "shut it down" is still not a single sentence. New `scripts/jarvis/intent.py`
+  (13 capabilities, bilingual one-liner per capability, `build_prompt()` GENERATED
+  from the table so prompt and validator cannot drift, `validate()` as the
+  boundary, `classify()` on its own smaller model `openai/gpt-oss-20b` at
+  temperature 0 — a creative classifier eventually routes a shutdown to the wrong
+  machine). The guarantee is unchanged and is the whole point: **there is no code
+  path from a model reply to a shell** — the router can only NAME a handler that
+  already exists, exactly like `power.POWER_COMMANDS` always did. `validate()`
+  drops an invented action (→ `None` → ordinary chat), an undeclared arg, a value
+  outside its choices, and returns `None` when a required arg is missing;
+  `None` is designed as the common answer, because "don't know" must degrade to
+  chat, never to a guess. Dispatcher order in `handle_text`: slash command →
+  open handoff payload → the proven Freebuff regexes → **spoken confirmation** →
+  router → chat; the deterministic regexes stay first so the shipped feature
+  never depends on a model, and `CONFIRM_RE` lets «نعم 123456» / a bare code /
+  «لا 123456» close a pending power token (whole-message-only, so a sentence is
+  never an approval). Also new: `scripts/jarvis/brain.py` (`/ask` → the PC brain
+  over **plain HTTP/JSON, never SSH** — a question may contain quotes, `$` and
+  `;`, and a test reads the module and asserts it imports no `shlex`/`subprocess`;
+  optional `aali_key.txt`, and absent key ⇒ an honest refusal naming the file),
+  `handoff.py` kinds (`note`/`answer`, `reply_to`, `machine` as FIELDS so the
+  payload stays verbatim — `cmd_task` is now a REAL queued note instead of the
+  old "bridge not built" stub), `main.answer_poller` (a daemon thread, silent when
+  empty, `AALI_JARVIS_POLL_SECS=0` off, an exception logs and keeps going),
+  `--reply-to/--answers/--text` on both CLIs, and a re-entrant **RLock** (a voice
+  note re-enters `handle_text` from `cmd_voice`, so a plain Lock would deadlock
+  the bot on its most-used feature). THE TWO ARABIC HAZARDS BOTH FIRE AGAIN, in
+  the same session: hand-typed `\u` escapes decoded to VALID-BUT-NONSENSE Arabic
+  (a classifier prompt nobody can read is worse than a missing one — the
+  `summary_ar` values now live in ONE reviewable `SUMMARY_AR` table, asserted to
+  contain Arabic), and a long Arabic doc came back with CJK/Hangul intrusions and
+  U+FFFD in 15 lines — found by a codepoint scan (now the standing check) and
+  repaired line by line, including one syllable hidden behind an invisible
+  Hangul filler that made a literal match fail. Tests: `tests/test_jarvis.py` 152
+  (+44), suite **1881 green / 17 skipped**. The bot fixture sets
+  `intent_enabled = False` because the router calls Groq on EVERY free-text
+  message — a test-pinned reminder that leaving it on makes the suite hit the
+  network. LIVE on the Pi (192.168.1.15, service restarted, poller running): a
+  real Arabic sentence «كم مساحة القرص المتبقية على الحاسوب؟» → `intent: resources`;
+  «اقفل الحاسوب من فضلك» → `intent: power` with **no** `power_shutdown` event
+  (the token was minted and the PC was never touched — the four `power_shutdown`
+  lines in the log are all from 2026-10-03, yesterday's typed tests); «ايش رأيك
+  بالطقس» → `chat`; and two handoff phrasings the regex layer cannot catch
+  («ابغى فريفب يبصلنا على موضوع تنزيل السيرفر» and "ask her to look into the
+  failing deployment") both landed in the inbox. Return path proven end to end:
+  answered from the PC with `--reply-to`, the RUNNING service delivered it to
+  Telegram within the poll window (`answers_delivered`, count 1) and marked it
+  read. Docs: `docs/features/jarvis_natural_language.md` (AR+EN) + a two-way
+  section in `jarvis_freebuff_bridge.md`. Still honest gaps: `power`/`logs`/
+  `resources` need SSH to the PC (sshd not yet materialised — needs the owner's
+  reboot), `/ask` needs `aali_key.txt` and can take 90s, every free-text message
+  now costs one extra small model call (~1s), and the router WILL misroute the
+  occasional sentence — which is why `None` falls back to chat. NEXT: owner owes
+  key rotation (Groq + DeepSeek were burned) and a PC reboot; the commit below
+  is STILL uncommitted at his request.
+
+- **"Send it to Freebuff" — the Jarvis -> Buffy bridge is LIVE (2026-10-04,
+  Buffy)**: the owner's actual request was «i told jarvis send it to freebuff,
+  he said he cant». THE HONEST SHAPE, stated once: **no API can inject a
+  message into a live Freebuff session** — there is no such endpoint, so the
+  feature is a MAILBOX, not a push. `scripts/jarvis/handoff.py` appends the
+  owner's note to `~/.aali/jarvis/freebuff_inbox.jsonl` on the Pi (always on,
+  and the PC already holds the Pi SSH key); `scripts/freebuff_inbox.py` pulls
+  it over SSH (`--take` to mark delivered). Nothing claims delivery it cannot
+  prove: the reply carries the note id + timestamp, and `/freebuffs` answers
+  "did it arrive?" by READING THE INBOX, not from memory. TRIGGERS are
+  generous, INTENT is strict: `/freebuff <text>`, `send/forward/tell <it> to
+  freebuff <text>`, `freebuff: <text>`, and the Arabic spellings, and a VOICE
+  NOTE works because `cmd_voice` now routes the transcript through
+  `handle_text` instead of straight to chat — the owner says the phrase out
+  loud and it lands. Ordinary chat is NOT hijacked: the matcher demands an
+  explicit send verb aimed at the name (or the name opening the message after a
+  colon), and a possessive (`show buffy's status`) is refused by an explicit
+  `(?!['’\w])` boundary, so `what can buffy do?` still goes to the brain. The
+  owner can also say the phrase with NOTHING after it, which opens a 5-minute
+  request whose next message becomes the payload (any `/command` cancels it,
+  and a test pins that it expires). THE INBOX IS THE ONE PLACE MESSAGE TEXT
+  EXISTS in Jarvis, so it is mode 600 inside a 700 dir, capped at 500 entries /
+  256 KB (newest kept), and `jarvis.log` still records only
+  `handoff_sent/ok/chars/count`. SECRETS ARE SCRUBBED ON THE WAY IN — the
+  Groq + DeepSeek keys already leaked into a chat once, so `gsk_/sk-/ghp/`
+  telegram-token/`api_key=`/long-hex shapes are replaced BEFORE the write and
+  the owner is told how many were stripped; prose that merely looks like a key
+  survives untouched. LIVE-VERIFIED end to end: a real `--once` message through
+  the Pi's own `handle_text` landed in the inbox, the PC read it back over
+  SSH, and `ls -l` showed `-rw-------` in a `drwx------` dir. TWO REAL DEFEATS
+  ON THE WAY, both mine: (1) the file transport **silently dropped the Arabic
+  verbs from the regex** (the Arabic prepositions and names survived, «ارسل»
+  did not), so every Arabic phrasing fell through to the brain — the Arabic
+  verbs are now `\u` escapes, which also keeps the file ASCII-safe; (2) my
+  SSH helper `shlex.join`ed the whole remote command, so the Pi got a literal
+  `~/jarvis/...` (no such file) and then a `ModuleNotFoundError` because the
+  package only imports from `WorkingDirectory=%h/jarvis` — only the two
+  user-supplied values are quoted now. Tests: test_jarvis.py **108** (+44:
+  every spelling, no-hijack cases, owner gating, expiry, the voice path, the
+  content-free log, every key shape, the cap, permissions, the CLI); suite
+  **1834 passed / 17 skipped**. Docs:
+  docs/features/jarvis_freebuff_bridge.md (AR+EN, honest limits).
+
+- **Jarvis speaks in the OWNER'S CLONED VOICE; reports are Arabic text +
+  English voice (2026-10-04, Buffy)**: Jarvis (Telegram remote control, Pi
+  `192.168.1.15`, bot **@AaliJarvisbot**) is LIVE. THE OWNER'S RULE, pinned in
+  tests: every report is Arabic TEXT, and the bot speaks ENGLISH. That is not a
+  formatting preference — it is two different strings. `speak()` sends the
+  Arabic text first and immediately, then renders a SHORT English line via
+  `Jarvis.english_line()` and sends that as the voice note; feeding the Arabic
+  string to an English voice would be noise, so `tts.synthesize(allow_clone=)`
+  exists purely to keep Arabic script away from the clone. **WHERE THE VOICE
+  LIVES: the Pi CANNOT host XTTS** (905 MB RAM, no torch), so the PC renders
+  it — `scripts/voice/studio_api.py` on :5082, reached over the LAN with a
+  shared secret, and the Pi only runs ffmpeg WAV->OGG (Telegram wants
+  OGG/Opus; a WAV is not a voice note). MEASURED, not guessed: XTTS-v2 on this
+  CPU costs ~140s to load once and then **~2s PER WORD** (5w 11.8s, 10w
+  21.3s), which is why `SPOKEN_MAX_WORDS=14` (~30s ceiling) is a LATENCY
+  BUDGET and why the text is sent before the audio. The server must stay WARM
+  (scripts/voice_server_for_jarvis.bat) or the first reply waits two minutes.
+  **THE SECURITY BIT, and the mistake I made first**: my first detached
+  launch passed `AALI_VOICE_BIND` but NOT the token, so a cloned-voice
+  endpoint came up on the LAN with no auth — anything on the WiFi could have
+  made the owner's machine say anything. Caught it myself and killed it by
+  exact netstat PID; `AALI_VOICE_TOKEN` now guards every `/api/` route with
+  `X-Aali-Voice-Token` (hmac.compare_digest), and the `.bat` reads the token
+  from disk so it cannot be forgotten again. The HTML console stays open (not
+  a secret); the API does not. FALLBACKS ARE HONEST, NEVER SILENCE: if the PC
+  is asleep or the brain is down, Jarvis falls back to the local espeak voice
+  (robot Arabic/English) rather than going mute — a test pins BOTH that the
+  fallback speaks and that `allow_clone=False` in that path. `VOICE_API`
+  resolves from the env, then from the `pc` machine's IP in machines.json, so
+  a DHCP change cannot silently downgrade every reply to the robot.
+  `tts.LAST_SOURCE` ("clone"/"espeak") plus `spoken_chars` are whitelisted log
+  fields — content never reaches the log. Tests: test_jarvis.py **64** (+14),
+  test_voice_agent.py **74** (+7, incl. the whole 401/401/200/401 token
+  matrix); suite **1793 passed / 16 skipped**, zero regressions.
+  STILL ON THE OWNER: rotate the Groq + DeepSeek keys (both leaked into a
+  Freebuff chat through a broken `sed` of mine), reboot the PC (materialises
+  `sshd.exe`, unlocking `/shutdown` `/reboot` `/sleep`), and enable Remote
+  Login on the Mac. LESSON, re-paid: **a secret handed over in chat must be
+  written to its destination file in the SAME turn** — the Telegram token was
+  sent in an earlier session, never persisted, and evaporated with that
+  session's context, which is why the bot sat dead in its wait loop.
+
 - **[PART 5/10] hub per-app manifests verified + committed · Studio comfort
   pass · iOS fixes · Desktop-Apps bundle (2026-10-03, Buffy)**: (0) The PART 5
   hub work was sitting UNCOMMITTED in the tree from the prior session —

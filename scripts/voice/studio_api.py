@@ -15,6 +15,9 @@ One stdlib HTTP server on :5082 that serves the Arabic-first console
 
 Honest by construction:
 - loopback unless AALI_VOICE_BIND is set (the house fail-safe);
+- AALI_VOICE_TOKEN, when set, guards every /api/ route with an
+  X-Aali-Voice-Token header — a cloned-voice endpoint reachable from the LAN
+  would otherwise let any device on the WiFi speak in the owner's voice;
 - an unknown voice name is an ERROR, never a silent fallback;
 - text is chunked with the engine's per-language cap, so nothing is
   truncated by the engine;
@@ -36,6 +39,7 @@ if os.path.isdir(os.path.join(_REPO_ROOT, "file-agent")):
     sys.path.insert(0, os.path.join(_REPO_ROOT, "file-agent"))
 
 import json
+import hmac
 import re
 import shutil
 import tempfile
@@ -55,6 +59,10 @@ MAX_BODY = 8 * 1024 * 1024        # an 8 MB upload is already a long recording
 MAX_TEXT = 2000
 UPLOAD_DIR = Path(os.environ.get("AALI_VOICE_UPLOADS") or r"D:/hwk-data/voice_uploads")
 AUDIO_NAME = re.compile(r"^[0-9a-f]{40}\.wav$")
+
+# When set, every /api/ route requires this header. Unset = no auth, which is
+# only safe while the server stays on loopback.
+VOICE_TOKEN = os.environ.get("AALI_VOICE_TOKEN", "").strip()
 
 # content-free log (names, counts, timings — never the script text)
 LOG_FILE = Path(r"D:/hwk-data/voice_studio_api.log")
@@ -161,9 +169,18 @@ class StudioHandler(BaseHTTPRequestHandler):
             raise ValueError("expected JSON")
         return data if isinstance(data, dict) else {}
 
+    def _authorized(self) -> bool:
+        """Shared-secret check for the API surface (see VOICE_TOKEN)."""
+        if not VOICE_TOKEN:
+            return True
+        got = self.headers.get("X-Aali-Voice-Token", "")
+        return hmac.compare_digest(got, VOICE_TOKEN)
+
     # -- routes ----------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802
         path = urllib.parse.urlparse(self.path).path
+        if path.startswith("/api/") and not self._authorized():
+            return self._error("unauthorized", 401)
         if path in ("/", "/index.html"):
             return self._serve_page("studio.html")
         if path == "/api/voices":
@@ -180,6 +197,8 @@ class StudioHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urllib.parse.urlparse(self.path).path
+        if not self._authorized():
+            return self._error("unauthorized", 401)
         try:
             if path == "/api/voices/check":
                 return self._check_upload(register=False)

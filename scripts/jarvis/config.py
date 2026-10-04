@@ -7,6 +7,9 @@ Files:
     groq_key.txt   the Groq API key, one line
     telegram.json  {"bot_token": "...", "owner_chat_id": 6027532184}
     machines.json  the pc/mac registry (see machines.py)
+    aali_key.txt   OPTIONAL: the Aali brain's master key, so Jarvis can ask
+                   the brain a question over the LAN. Absent means the brain
+                   is not reachable, and Jarvis says so instead of guessing.
 
 Nothing in this module ever logs a secret value.
 """
@@ -80,6 +83,21 @@ def load_telegram(cfg_dir: Path | None = None) -> TelegramConfig:
         raise ValueError(f"{f} has no bot_token")
     chat_id = int(data.get("owner_chat_id") or OWNER_CHAT_ID)
     return TelegramConfig(bot_token=token, owner_chat_id=chat_id)
+
+
+def load_aali_key(cfg_dir: Path | None = None) -> str:
+    """The Aali brain's master key, or ``""`` when the owner has not set it.
+
+    Optional on purpose. Most of Jarvis works without it; only "ask the brain"
+    needs it, and a missing key must be an honest refusal rather than a
+    fabricated answer. The path is resolved per call so a test can never reach
+    the owner's real ``~/.aali``.
+    """
+    f = (cfg_dir or config_dir()) / "aali_key.txt"
+    try:
+        return _read(f) if f.exists() else ""
+    except OSError:
+        return ""
 
 
 def ensure_config_dir() -> Path:

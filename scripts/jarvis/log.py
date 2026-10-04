@@ -33,6 +33,10 @@ ALLOWED_FIELDS = frozenset(
         "reason",
         "cmd",
         "sender",
+        # which speech engine produced a voice note ("clone" or "espeak"),
+        # and how long the spoken line was — sizes and names, never content
+        "source",
+        "spoken_chars",
     }
 )
 

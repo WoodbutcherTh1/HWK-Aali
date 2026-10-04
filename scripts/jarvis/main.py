@@ -10,13 +10,16 @@ Usage (on the Pi)::
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import threading
 import time
 from pathlib import Path
 
 if __package__ in (None, ""):  # allow `python main.py` as well as -m
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from jarvis import config as _config  # type: ignore
+    from jarvis import handoff as _handoff  # type: ignore
     from jarvis import groq as _groq  # type: ignore
     from jarvis import power as _power  # type: ignore
     from jarvis import tts as _tts  # type: ignore
@@ -25,11 +28,40 @@ if __package__ in (None, ""):  # allow `python main.py` as well as -m
     from jarvis.machines import load_machines as _load_machines  # type: ignore
     from jarvis.telegram import TelegramClient as _TelegramClient  # type: ignore
 else:
-    from . import config, groq, power, tts
+    from . import config, groq, handoff, power, tts
     from .commands import Jarvis
     from .log import log_event
     from .machines import load_machines
     from .telegram import TelegramClient
+
+# How often the inbox is checked for an answer from Freebuff. The point of the
+# bridge being two-way is that the owner does not have to be at the PC to find
+# out what came back. 0 disables the poller entirely.
+DEFAULT_POLL_SECS = 60.0
+
+
+def poll_interval() -> float:
+    """Seconds between inbox checks. Env-overridable; 0 turns it off."""
+    raw = (os.environ.get("AALI_JARVIS_POLL_SECS") or "").strip()
+    if not raw:
+        return DEFAULT_POLL_SECS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_POLL_SECS
+
+
+def answer_poller(jarvis, interval: float, stop: threading.Event) -> None:
+    """Push Freebuff's answers to Telegram without the owner asking.
+
+    Silent when there is nothing new, and it never raises: a poller that can
+    kill the bot's polling loop would turn a convenience into an outage.
+    """
+    while not stop.wait(interval):
+        try:
+            jarvis.deliver_answers()
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event("answer_poll_failed", ok=False, reason=type(exc).__name__)
 
 
 def build(verbose: bool = False, wait_for_token: bool = True):
@@ -99,6 +131,17 @@ def selfcheck() -> int:
         ok = False
 
     print(f"tts tools  : {'ready' if tts.available() else 'MISSING (espeak-ng/ffmpeg)'}")
+    aali_key = config.load_aali_key(cfg_dir)
+    print(
+        "aali key   : "
+        + ("present — Jarvis can ask the brain" if aali_key else "absent — /ask will refuse")
+    )
+    print(
+        "freebuff   : "
+        f"{handoff.pending_count(cfg_dir)} note(s) waiting, "
+        f"{len(handoff.read_answers(cfg_dir, limit=5))} new answer(s)"
+    )
+    print(f"poll every : {poll_interval():.0f}s")
     print(f"python     : {sys.version.split()[0]}")
 
     for m in machines.values():
@@ -115,6 +158,18 @@ def selfcheck() -> int:
 
 def run(jarvis: Jarvis, voice: bool = True, updates: int | None = None) -> int:
     print("[jarvis] polling for updates (Ctrl-C to stop)")
+    stop = threading.Event()
+    interval = poll_interval()
+    poller: threading.Thread | None = None
+    if interval > 0:
+        poller = threading.Thread(
+            target=answer_poller,
+            args=(jarvis, interval, stop),
+            name="jarvis-answer-poller",
+            daemon=True,
+        )
+        poller.start()
+        log_event("answer_poll_start", secs=int(interval))
     handled = 0
     try:
         for update in jarvis.tg.poll_forever(stop_after=updates):
@@ -122,6 +177,8 @@ def run(jarvis: Jarvis, voice: bool = True, updates: int | None = None) -> int:
             handled += 1
     except KeyboardInterrupt:
         print("\n[jarvis] stopped")
+    finally:
+        stop.set()
     log_event("shutdown", count=handled)
     return 0
 
