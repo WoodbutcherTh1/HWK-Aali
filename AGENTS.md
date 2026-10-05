@@ -90,6 +90,45 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **[Jarvis × PC agent] THE PC IS NOW FULLY CONTROLLABLE FROM TELEGRAM — the
+  dead capabilities are real (2026-10-05, Buffy — LIVE)**: the owner's ask was
+  «let me able to full control the pc via the telegram jarvis». Root cause of
+  the dead three: `resources`/`logs`/`power` were SSH-only, the PC's sshd
+  never materialised (still true — no :22 listener today), and `cmd_sysinfo`
+  had a production bug that refused whenever no runner was injected — i.e.
+  ALWAYS, so «كم مساحة القرص» could never answer even WITH SSH. Fix is the
+  same transport everything else already uses: new `scripts/pc_agent.py` +
+  `pc_agent.bat` — a stdlib, token-gated (`X-Aali-Agent-Token`,
+  hmac.compare_digest) HTTP service on **:5083** with a CLOSED set:
+  `/api/health` (open, content-free), `/api/resources` (disk C/D/X via
+  shutil, RAM via ctypes GlobalMemoryStatusEx, GPU via nvidia-smi — all real,
+  verified live), `/api/logs` (BY NAME against the `D:/hwk-data/*.log`
+  whitelist — traversal dies by construction), `/api/power` (the fixed table
+  only; still gated by Jarvis's 6-digit two-step token). Fail closed: no token
+  ⇒ refuses to start/answer; bad Host ⇒ 403 (rebinding); the gate runs BEFORE
+  routing so an unauthenticated caller cannot even probe the endpoint set.
+  Jarvis side: `jarvis/agent.py` client + `machines.json` gains `agent_port` +
+  `pc_agent_token.txt` (the voice_token pattern); handlers prefer the agent,
+  SSH stays as fallback for non-agent machines (the Mac). Router table
+  UNCHANGED — no new model calls, no prompt drift; the three capabilities
+  simply work now. LIVE-VERIFIED: PC curl matrix (401/200/traversal-refused/
+  bogus-action-refused), then Pi→PC through the REAL client (health true;
+  C 61.9 / D 82.9 / X 299.4 GB free; RTX 3070 3.8/8GB 49°C; real log tail),
+  then the full intent→handler→Arabic-render path on the Pi. Also this
+  session: `freebuff_inbox.py` died on cp1252 (Windows reader) while the
+  owner had FIVE unanswered notes — decode + console-encode bugs fixed and
+  pinned by a source tripwire; all five answered via `--reply-to`, delivered
+  to Telegram by the running poller (`answers_delivered: count 5`); voice
+  server :5082 restarted (was down since the last reboot — replies were on
+  the espeak fallback) and the clone path proven with a real 158KB WAV (first
+  call 2m18s cold, then ~2s/word as documented). pc_agent added to
+  `aali_autostart.bat` (health-guarded step 0c) so it survives reboots.
+  Tests: test_pc_agent.py 24 (token matrix, fail-closed, traversal,
+  fixed-table, content-free audit) + 10 in test_jarvis.py; suite
+  **1915 green / 17 skipped**. Still honest: sshd on the PC is STILL absent
+  (the agent makes it unnecessary for Jarvis), owner still owes the Groq +
+  DeepSeek key rotation, and C: 14% / D: 18% free sit below the 20% rule.
+
 - **[Jarvis × Freebuff] JARVIS NOW ACCEPTS PLAIN LANGUAGE AND OBEYS (2026-10-04,
   Buffy — LIVE on the Pi)**: the owner's ask was «let me ask jarvis everything to
   do and he must obey me ... i want full access from outside home», and three

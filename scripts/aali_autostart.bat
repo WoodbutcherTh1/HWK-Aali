@@ -25,6 +25,17 @@ rem     revives :20129 when the GPU card frees - never fights a trainer
 rem     (single instance via pidlock: a duplicate exits in <1s, harmless)
 "%ROOT%\.venv\Scripts\python.exe" "%ROOT%\scripts\launch_detached.py" --log aali_brain_watchdog -- "%ROOT%\.venv\Scripts\python.exe" "%ROOT%\scripts\aali_brain_watchdog.py" >>"%GUARDLOG%" 2>&1
 
+rem 0c) ensure the JARVIS PC AGENT is alive on EVERY guard run (2026-10-05):
+rem     resources/logs/power for Telegram Jarvis (:5083, token-gated).
+rem     Health-guarded like the brain above: a curl probe, launch when down.
+curl -s --fail -m 3 http://127.0.0.1:5083/api/health >nul 2>&1
+if not errorlevel 1 (
+  echo [%date% %time%] pc_agent alive>>"%GUARDLOG%"
+) else (
+  echo [%date% %time%] pc_agent down - starting>>"%GUARDLOG%"
+  powershell -NoProfile -Command "Start-Process -FilePath '%ROOT%\scripts\pc_agent.bat' -WorkingDirectory '%ROOT%' -WindowStyle Hidden"
+)
+
 rem 1) alive already? (--fail: any HTTP error also counts as down)
 curl -s --fail -m 3 "%HEALTH_URL%" >nul 2>&1
 if not errorlevel 1 (

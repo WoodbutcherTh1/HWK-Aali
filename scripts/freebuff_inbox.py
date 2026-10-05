@@ -113,7 +113,19 @@ def run(args: argparse.Namespace, runner=subprocess.run) -> int:
         # -i cannot be empty; drop it and let the agent/default key win.
         argv = ["ssh", *SSH_OPTS, f"{user}@{host}", remote]
     try:
-        proc = runner(argv, capture_output=True, text=True, timeout=90)
+        # encoding is not optional: the inbox and the answers are UTF-8 Arabic
+        # and this script runs on Windows, whose default cp1252 turns every
+        # non-ASCII byte into a UnicodeDecodeError inside subprocess's reader
+        # thread — the reader dies, stdout comes back None, and the owner's
+        # notes look like an SSH failure instead of what he actually sent.
+        proc = runner(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=90,
+        )
     except FileNotFoundError:
         print("ssh is not available on this machine", file=sys.stderr)
         return 2
@@ -122,6 +134,14 @@ def run(args: argparse.Namespace, runner=subprocess.run) -> int:
         return 2
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
+    # The inbox text is Arabic; a cp1252 console cannot encode it. Force UTF-8
+    # with replacement on the streams (the repo-wide entrypoint convention) so
+    # the owner's notes print instead of dying on the way out.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     if out:
         print(out)
     if err:

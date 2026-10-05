@@ -2,10 +2,14 @@
 
 Two transports:
 
-* **SSH** for anything that changes machine state (shutdown / reboot / sleep).
-  The command is built per-OS and the subprocess is injectable for tests.
+* **The PC control agent** (plain HTTP with a shared token, ``jarvis.agent``)
+  for machines that advertise ``agent_port`` — the PC, where sshd was never
+  set up. The command is still built ONLY from the fixed table below; the
+  agent just carries it, so the trust boundary does not move.
+* **SSH** for anything else (fallback, and machines like the Mac). The command
+  is built per-OS and the subprocess is injectable for tests.
 * **Plain TCP/HTTP probes** for status, so ``/status`` still answers on a
-  machine where SSH is not set up yet.
+  machine where neither agent nor SSH is set up yet.
 
 Every remote action is deliberately narrow: the remote command is chosen from a
 fixed table keyed by OS, never built from user text. A Telegram message can
@@ -21,6 +25,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from . import agent
 from .machines import Machine
 
 SSH_TIMEOUT = 20
@@ -109,14 +114,32 @@ def power_action(
     action: str,
     runner: Callable[[list[str], int], tuple[int, str]] | None = None,
 ) -> ActionResult:
-    """Shut down / reboot / sleep a machine. Refuses unknown OS or action."""
+    """Shut down / reboot / sleep a machine. Refuses unknown OS or action.
+
+    Agent machines (``agent_port`` set) go over the token-gated HTTP agent;
+    if the agent is unreachable the SSH path is tried before giving up, so a
+    machine that one day gains sshd keeps working with zero code change.
+    """
     action = action.lower().strip()
     if action not in ACTIONS:
         return ActionResult(False, f"unknown action '{action}'")
     table = POWER_COMMANDS.get(machine.os)
     if table is None:
         return ActionResult(False, f"no power commands known for os '{machine.os}'")
-    return ssh_exec(machine, table[action], runner=runner)
+    if agent.has_agent(machine):
+        ok, data = agent.power(machine, action)
+        if ok:
+            return ActionResult(True, str(data.get("detail") or "done"))
+        err = str(data.get("error") or "agent unreachable")
+        # Fall through to SSH; if that is not configured either, its honest
+        # failure (no user / connection refused) is the reply.
+    else:
+        err = ""
+    result = ssh_exec(machine, table[action], runner=runner)
+    if result.ok:
+        return result
+    detail = f"{result.detail}" + (f" (agent: {err})" if err else "")
+    return ActionResult(False, detail[:400], result.code)
 
 
 def tcp_open(host: str, port: int, timeout: float = 1.5) -> bool:

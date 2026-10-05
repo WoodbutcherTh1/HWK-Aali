@@ -13,6 +13,11 @@ Each entry may carry::
 
 ``mac`` may be written with ``-`` or ``:`` separators; it is normalised to
 upper-case colon form so the magic-packet builder never has to guess.
+
+``agent_port`` (optional) points at the machine's control agent — the small
+token-gated HTTP service that gives Jarvis real resources/logs/power on a
+Windows PC where SSH was never set up (see ``pc_agent.py`` and ``jarvis.agent``).
+Machines without one keep the SSH paths.
 """
 
 from __future__ import annotations
@@ -45,6 +50,7 @@ class Machine:
     user: str | None
     os: str
     api_port: int | None = None
+    agent_port: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +60,7 @@ class Machine:
             "user": self.user,
             "os": self.os,
             "api_port": self.api_port,
+            "agent_port": self.agent_port,
         }
 
 
@@ -69,6 +76,7 @@ def _machine(key: str, raw: Any) -> Machine:
         raise MachineError(f"machine '{key}' has no ip")
     mac = normalize_mac(raw.get("mac"))
     port = raw.get("api_port")
+    agent_port = raw.get("agent_port")
     return Machine(
         key=key,
         name=str(raw.get("name") or key.upper()),
@@ -77,6 +85,7 @@ def _machine(key: str, raw: Any) -> Machine:
         user=(str(raw["user"]).strip() if raw.get("user") else None),
         os=str(raw.get("os") or "unknown").lower(),
         api_port=int(port) if port else None,
+        agent_port=int(agent_port) if agent_port else None,
     )
 
 

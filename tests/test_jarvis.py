@@ -1733,3 +1733,159 @@ def test_the_poller_delivers_when_something_is_waiting(cfg_dir):
     stop.set()
     jarvis_main.answer_poller(q, 0.01, stop)
     assert q.voice is None or q.voice is False, "the poller speaks only when told to"
+
+
+# ============================================================ PC control agent
+# The capabilities the router advertises — resources / logs / power — are real
+# on the PC only through its control agent (pc_agent.py on :5083). These tests
+# run the REAL agent in-process on an ephemeral port and drive Jarvis against
+# it, so both sides of the LAN call are exercised with no network.
+
+import pc_agent  # noqa: E402  (pythonpath includes scripts/)
+from jarvis import agent as pc_agent_client  # noqa: E402
+
+
+@pytest.fixture
+def machines_with_agent(machines_file, tmp_path):
+    data = json.loads(machines_file.read_text(encoding="utf-8"))
+    data["pc"]["agent_port"] = 5083  # real value in production; tests rebind below
+    p = tmp_path / "machines_agent.json"
+    p.write_text(json.dumps(data), encoding="utf-8")
+    return load_machines(p)
+
+
+@pytest.fixture
+def agent_server(monkeypatch, tmp_path):
+    """The REAL pc_agent on an ephemeral port, its state pointed into tmp."""
+    monkeypatch.setattr(pc_agent, "TOKEN", "agent-token-test")
+    monkeypatch.setattr(pc_agent, "LOG_ROOTS", (tmp_path / "logs",))
+    monkeypatch.setattr(pc_agent, "AUDIT_LOG", tmp_path / "audit.log")
+    (tmp_path / "logs").mkdir()
+    httpd = pc_agent.make_server("127.0.0.1", 0)
+    port = httpd.server_address[1]
+    th = threading.Thread(target=httpd.serve_forever, daemon=True)
+    th.start()
+    # the Pi side reads its token from this file (config-dir convention)
+    tok = tmp_path / "pc_agent_token.txt"
+    tok.write_text("agent-token-test\n", encoding="utf-8")
+    monkeypatch.setattr(pc_agent_client, "TOKEN_FILE", tok)
+    yield port, tmp_path
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def _with_agent_port(machines, port):
+    """Rebind the pc machine to the test server's ephemeral port."""
+    rebuilt = dict(machines)
+    pc = machines["pc"]
+    rebuilt["pc"] = Machine(
+        key=pc.key, name=pc.name, ip="127.0.0.1", mac=pc.mac, user=pc.user,
+        os=pc.os, api_port=pc.api_port, agent_port=port,
+    )
+    return rebuilt
+
+
+def test_machine_parses_agent_port(machines_with_agent):
+    assert machines_with_agent["pc"].agent_port == 5083
+    assert machines_with_agent["mac"].agent_port is None
+
+
+def test_disk_numbers_come_from_the_agent(machines_with_agent, agent_server):
+    port, _ = agent_server
+    tg = _QuietTelegram()
+    j = Jarvis(GroqConfig(api_key="k"), tg, _with_agent_port(machines_with_agent, port))
+    j.cmd_sysinfo(OWNER, "disk")
+    text = tg.sent[-1]
+    assert "القرص" in text and "متبقٍ" in text
+    assert "C:" in text
+
+
+def test_agent_down_is_an_honest_refusal(machines_with_agent, tmp_path, monkeypatch):
+    """A dead agent must name itself, not fall back to fake numbers."""
+    rebuilt = _with_agent_port(machines_with_agent, 1)  # nothing listens on :1
+    tg = _QuietTelegram()
+    j = Jarvis(GroqConfig(api_key="k"), tg, rebuilt)
+    tok = tmp_path / "pc_agent_token.txt"
+    tok.write_text("agent-token-test\n", encoding="utf-8")
+    monkeypatch.setattr(pc_agent_client, "TOKEN_FILE", tok)
+    j.cmd_sysinfo(OWNER, "ram")
+    text = tg.sent[-1]
+    assert "❌" in text
+    assert "pc_agent.bat" in text, "the owner must be told what to start"
+
+
+def test_logs_flow_through_the_agent(machines_with_agent, agent_server):
+    port, tmp = agent_server
+    (tmp / "logs" / "aali_server.log").write_text(
+        "2026-10-05 boot ok\nwatchdog alive\n", encoding="utf-8"
+    )
+    tg = _QuietTelegram()
+    j = Jarvis(GroqConfig(api_key="k"), tg, _with_agent_port(machines_with_agent, port))
+    j.cmd_logs(OWNER, "pc aali_server.log")
+    text = tg.sent[-1]
+    assert "aali_server.log" in text and "watchdog alive" in text
+
+
+def test_logs_unknown_name_lists_the_whitelist(machines_with_agent, agent_server):
+    port, tmp = agent_server
+    (tmp / "logs" / "real.log").write_text("x\n", encoding="utf-8")
+    tg = _QuietTelegram()
+    j = Jarvis(GroqConfig(api_key="k"), tg, _with_agent_port(machines_with_agent, port))
+    j.cmd_logs(OWNER, "pc nope.log")
+    assert "real.log" in tg.sent[-1]
+
+
+def test_power_goes_through_the_agent(machines_with_agent, agent_server, monkeypatch):
+    """An agent machine runs the FIXED table command via the agent; the PC
+    side's own allow-list is the second copy of that guarantee."""
+    port, _ = agent_server
+    seen = {}
+    monkeypatch.setattr(
+        pc_agent, "_run", lambda argv, t: (seen.update(argv=argv) or (0, ""))
+    )
+    pc = _with_agent_port(machines_with_agent, port)["pc"]
+    result = power.power_action(pc, "shutdown")
+    assert result.ok
+    assert seen["argv"][0] == "shutdown", "only the table's command may run"
+
+
+def test_power_falls_back_to_ssh_when_the_agent_fails(machines_with_agent, monkeypatch):
+    """Agent down -> SSH is tried before giving up, and the failure names both."""
+    calls = []
+    monkeypatch.setattr(pc_agent_client, "power", lambda m, a: (False, {"ok": False, "error": "URLError"}))
+    machines = dict(machines_with_agent)
+    machines["pc"] = Machine(
+        key="pc", name="PC", ip="1.2.3.4", mac=None, user="u",
+        os="windows", api_port=None, agent_port=5083,
+    )
+    result = power.power_action(machines["pc"], "reboot", runner=lambda a, t: (calls.append(a) or (1, "no route")))
+    assert not result.ok
+    assert calls, "the ssh fallback must actually be attempted"
+    assert "agent: URLError" in result.detail
+
+
+def test_sysinfo_without_an_agent_still_uses_ssh(machines, monkeypatch):
+    """Regression: the old guard refused unless a runner was injected; the ssh
+    path must run with or without one, and a real failure is honest."""
+    tg = _QuietTelegram()
+    j = Jarvis(GroqConfig(api_key="k"), tg, machines)  # runner=None, like production
+    j.cmd_sysinfo(OWNER, "disk")
+    assert tg.sent, "a reply is sent either way"
+    assert "📊" in tg.sent[-1] or "❌" in tg.sent[-1]
+
+
+def test_freebuff_inbox_reader_pins_utf8():
+    """Source tripwire: the PC-side inbox reader runs on Windows, whose default
+    cp1252 turned every Arabic byte into a UnicodeDecodeError inside the
+    subprocess reader thread — the owner's notes looked like an SSH failure.
+    The subprocess.run call must pin encoding='utf-8' forever."""
+    import re
+
+    src = (Path(__file__).resolve().parent.parent / "scripts" / "freebuff_inbox.py").read_text(
+        encoding="utf-8"
+    )
+    m = re.search(r"runner\(\s*argv,\s*(.*?)\)", src, re.S)
+    assert m, "the subprocess.run call in freebuff_inbox.run() changed shape"
+    assert 'encoding="utf-8"' in m.group(1), (
+        "freebuff_inbox must decode SSH output as UTF-8, not the Windows codepage"
+    )

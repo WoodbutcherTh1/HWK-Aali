@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from . import brain, groq, handoff, intent, power, tts, wol
+from . import agent, brain, groq, handoff, intent, power, tts, wol
 from .config import GroqConfig, config_dir, load_aali_key
 from .log import log_event, text_fingerprint
 from .machines import Machine, resolve
@@ -128,7 +128,7 @@ HELP_AR = """🛰️ **جارفيس** — أوامرك
 
 **الحالة**
 • `/status` أو `/status all` — حالة كل الأجهزة
-• `/disk` `/ram` `/gpu` — موارد الجهاز (الراسبيري)
+• `/disk` `/ram` `/gpu` — موارد أي جهاز (قرص/ذاكرة/كارت)
 • `/tasks` — المهام الجارية
 
 **الطاقة** (كلها تحتاج تأكيداً)
@@ -164,7 +164,7 @@ HELP_EN = """🛰️ **Jarvis** — commands
 /wake pc|mac|all
 /shutdown|reboot|sleep <machine>  (asks for confirmation)
 /aali status|restart
-/logs <machine> [file] · /update all · /help
+/logs <machine> [file] · /help
 /freebuff <message>  —  hand the rest of the message to Freebuff
 /ask <question>      —  ask the Aali brain on the PC and get its answer
 /freebuffread        —  deliver whatever Freebuff wrote back
@@ -719,13 +719,26 @@ class Jarvis:
             self.speak(chat_id, "❓ أي جهاز؟ (`pc` أو `mac`)", voice)
             return
         filename = parts[1] if len(parts) > 1 else "aali_server.log"
-        if "/" in filename or filename.startswith("."):
+        if "/" in filename or "\\" in filename or filename.startswith("."):
             self.speak(chat_id, "❌ اسم ملف غير صالح.", voice)
+            return
+        if agent.has_agent(m):
+            # The agent resolves the bare name against its own whitelist, so a
+            # traversal attempt is dead by construction on the PC side too.
+            ok, data = agent.logs(m, filename)
+            log_event("logs", machine=m.key, ok=ok, via="agent")
+            if not ok:
+                known = data.get("known") or []
+                hint = f"\nسجلات معروفة: {', '.join(f'`{k}`' for k in known[:8])}" if known else ""
+                self.speak(chat_id, f"❌ {m.name}: {data.get('error', 'فشل')}{hint}", voice)
+                return
+            body = "\n".join(str(ln) for ln in (data.get("lines") or [])[-40:])
+            self.speak(chat_id, f"📄 آخر سطور `{filename}`:\n```\n{body[:1200]}\n```")
             return
         result = power.ssh_exec(
             m, f"tail -n 20 ~/{shlex.quote(filename)}", runner=self.runner
         )
-        log_event("logs", machine=m.key, ok=result.ok)
+        log_event("logs", machine=m.key, ok=result.ok, via="ssh")
         if not result.ok:
             self.speak(chat_id, f"❌ {m.name}: {result.detail[:120]}", voice)
             return
@@ -734,28 +747,88 @@ class Jarvis:
     def cmd_sysinfo(
         self, chat_id: int, what: str, voice: bool = False, machine: str | None = None
     ) -> None:
-        runner = self.runner
-        if runner is None:
-            self.speak(chat_id, "❌ المعلومة غير متاحة بدون SSH.", voice)
-            return
-        table = {
-            "disk": "df -h / | tail -1",
-            "ram": "free -h | head -2",
-            "gpu": "nvidia-smi --query-gpu=name,utilization.gpu,memory.used --format=csv,noheader",
-        }
+        """Disk / RAM / GPU numbers for a machine.
+
+        Two transports: the token-gated control agent (``agent_port`` set —
+        the PC, where SSH never existed) or SSH for machines that have it.
+        The agent carries only validated enums; the numbers it returns are
+        rendered here in Arabic.
+        """
         key = (what or "").strip().lower()
-        if key not in table:
-            self.speak(
-                chat_id, "❓ أي مورد؟ (`disk` أو `ram` أو `gpu`)", voice
-            )
+        if key not in ("disk", "ram", "gpu"):
+            self.speak(chat_id, "❓ أي مورد؟ (`disk` أو `ram` أو `gpu`)", voice)
             return
         m = self._machine_or_none(machine or "pc")
         if m is None:
             self.speak(chat_id, "❓ ما اسم الجهاز؟ (`pc` أو `mac`)", voice)
             return
-        result = power.ssh_exec(m, table[what], runner=runner)
-        log_event(f"sys_{what}", machine=m.key, ok=result.ok)
-        self.speak(chat_id, f"📊 {what}:\n```\n{result.detail[:600]}\n```" if result.ok else "❌ فشل")
+        if agent.has_agent(m):
+            ok, data = agent.resources(m, key)
+            log_event(f"sys_{key}", machine=m.key, ok=ok, via="agent")
+            if not ok:
+                err = str(data.get("error") or "غير متاح")
+                hint = (
+                    "\n💡 وكيل التحكم على الحاسوب لا يستجيب. "
+                    "شغّل `scripts\\pc_agent.bat` هناك أو اسأل فريفب أن يشغّله."
+                    if err not in ("HTTP 401", "no agent token configured")
+                    else "\n💡 مفتاح الوكيل مفقود: ضعه في `pc_agent_token.txt`."
+                )
+                self.speak(chat_id, f"❌ {m.name}: {err}{hint}", voice)
+                return
+            self.speak(chat_id, self._render_resources(m.name, key, data), voice)
+            return
+        # SSH fallback (Linux command table) for machines with an agent-less
+        # setup. The command comes from a fixed table, never from user text.
+        table = {
+            "disk": "df -h / | tail -1",
+            "ram": "free -h | head -2",
+            "gpu": "nvidia-smi --query-gpu=name,utilization.gpu,memory.used --format=csv,noheader",
+        }
+        result = power.ssh_exec(m, table[key], runner=self.runner)
+        log_event(f"sys_{key}", machine=m.key, ok=result.ok, via="ssh")
+        self.speak(
+            chat_id,
+            f"📊 {what}:\n```\n{result.detail[:600]}\n```" if result.ok else f"❌ فشل: {result.detail[:200]}",
+            voice,
+        )
+
+    @staticmethod
+    def _render_resources(name: str, what: str, data: dict[str, Any]) -> str:
+        """Arabic-first rendering of one agent resources reply."""
+        head = f"📊 **{name}**"
+        if what == "disk":
+            disk = data.get("disk") or {}
+            drives = disk.get("drives") or {}
+            if not drives:
+                return head + "\n⚠️ لا توجد أقراص مقروءة."
+            lines = [head]
+            for letter, info in sorted(drives.items()):
+                lines.append(
+                    f"• القرص {letter}: متبقٍ **{info.get('free_gb')} GB** "
+                    f"من {info.get('total_gb')} GB ({info.get('free_pct')}%)"
+                )
+            return "\n".join(lines)
+        if what == "ram":
+            ram = data.get("ram") or {}
+            if not ram.get("ok"):
+                return head + "\n⚠️ تعذر قراءة الذاكرة."
+            return (
+                f"{head}\n• الذاكرة: **{ram.get('avail_gb')} GB** متاحة "
+                f"من {ram.get('total_gb')} GB (الحمل {ram.get('load_pct')}%)"
+            )
+        gpu = data.get("gpu") or {}
+        gpus = gpu.get("gpus") or []
+        if not gpu.get("ok") or not gpus:
+            return head + "\n⚠️ لا يوجد كارت رسومات مقروء (nvidia-smi)."
+        lines = [head]
+        for g in gpus:
+            temp = g.get("temp_c")
+            lines.append(
+                f"• {g.get('name')}: استعمال **{g.get('util_pct')}%**، "
+                f"الذاكرة {g.get('mem_used_gb')}/{g.get('mem_total_gb')} GB"
+                + (f"، {temp}°C" if temp is not None else "")
+            )
+        return "\n".join(lines)
 
     def cmd_task(self, chat_id: int, args: str, voice: bool = False) -> None:
         """Record a task so it is not forgotten -- into the same inbox.
