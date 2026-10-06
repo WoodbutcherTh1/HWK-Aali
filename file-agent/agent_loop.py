@@ -529,6 +529,186 @@ _IDENTITY_FAST_PATTERNS = (
 _IDENTITY_FAST_RES = tuple(re.compile(p) for p in _IDENTITY_FAST_PATTERNS)
 
 
+# --- deterministic MACHINE FACTS -------------------------------------------
+# 2026-10-06 (owner: "as a user he did nothing" / a live disk question).
+# Measured on this box: the served 1.5B answered "free disk space" three times
+# in one session with 10 GB, 1.2 GB and 2 GB, while the truth was 57 GB, and
+# never emitted a single tool_requested. A machine fact answered from model
+# memory is a guess wearing a number's clothes, so these questions are
+# answered from the OS instead - the same reasoning as _identity_fast.
+# Arabic literals are \u escapes on purpose: the file transport has corrupted
+# hand-typed Arabic more than once (see AGENTS.md).
+_DISK_FACT_RES = tuple(re.compile(p, re.I) for p in (
+    r"\b(?:how much|whats|what's|show)\s+(?:free\s+|remaining\s+)?"
+    r"(?:disk\s+space|storage\s+space|space\s+(?:on|left|free|remaining)|"
+    r"free\s+space|disk|storage)\b",
+    r"\b(?:free|remaining|available)\s+(?:disk\s+space|space|storage)\b",
+    r"\bspace\s+(?:is\s+)?(?:on|left|free|remaining)\b",
+    r"\bspace\s+(?:on|left\s+on|remaining\s+on)\s+(?:the\s+)?[cdx]:?\\",
+    r"\b[cdx]:\\?\s*(?:drive|disk|volume)\b",
+    r"\bhow\s+(?:full|used)\s+is\s+(?:the\s+)?[cdx]\b",
+    # Arabic
+    r"\u0645\u0633\u0627\u062d\u0629",  # مساحة  (space)
+    r"\u0627\u0644\u0642\u0631\u0635|\u0642\u0631\u0635",  # القرص / قرص
+    r"\u0627\u0644\u0647\u0627\u0631\u062f|\u0627\u0644\u062a\u062e\u0632\u064a\u0646",  # الهارد / التخزين
+))
+_RAM_FACT_RES = tuple(re.compile(p, re.I) for p in (
+    r"\bram\b", r"\b(?:system|physical|total)\s+memory\b",
+    r"\bhow much memory\b", r"\bmemory\s+(?:usage|used|left|free|available)\b",
+    # Arabic: الرام, الذاكرة الفيزيائية/النظام, ذاكرة الجهاز
+    r"\u0627\u0644\u0631\u0627\u0645|\u0631\u0627\u0645",
+    r"\u0627\u0644\u0630\u0627\u0643\u0631\u0629\s+(?:\u0627\u0644\u0641\u064a\u0632\u064a\u0627\u0626\u064a\u0629|"
+    r"\u0627\u0644\u0646\u0638\u0627\u0645|\u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645\u0629)",
+    r"\u0630\u0627\u0643\u0631\u0629\s+(?:the\s+)?\u0627\u0644\u062c\u0647\u0627\u0632",
+))
+_GPU_FACT_RES = tuple(re.compile(p, re.I) for p in (
+    r"\bgpu\b", r"\bgraphics?\s+card\b", r"\bvideo\s+card\b", r"\bnvidia\b",
+    r"\bhow much (?:vram|video memory)\b",
+    # Arabic: كرت الشاشة, كارت الشاشة, معالج الرسوميات
+    r"\u0643\u0631\u062a\s+\u0627\u0644\u0634\u0627\u0634\u0629|"
+    r"\u0643\u0627\u0631\u062a\s+\u0627\u0644\u0634\u0627\u0634\u0629|"
+    r"\u0645\u0639\u0627\u0644\u062c\s+\u0627\u0644\u0631\u0633\u0648\u0645\u064a\u0627\u062a",
+))
+# "save this to your memory" is Aali's memory tool, never a RAM question.
+_MEMORY_TOOL_RES = tuple(re.compile(p, re.I) for p in (
+    r"\b(?:save|remember|recall|store|forget)\b.{0,40}\bmemor",
+    r"\bmemor(?:y|ies)\s+(?:tool|note|entry)",
+    r"\u0627\u062d\u0641\u0638|\u062a\u0630\u0643\u0631|\u0627\u0633\u062a\u0639\u0631\u0634",
+))
+
+
+def _machine_facts(message: str) -> dict[str, Any] | None:
+    """Real numbers for a machine-facts question, or None.
+
+    Returns {"group": "disk"|"ram"|"gpu", "facts": {drive: (free,total)}}.
+    Every value is read from the OS here; nothing is generated.
+    """
+    text = message.strip()
+    if not text:
+        return None
+    if any(p.search(text) for p in _MEMORY_TOOL_RES):
+        return None
+    groups = []
+    if any(p.search(text) for p in _DISK_FACT_RES):
+        groups.append("disk")
+    if any(p.search(text) for p in _RAM_FACT_RES):
+        groups.append("ram")
+    if any(p.search(text) for p in _GPU_FACT_RES):
+        groups.append("gpu")
+    # Ambiguous ("how much memory do you have") is not a machine fact.
+    if len(groups) != 1:
+        return None
+    return {"group": groups[0], "facts": _read_machine_facts(groups[0], text)}
+
+
+def _read_machine_facts(group: str, text: str) -> dict[str, Any]:
+    import shutil
+    out: dict[str, Any] = {}
+    if group == "disk":
+        drives = ["C", "D", "X"]
+        asked = [d for d in drives if re.search(rf"\b{d}\s*:?\\?\b", text, re.I)]
+        for drive in (asked or drives):
+            try:
+                usage = shutil.disk_usage(f"{drive}:/")
+            except OSError as exc:
+                out[drive] = {"error": type(exc).__name__}
+                continue
+            out[drive] = {"free_gb": round(usage.free / 2 ** 30, 1),
+                          "total_gb": round(usage.total / 2 ** 30, 1),
+                          "used_pct": round(100.0 * usage.used / usage.total, 1)}
+    elif group == "ram":
+        try:
+            import ctypes
+
+            class _MemStatus(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            status = _MemStatus()
+            status.dwLength = ctypes.sizeof(_MemStatus)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+            out["ram"] = {"total_gb": round(status.ullTotalPhys / 2 ** 30, 1),
+                          "available_gb": round(status.ullAvailPhys / 2 ** 30, 1),
+                          "used_pct": int(status.dwMemoryLoad)}
+        except Exception as exc:  # noqa: BLE001 - honest failure, never a guess
+            out["ram"] = {"error": type(exc).__name__}
+    else:
+        try:
+            import subprocess
+
+            proc = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,memory.used,memory.total,"
+                 "utilization.gpu,temperature.gpu", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=20)
+            if proc.returncode == 0 and proc.stdout.strip():
+                parts = [p.strip() for p in proc.stdout.strip().splitlines()[0].split(",")]
+                out["gpu"] = {"name": parts[0], "used_mib": parts[1], "total_mib": parts[2],
+                              "util_pct": parts[3], "temp_c": parts[4]}
+            else:
+                out["gpu"] = {"error": "nvidia-smi returned nothing"}
+        except Exception as exc:  # noqa: BLE001
+            out["gpu"] = {"error": type(exc).__name__}
+    return out
+
+
+def _machine_facts_fast(message: str) -> str | None:
+    """Deterministic machine-facts answer (EN/AR) or None.
+
+    The numbers come from the OS, so the answer is right even when the model
+    that answers everything else is a 1.5B that invents them.
+    """
+    found = _machine_facts(message)
+    if found is None:
+        return None
+    arabic = any("\u0600" <= ch <= "\u06FF" for ch in message)
+    facts, group = found["facts"], found["group"]
+    lines: list[str] = []
+    if group == "disk":
+        lines.append("\u0627\u0644\u0623\u0631\u0630\u0627\u0645 \u0627\u0644\u0641\u0639\u0644\u064a\u0629 \u0645\u0642\u0631\u0648\u0621\u0629 \u0645\u0646 \u0627\u0644\u0646\u0638\u0627\u0645:"
+                     if arabic else "Real free space read from the OS:")
+        for drive, info in facts.items():
+            if "error" in info:
+                lines.append(f"{drive}: \u0644\u0645 \u0623\u0633\u062a\u0637\u0639 \u0627\u0644\u0642\u0631\u0627\u0621"
+                             if arabic else f"{drive}: could not be read")
+                continue
+            if arabic:
+                lines.append(f"\u2022 {drive}: \u0641\u0627\u0631\u063a {info['free_gb']} \u062c\u064a\u0628\u0627"
+                             f" \u0645\u0646 {info['total_gb']} \u062c\u064a\u0628\u0627"
+                             f" ({info['used_pct']}% \u0645\u0633\u062a\u062e\u062f\u0645)")
+            else:
+                lines.append(f"- {drive}: {info['free_gb']} GB free of {info['total_gb']} GB"
+                             f" ({info['used_pct']}% used)")
+    elif group == "ram":
+        info = facts.get("ram", {})
+        if "error" in info:
+            return ("\u0644\u0645 \u0623\u0633\u062a\u0637\u0639 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0630\u0627\u0643\u0631\u0629."
+                    if arabic else "I could not read the memory status.")
+        if arabic:
+            lines.append(f"\u0627\u0644\u0630\u0627\u0643\u0631\u0629: {info['used_pct']}% \u0645\u0633\u062a\u062e\u062f\u0645\u0629"
+                         f" \u0645\u0646 {info['total_gb']} \u062c\u064a\u0628\u0627"
+                         f" ({info['available_gb']} \u062c\u064a\u0628\u0627 \u0645\u062a\u0627\u062d\u0629).")
+        else:
+            lines.append(f"Memory: {info['used_pct']}% used of {info['total_gb']} GB"
+                         f" ({info['available_gb']} GB available).")
+    else:
+        info = facts.get("gpu", {})
+        if "error" in info:
+            return ("\u0644\u0645 \u0623\u0633\u062a\u0637\u0639 \u0645\u0639\u0644\u0648\u0645 \u0627\u0644\u0631\u0633\u0648\u0645\u064a\u0627\u062a."
+                    if arabic else "I could not read the GPU status.")
+        if arabic:
+            lines.append(f"\u0643\u0631\u062a \u0627\u0644\u0634\u0627\u0634\u0629: {info['name']}"
+                         f" - {info['used_mib']}/{info['total_mib']} MiB"
+                         f" (\u0627\u0633\u062a\u062e\u062f\u0627\u0645 {info['util_pct']}%"
+                         f", \u0627\u0644\u062d\u0631\u0627\u0629 {info['temp_c']}\u00b0).")
+        else:
+            lines.append(f"GPU: {info['name']} - {info['used_mib']}/{info['total_mib']} MiB"
+                         f" ({info['util_pct']}% busy, {info['temp_c']} C).")
+    return "\n".join(lines)
+
+
 def _identity_fast(message: str) -> str | None:
     """Deterministic identity answer (EN/AR) or None — shared by every brain
     path so name/origin questions never depend on a small model's mood."""
@@ -560,6 +740,9 @@ def _local_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
     fast = _identity_fast(message)
     if fast is not None:
         return "final", {"content": fast}
+    facts = _machine_facts_fast(message)
+    if facts is not None:
+        return "final", {"content": facts}
     text = message.strip()
     lower = text.lower()
 
@@ -2154,6 +2337,11 @@ def _openai_compat_loop(
     ident = _identity_fast(user_message)
     if ident is not None:
         return ident
+    # Machine facts come from the OS, never from the model's memory: the
+    # 1.5B invented three different free-space answers in one session.
+    facts = _machine_facts_fast(user_message)
+    if facts is not None:
+        return facts
     if headers is None:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     messages: list[dict[str, Any]] = [

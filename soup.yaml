@@ -1,16 +1,15 @@
 # Soup config for HWK-Aali (owner's machine: RTX 3070 8GB)
 # Purpose: local teacher + comparison model for Aali's tool-calling exam.
 #
-# Phase 1 (now): local 1.5B instruct teacher — downloaded to D:/hwk-models
-#   (scripts/soup_pipeline.py serves this exact folder for the baseline exam).
-#   4bit QLoRA at max_length 768 fits the 8GB card WITH nothing else on it.
-#   (1024 was tried on 2026-09-12 and CUDA-OOM'd at batch_size=1 - 768 is
-#   the hard ceiling for this card; build_aali_sft_v2.py budgets every row
-#   against TRAIN_MAX_LENGTH=768 - keep the two in sync.)
-# Phase 2 (after Phase A finishes): optionally raise `base` to a 7B/8B instruct
-#   model for a stronger teacher — profile first; it will NOT fit the 8GB card
-#   next to a running server.
-base: D:/hwk-models/Qwen2.5-1.5B-Instruct
+# 2026-10-06 BASE UPGRADE 1.5B -> 3B (owner directive: "make the brain bigger
+#   and smarter"). Evidence first: the A/B (scripts/brain_ab.py, warm, same
+#   harness) had the RAW 3B LOSING 3/6 to the tuned 1.5B (fabricated a file
+#   listing, mixed English into Arabic) -> raw-bigger is not better, TUNED
+#   bigger is the path. 3B at 4-bit QLoRA trains within the 8GB card with the
+#   GPU free; max_length stays 768 (hard ceiling, in sync with
+#   build_aali_sft_v2.py TRAIN_MAX_LENGTH). NOTE: the 1.5B base must STAY on
+#   disk anyway - checkpoint-3933 (the live brain) loads on top of it.
+base: D:/hwk-models/Qwen2.5-3B-Instruct
 task: sft
 
 data:
