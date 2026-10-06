@@ -102,3 +102,27 @@ piper, faster-whisper).
   launch_detached --log soup_3b -- .venv/Scripts/python.exe
   scripts/soup_pipeline.py. The pipeline's own gates (exam integrity, floors,
   mix hygiene, GPU) all still apply on top.
+
+## EXECUTED (2026-10-06 late night — gates passed, run LAUNCHED)
+- **D: unblocked by moving sd-models (22.2 GB) to X:** with a JUNCTION at
+  D:/hwk-data/sd-models -> X:/hwk-data/sd-models (robocopy /E, 36/36 files,
+  all 8 giant models sha256-MATCH, then the D: original removed). Only
+  consumer is scripts/image_tools.py (runtime path resolution ->
+  junction-transparent). D: went 88.9 GB (19.1%) -> **110.6 GB (23.8%)**
+  — the 20% rule PASSES. X: still holds 263+ GB.
+- Pre-launch by the book: tuned/ -> tuned.checkpoint3933.promoted.bak
+  (128 MB adapter, verified on disk), old verdict ->
+  resft_pipeline_report.3933-archived.md, brain watchdog stopped (verified
+  shim PID), :20129 killed by netstat-verified PID, GPU 822 MiB idle.
+- **soup_3b LAUNCHED detached (log D:/hwk-data/soup_3b.log, PID 19728).**
+  Verified from the log: GPU gate passed, teacher (1.5B) served, baseline
+  exam running. IMPORTANT design note verified in soup_pipeline.py: the
+  baseline stage ALWAYS serves the fixed 1.5B teacher (resolve_teacher_model),
+  while `soup train` + the tuned exam read soup.yaml = the 3B — so this run
+  grades tuned-3B vs teacher-1.5B, exactly the promotion question.
+- Monitor: tail D:/hwk-data/soup_3b.log (or scripts\mission_clock.bat).
+  On PROMOTE the pipeline leaves the tuned-3B serving on :20129 as the live
+  brain; on NO-GO/INCOMPLETE the brain needs re-serving from
+  tuned.checkpoint3933.promoted.bak + the brain watchdog relaunch.
+- Commit: 42db05d (A/B harness, fast path, soup.yaml 3B, probes, findings).
+  Nothing pushed (owner rule).
