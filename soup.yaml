@@ -21,7 +21,13 @@ data:
 training:
   epochs: 3
   lr: 2e-5
-  batch_size: auto
+  # 2026-10-07 fix: was "auto". The auto path runs a live CUDA batch probe,
+  # and on this WDDM box under host-RAM pressure the bs=1 probe failed its
+  # measured-peak budget check (soup #649 gate) - reported as "OOM at
+  # batch_size=1" and killed the whole 3B graduation (soup_3b.log 20:27). An
+  # explicit size SKIPS the probe entirely. 2 = soup profile's own
+  # recommendation for 3B 4-bit at seq 768 on the 8GB card (~5.2 GB total).
+  batch_size: 2
   lora:
     r: 32
     alpha: 16
