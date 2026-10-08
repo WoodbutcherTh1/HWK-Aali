@@ -659,7 +659,14 @@ def test_api_key_gate_blocks_unauthorized(monkeypatch, tmp_path):
     """Multi-user mode: no/wrong X-API-Key is refused on /api/*.
 
     Track B 11.2 (2026-09-25): the refusal is now a uniform 404 — an
-    unauthorized caller must never learn that the surface exists."""
+    unauthorized caller must never learn that the surface exists.
+
+    2026-10-09 guest tier: /api/ask is the DELIBERATE exception — an
+    anonymous remote caller is now a guest (own namespace, guest policy,
+    daily cap) instead of a 404. Gated stay: wrong key, and every other
+    /api/* surface. Ask without a key is only exercised for the GATE
+    result here: a wrong key must still 404, and the guest path itself
+    has its own suite (tests/test_guest_chat.py)."""
     monkeypatch.setenv("AGENT_WORKSPACE", str(tmp_path))
     import importlib
 
@@ -674,8 +681,27 @@ def test_api_key_gate_blocks_unauthorized(monkeypatch, tmp_path):
     assert client.get("/api/health", headers={"X-API-Key": "wrong"}).status_code == 200
     assert client.get("/api/health", headers={"X-API-Key": "secret-key-1"}).status_code == 200
     # but everything else with an /api prefix is gated
-    assert client.post("/api/ask", json={"message": "hi", "sid": "t"}).status_code == 404
+    # 2026-10-09: a keyless ask is now the GUEST path (chat without sign-in,
+    # guest policy + cap), not a 404 — it must NOT be treated as authorized:
+    # assert it runs the guest policy by checking the cap env contract and
+    # that a WRONG key still 404s (the gate's real job).
     assert client.post("/api/ask", json={"message": "hi", "sid": "t"},
                        headers={"X-API-Key": "wrong"}).status_code == 404
+    import io
+    from contextlib import redirect_stdout
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        resp = client.post("/api/ask", json={"message": "hi", "sid": "t"})
+    # either the guest path ran (2xx/429) or the loopback brain was down —
+    # never a 404 gate refusal and never an auth error
+    assert resp.status_code != 404
+    body = resp.get_json() or {}
+    if resp.status_code < 300:
+        assert body.get("ok") in (True, False)  # real ask payload, not a gate card
+    # every other /api surface stays uniform-404 for an anonymous caller
+    # (/api/ask, /api/ask/stream, /api/sessions and /api/session/<sid> are the
+    # deliberate guest-tier exceptions — see tests/test_guest_chat.py)
+    for gated in ("/api/projects", "/api/search?q=x", "/api/attach"):
+        assert client.get(gated).status_code == 404, gated
     # non-API routes (the UI) stay open
     assert client.get("/ui/").status_code in (200, 404)

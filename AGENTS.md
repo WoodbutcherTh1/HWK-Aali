@@ -90,6 +90,58 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **GUEST CHAT TIER — DeepSeek/Gemini-style anonymous chat + optional account
+  (2026-10-09, Buffy — LIVE in code)**: the owner's ask was «we need that like
+  deepseek site or gemini — u can go talk without sign in but u have option to
+  create an account». SERVER (file-agent/app.py): keyless remote callers are
+  now GUESTS on a CLOSED whitelist (`/api/ask`, `/api/ask/stream`,
+  `/api/sessions`, `/api/session/<sid>` any-sid-shape — lookup is
+  namespace-scoped so another guest's sid 404s) instead of uniform-404;
+  everything else stays 404. Per-browser id in an `hwk_guest` cookie (32-hex
+  validated, httponly, samesite=Lax, 90d) → own namespace `g<guest_id>:<sid>`;
+  caps via sliding windows (`AALI_GUEST_ASKS_PER_DAY` default 30 + burst 5/
+  300s) → 429 with the Arabic upsell GUEST_CAP_MESSAGE; remote anonymous
+  callers are FORCED policy=guest + confirmed=False in both ask handlers
+  (agent_loop kwarg is `confirmed`); loopback never capped, owner/master sees
+  all namespaces as before. SECURITY ORDERING: a PRESENTED-BUT-WRONG key is
+  still refused 404 — never silently downgraded to a guest (found by
+  test_api_key_gate's wrong-key assertion after the whitelist landed).
+  WEB (web/src): 429 no longer swallows as «تعذّر الاتصال بالخادم» — askStream
+  reads the 429 body into a typed error (status+serverError), App.tsx renders
+  the Arabic cap message + a «أنشئ حساباً أو سجّل الدخول» CTA button
+  (guestCapped flag on the message → .guest-cta pill → setAuthOpen(true));
+  onSignedIn now ALSO calls refreshRole() so the role store unlocks user
+  surfaces without a reload. Tests: tests/test_guest_chat.py 13 (isolation,
+  caps, policy-force, 404 contract, namespace unit) + updated
+  test_api_key_gate_blocks_unauthorized; suite 1938+ green / 17 skipped
+  (3 standalone-green flakes under GPU-train load: test_hwk gate, machine_
+  facts fast-path, pc_agent oversized-body). NOT DONE / owner decisions
+  pending: live-verify on :5055 + a served-dist screenshot; the owner ALSO
+  asked to "work on Aali Studio for mac/windows/ios" — no Studio work has
+  started this session (the training run owns the GPU; Studio's macOS/iOS
+  builds are OWNER-MACHINE-ONLY per the porting docs — needs his MacBook run
+  or an explicit go to spend PC time on Studio UI/UX).
+
+- **3B graduation RETRY LIVE — root cause was NOT the config (2026-10-08
+  21:12, Buffy — IN PROGRESS)**: the owner's 2026-10-06 3B graduation
+  (soup_3b.log) died "OOM at batch_size=1" — but soup.yaml ALREADY had
+  `quantization: 4bit` and bitsandbytes 0.50.2 IS in the soup-venv; soup's
+  own `profile` predicted ~5.2 GB / fits 8 GB / recommends batch_size 2.
+  REAL CAUSE: `batch_size: auto` runs a live CUDA probe whose WDDM
+  measured-peak gate (soup #649: "no exception" is not "fits" on Windows —
+  it compares peak against free+held at probe time) failed while the host
+  was thrashing (the mid-train smoke probe froze at 'Loading weights 0%'
+  the same night, exit 3) — a fake "OOM" killed the whole train. FIX: one
+  line — explicit `batch_size: 2` in soup.yaml SKIPS the probe entirely
+  (commit 592d796). Relaunch sequence per convention: watchdog killed by
+  its shim PID PAIR (17444+17464, one process), brain serve killed by
+  cmdline-verified PID 3968, pipeline + soup3b_aftercare relaunched
+  detached, aftercare re-armed (it restores checkpoint-3933 on any
+  non-PROMOTE verdict). LIVE-VERIFIED: all gates passed, train ticking
+  128/1968 steps at ~4.1 s/it (ETA ~2h15m), NO OOM, smoke probe 0/6
+  correctly logged telemetry-only. WATCH: D:/hwk-data/soup_3b.log →
+  tuned exam → verdict → aftercare morning state.
+
 - **[Jarvis × PC agent] THE PC IS NOW FULLY CONTROLLABLE FROM TELEGRAM — the
   dead capabilities are real (2026-10-05, Buffy — LIVE)**: the owner's ask was
   «let me able to full control the pc via the telegram jarvis». Root cause of

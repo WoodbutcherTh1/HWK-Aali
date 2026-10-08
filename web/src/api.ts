@@ -406,7 +406,25 @@ export async function askStream(
       }),
       signal: opts?.signal,
     });
-    if (!res.ok || !res.body) throw new Error(`stream HTTP ${res.status}`);
+    if (!res.ok || !res.body) {
+      /* 2026-10-09 guest tier: a 429 carries the Arabic upsell in its body —
+         surface it instead of a generic connection error. */
+      let serverError = "";
+      if (res.status === 429) {
+        try {
+          serverError = String((await res.json()).error || "");
+        } catch {
+          /* body unreadable — fall through to the generic message */
+        }
+      }
+      const err = new Error(serverError || `stream HTTP ${res.status}`) as Error & {
+        status?: number;
+        serverError?: string;
+      };
+      err.status = res.status;
+      err.serverError = serverError;
+      throw err;
+    }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";

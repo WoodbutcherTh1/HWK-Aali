@@ -86,6 +86,7 @@ interface Msg {
   files?: Attachment[]; // attachments the user sent with this message
   ragSources?: RagSource[]; // knowledge-base citations (Wave 2)
   ragNote?: string;         // honest "nothing relevant" note (Wave 2)
+  guestCapped?: boolean;    // 429: free guest asks used up — offer sign-in (2026-10-09)
 }
 
 interface Activity {
@@ -1077,6 +1078,11 @@ export default function App() {
         }
       } catch (err) {
         const aborted = controller.signal.aborted;
+        /* Guest tier (2026-10-09): a 429 means the daily/burst ask cap for
+           anonymous visitors — show the server's Arabic upsell + a sign-in
+           CTA instead of a fake "connection problem". */
+        const errStatus = (err as { status?: number })?.status;
+        const errServerMsg = (err as { serverError?: string })?.serverError;
         setMessages((m) =>
           m.map((x) =>
             x.id === thinkId
@@ -1085,14 +1091,17 @@ export default function App() {
                   thinking: false,
                   text: aborted
                     ? "⏹ أوقفتَ عرض الرد — قد يظل الطلب يعمل في الخلفية وسيظهر في سجل الجلسة."
-                    : sawActivity
-                      ? "انقطع الاتصال أثناء العمل — راجع الجلسة من القائمة الجانبية."
-                      : "تعذّر الاتصال بالخادم — تحقق من ⚙︎ الإعدادات",
+                    : errStatus === 429
+                      ? errServerMsg || "وصلتَ حد الرسائل المجانية لهذا اليوم — أنشئ حساباً للمتابعة دون حدود."
+                      : sawActivity
+                        ? "انقطع الاتصال أثناء العمل — راجع الجلسة من القائمة الجانبية."
+                        : "تعذّر الاتصال بالخادم — تحقق من ⚙︎ الإعدادات",
+                  guestCapped: errStatus === 429,
                 }
               : x
           )
         );
-        if (!aborted) setConnected(false);
+        if (errStatus !== 429 && !aborted) setConnected(false);
       } finally {
         setActivities([]);
         setWaiting(false);
@@ -1852,6 +1861,15 @@ export default function App() {
                       )}
                       {m.thinking ? <ThinkingOrbit /> : <Markdown text={m.text} />}
                       {m.thinking && <div style={{ marginTop: 10 }}>{ActivityPanel}</div>}
+                      {/* Guest tier: after the 429 cap message, offer the account
+                          door right inside the chat (DeepSeek/Gemini pattern). */}
+                      {!m.thinking && m.guestCapped && (
+                        <div className="guest-cta">
+                          <button type="button" onClick={() => setAuthOpen(true)}>
+                            ✦ أنشئ حساباً أو سجّل الدخول للمتابعة
+                          </button>
+                        </div>
+                      )}
                       {/* Wave 2: knowledge-base citations + honest no-hit note */}
                       {!m.thinking && m.role === "assistant" && (m.ragSources?.length || m.ragNote) && (
                         <div className="rag-citations">
@@ -2061,6 +2079,7 @@ export default function App() {
             onClose={() => setAuthOpen(false)}
             onSignedIn={(email, role) => {
               setMe({ email, role: role as "user" | "admin", is_admin: role === "admin" });
+              void refreshRole();
               showToast(role === "admin" ? "أهلاً بعودتك يا صاحب السموّ ✦" : `أهلاً ${email} ✦`);
             }}
           />

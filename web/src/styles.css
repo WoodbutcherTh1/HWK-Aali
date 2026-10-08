@@ -1187,6 +1187,17 @@ button, .chip, .quick-pill, .msg { transition-duration: 0.13s; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* ————— Guest tier (2026-10-09): sign-in CTA under the 429 cap message ————— */
+.guest-cta { margin-top: 10px; }
+.guest-cta button {
+  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  padding: 8px 16px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--acc, #e8b34b) 45%, transparent);
+  color: var(--acc, #e8b34b); background: transparent;
+  transition: background 0.13s ease;
+}
+.guest-cta button:hover { background: color-mix(in srgb, var(--acc, #e8b34b) 12%, transparent); }
+
 /* ————— Wave 3: share + prompt library ————— */
 .share-modal, .prompts-modal { max-width: 640px; width: min(640px, 94vw); }
 .share-body, .prompts-body { padding: 14px 18px 18px; display: grid; gap: 10px; max-height: 70vh; overflow: auto; }

@@ -26,7 +26,7 @@ from pathlib import Path
 
 import agent_log
 from agent_log import new_request_id
-from flask import Flask, Response, make_response, request, send_file, send_from_directory
+from flask import Flask, Response, g, make_response, request, send_file, send_from_directory
 import agent_loop as agent_loop_mod
 from agent_loop import AgentLoopError, agent_loop, compact_history
 from file_agent import search_index
@@ -107,6 +107,34 @@ def _account_session() -> dict | None:
     }
 
 
+def _guest_id() -> str:
+    """Identity of an ANONYMOUS chat visitor (DeepSeek-style guest tier,
+    2026-10-08): a random per-browser id carried in the hwk_guest cookie.
+    NOT a credential — it only scopes which conversations belong to this
+    browser (the same isolation a key_id gives an issued key). The cookie
+    is set by _cors_headers (after_request) when this request minted one."""
+    if hasattr(g, "guest_id"):
+        return str(g.guest_id)
+    gid = request.cookies.get("hwk_guest", "").strip()
+    if not re.fullmatch(r"[0-9a-f]{32}", gid):
+        gid = uuid.uuid4().hex
+        g.guest_id = gid  # after_request turns this into a Set-Cookie
+    return gid
+
+
+def _ns_prefix() -> str:
+    """The session-namespace prefix THIS caller may touch. Mirrors _user_ns
+    so /api/sessions filtering can never drift from the lookup key shape."""
+    if not API_KEY:
+        return ""
+    auth = _auth_state()
+    if auth and not auth["is_admin"]:
+        return f"u{auth['key_id']}:"
+    if auth:  # master key = owner: sees everything (caller filters)
+        return ""
+    return f"g{_guest_id()}:"
+
+
 def _user_ns(sid: str | None) -> str:
     """Session ids are stored PER USER: <ns>:<sid>. Local mode keeps the bare sid.
     Issued keys namespace by their key_id (the plaintext key never touches disk)."""
@@ -115,7 +143,12 @@ def _user_ns(sid: str | None) -> str:
     auth = _auth_state()
     if auth and not auth["is_admin"]:
         return f"u{auth['key_id']}:{sid or uuid.uuid4().hex}"
-    return f"u{_client_key()}:{sid}" if sid else f"u{_client_key()}:{uuid.uuid4().hex}"
+    if auth:
+        return f"u{_client_key()}:{sid}" if sid else f"u{_client_key()}:{uuid.uuid4().hex}"
+    # Anonymous visitor in key mode: the GUEST namespace (per-browser cookie),
+    # never the shared legacy "u:" bucket — one guest must not read another's
+    # conversation even if a sid leaks (each lookup is scoped to this browser).
+    return f"g{_guest_id()}:{sid or uuid.uuid4().hex}"
 
 
 @app.before_request
@@ -141,6 +174,35 @@ def _require_api_key():
         return None  # single-use handoff trade: the ?ht= token IS the credential
     if request.path.startswith("/share/"):
         return None  # Wave 3: shared conversations — the token IS the credential
+    # GUEST CHAT TIER (2026-10-08, DeepSeek-style): an anonymous visitor may
+    # TALK without any account. The surface is a closed whitelist — chat,
+    # list/open/delete THEIR OWN conversations — everything else stays under
+    # the uniform-404 contract below. Guest policy and the rate cap are
+    # enforced inside the ask handlers (the gate cannot see the body).
+    if request.path in {"/api/ask", "/api/ask/stream", "/api/sessions"} \
+            or request.path.startswith("/api/session/"):
+        # NOTE: /api/session/<sid> is reached by ANY sid shape here on
+        # purpose — the route itself looks the session up INSIDE the
+        # caller's namespace, so another guest's sid simply misses (404).
+        sess = _account_session()
+        if sess:
+            if apikeys.over_daily_cap(sess["key_id"]):
+                return make_response({"ok": False, "error": "daily request cap reached for this key"}, 429)
+            apikeys.record_usage(sess["key_id"])
+            return None
+        auth = _auth_state()
+        if auth:
+            if not auth["is_admin"] and apikeys.over_daily_cap(auth["key_id"]):
+                return make_response({"ok": False, "error": "daily request cap reached for this key"}, 429)
+            apikeys.record_usage(auth["key_id"])
+            return None
+        if _client_key():
+            # A credential was PRESENTED but did not authenticate: refuse,
+            # never silently downgrade a broken client to a guest (the
+            # wrong-key contract from Track B 11.2 stays intact).
+            return make_response({"ok": False, "error": "not found"}, 404)
+        _guest_id()  # mint the cookie if this browser has none
+        return None  # guest path — capped + policy-forced inside the handler
     if not request.path.startswith("/api/"):
         return None
     # Account sessions (X-Session-Token) authenticate too: resolve to the
@@ -171,6 +233,11 @@ def _cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Session-Id, X-API-Key"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+    # Guest tier: persist the per-browser id minted during this request.
+    if hasattr(g, "guest_id"):
+        response.set_cookie(
+            "hwk_guest", str(g.guest_id), max_age=90 * 24 * 3600,
+            httponly=True, samesite="Lax", path="/")
     return response
 
 WORKSPACE_ROOT = Path(
@@ -652,6 +719,10 @@ def api_ask():
     message = str(payload.get("message", "")).strip()
     if not message:
         return make_response({"ok": False, "error": "message is required"}, 400)
+    # Guest tier cap (2026-10-08): anonymous remote callers get a bounded
+    # free chat quota; the honest answer names the signup option.
+    if _guest_cap_enforced() and not _guest_ask_ok(_guest_id()):
+        return make_response({"ok": False, "error": GUEST_CAP_MESSAGE}, 429)
     sid = str(payload.get("sid") or request.headers.get("X-Session-Id") or uuid.uuid4().hex)
     mode = str(payload.get("mode", "local"))
     # Confirmation policy from the client: "auto" (default) / "aggressive" /
@@ -690,7 +761,10 @@ def api_ask():
     is_local = (remote_addr in {"127.0.0.1", "::1", "localhost"}
                 and not request.headers.get("X-Forwarded-For"))
     auth = _auth_state()
-    if not is_local and auth and not auth["is_admin"]:
+    if not is_local and (auth is None or not auth["is_admin"]):
+        # 2026-10-08: remote ANONYMOUS visitors (guest tier) are forced into
+        # the same server-enforced guest policy as remote key holders — an
+        # account-less caller gets chat, never commands.
         policy = "guest"
         confirmed = False
 
@@ -855,6 +929,10 @@ def api_ask_stream():
     message = str(payload.get("message", "")).strip()
     if not message:
         return make_response({"ok": False, "error": "message is required"}, 400)
+    # Guest tier cap (2026-10-08): anonymous remote callers get a bounded
+    # free chat quota; the honest answer names the signup option.
+    if _guest_cap_enforced() and not _guest_ask_ok(_guest_id()):
+        return make_response({"ok": False, "error": GUEST_CAP_MESSAGE}, 429)
     sid = str(payload.get("sid") or request.headers.get("X-Session-Id") or uuid.uuid4().hex)
     mode = str(payload.get("mode", "local"))
     policy = str(payload.get("policy", "auto"))
@@ -889,7 +967,10 @@ def api_ask_stream():
     is_local = (remote_addr in {"127.0.0.1", "::1", "localhost"}
                 and not request.headers.get("X-Forwarded-For"))
     auth = _auth_state()
-    if not is_local and auth and not auth["is_admin"]:
+    if not is_local and (auth is None or not auth["is_admin"]):
+        # 2026-10-08: remote ANONYMOUS visitors (guest tier) are forced into
+        # the same server-enforced guest policy as remote key holders — an
+        # account-less caller gets chat, never commands.
         policy = "guest"
         confirmed = False
 
@@ -1088,7 +1169,7 @@ def api_sessions():
     _ensure_sessions_loaded()
     ctx = _resolve_role()
     is_owner = ctx["role"] == "owner"
-    prefix = f"u{_client_key()}:" if (API_KEY and not is_owner) else ""
+    prefix = _ns_prefix() if (API_KEY and ctx["role"] != "owner") else ""
     rows = []
     for key, rec in _sessions.items():
         if API_KEY and not is_owner and not key.startswith(prefix):
@@ -1237,6 +1318,45 @@ def api_session_export(sid: str):
 _SEARCH_RATE: dict[str, list[float]] = {}
 _SEARCH_RATE_MAX = 30  # searches per minute per caller
 _SEARCH_RATE_WINDOW = 60.0
+
+# ————— guest ask cap (2026-10-08): anonymous chat is free but bounded —————
+# Two sliding windows per guest id: a burst cap (protects the GPU from a
+# rapid-fire loop) and a daily cap (protects it from a patient one). Env-
+# tunable; in-memory on purpose (a restart forgives, like the login lockout).
+_GUEST_BURST = {"max": 5, "window": 300.0}          # 5 asks / 5 min
+_GUEST_DAY = {"max": int(os.getenv("AALI_GUEST_ASKS_PER_DAY", "30") or 30),
+              "window": 86400.0}                     # 30 asks / day
+_GUEST_RATE: dict[str, list[float]] = {}
+GUEST_CAP_MESSAGE = (
+    "انتهت حصة الزائر المجانية لليوم 🕊️\n\n"
+    "أنشئ حساباً مجانياً (زر «دخول» أعلى الصفحة) لتتابع محادثاتك وتحصل على "
+    "حصة أكبر — أو عد غداً."
+)
+
+
+def _guest_ask_ok(guest_id: str) -> bool:
+    """Sliding-window ask cap for ONE guest id. Content-free: only the id."""
+    now = time.time()
+    kept = [t for t in _GUEST_RATE.get(guest_id, []) if now - t < _GUEST_DAY["window"]]
+    burst = [t for t in kept if now - t < _GUEST_BURST["window"]]
+    if len(burst) >= _GUEST_BURST["max"] or len(kept) >= _GUEST_DAY["max"]:
+        _GUEST_RATE[guest_id] = kept
+        return False
+    kept.append(now)
+    _GUEST_RATE[guest_id] = kept
+    return True
+
+
+def _guest_cap_enforced() -> bool:
+    """The cap applies to REMOTE anonymous callers only: local mode has no key
+    at all (the owner's machine), and an authenticated caller has its own
+    daily cap. Loopback anonymous in key mode is the owner's own browser."""
+    if not API_KEY:
+        return False
+    remote_addr = request.remote_addr or ""
+    is_local = (remote_addr in {"127.0.0.1", "::1", "localhost"}
+                and not request.headers.get("X-Forwarded-For"))
+    return not is_local and _auth_state() is None
 
 
 def _search_rate_ok(caller: str) -> bool:
