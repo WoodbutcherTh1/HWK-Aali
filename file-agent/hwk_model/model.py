@@ -32,6 +32,64 @@ class ModelConfig:
     rope_base: float = 10000.0
 
 
+# Cross-entropy chunk size (tokens per chunk).
+#
+# 2026-10-27: the output layer, not attention, is the memory wall at long
+# context. A single F.cross_entropy over [tokens x 32000 vocab] materialises
+# fp32 logits plus softmax buffers, which is ~6 GB on its own at 16384 tokens.
+# Measured on the 8 GB RTX 3070 (one real forward+backward, this exact model):
+#   ctx 8192  stock 3.32 GB | chunked 2.72 GB
+#   ctx 16384 stock 6.43 GB | chunked 5.82 GB
+# The stock path left so little headroom that every stage-6 (16k) attempt died
+# on the FIRST backward with `RuntimeError: CUDA driver error: device not ready`
+# - a Windows/WDDM video-memory reset rather than the catchable
+# torch.OutOfMemoryError the training loop retries. Chunking is numerically
+# identical (cross-entropy is a mean over positions) and was verified to give
+# the same loss to four decimals on both paths.
+CE_CHUNK_TOKENS = 2048
+
+
+def _chunked_cross_entropy(
+    logits: Tensor,
+    labels: Tensor,
+    vocab_size: int,
+    ignore_index: int = -100,
+    chunk: int | None = None,
+) -> Tensor:
+    """F.cross_entropy over the flattened batch, computed in token chunks.
+
+    Exactly equal to the single-call mean (sum of per-token losses divided by
+    the number of non-ignored targets), but the transient fp32 softmax buffers
+    are bounded by `chunk x vocab_size` instead of `tokens x vocab_size`.
+    """
+    # Resolved at CALL time (not as a default argument) so the module constant
+    # - and any test or operator that raises it - really governs the chunking.
+    if chunk is None:
+        chunk = CE_CHUNK_TOKENS
+    flat_logits = logits.reshape(-1, vocab_size)
+    flat_labels = labels.reshape(-1)
+    total = flat_labels.numel()
+    if total <= chunk:
+        return F.cross_entropy(flat_logits, flat_labels, ignore_index=ignore_index)
+    counted = int((flat_labels != ignore_index).sum())
+    if counted == 0:
+        # Every target masked: matches F.cross_entropy's mean-of-nothing (nan)
+        # rather than inventing a zero to train on.
+        return F.cross_entropy(flat_logits, flat_labels, ignore_index=ignore_index)
+    accumulated: Tensor | None = None
+    for start in range(0, total, chunk):
+        stop = min(start + chunk, total)
+        piece = F.cross_entropy(
+            flat_logits[start:stop],
+            flat_labels[start:stop],
+            ignore_index=ignore_index,
+            reduction="sum",
+        )
+        accumulated = piece if accumulated is None else accumulated + piece
+    assert accumulated is not None  # total > chunk >= 1 guarantees one pass
+    return accumulated / counted
+
+
 def _rotary_half(x: Tensor) -> Tensor:
     """Rotate the two halves of the last dimension (RoPE trick)."""
     x1, x2 = x.chunk(2, dim=-1)
@@ -150,11 +208,7 @@ class TinyCausalLM(nn.Module):
         # The dataset provides the shift (input tokens [0..T-1], targets
         # [1..T]), so loss is computed over full logits/labels of the same
         # length.
-        loss = F.cross_entropy(
-            logits.contiguous().view(-1, self.config.vocab_size),
-            labels.contiguous().view(-1),
-            ignore_index=-100,
-        )
+        loss = _chunked_cross_entropy(logits, labels, self.config.vocab_size)
         return logits, loss
 
 

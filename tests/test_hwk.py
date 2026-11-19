@@ -44,6 +44,78 @@ def test_model_init_loss_matches_random_guessing():
     assert abs(float(loss) - math.log(259)) < 0.15
 
 
+# ---------------------------------------------------------------------------
+# Chunked cross-entropy (2026-10-27: the output layer is the memory wall at
+# long context - see CE_CHUNK_TOKENS in hwk_model/model.py). The whole point is
+# that chunking changes MEMORY, never the number, so equivalence is the test.
+# ---------------------------------------------------------------------------
+
+def test_chunked_cross_entropy_matches_single_call():
+    from torch.nn import functional as F
+
+    from hwk_model.model import _chunked_cross_entropy
+
+    torch.manual_seed(3)
+    logits = torch.randn(2, 40, 259)
+    labels = torch.randint(0, 259, (2, 40))
+    labels[:, :15] = -100            # masked prompt half, like an SFT row
+    reference = F.cross_entropy(logits.reshape(-1, 259), labels.reshape(-1),
+                                ignore_index=-100)
+    for chunk in (1, 7, 16, 40):     # includes chunk > total and chunk == total
+        got = _chunked_cross_entropy(logits, labels, 259, chunk=chunk)
+        assert torch.allclose(got, reference, atol=1e-6), chunk
+
+
+def test_chunked_cross_entropy_all_masked_stays_nan():
+    # a fully masked row must not silently become a 0.0 loss and train on noise
+    from hwk_model.model import _chunked_cross_entropy
+
+    logits = torch.randn(1, 32, 259)
+    labels = torch.full((1, 32), -100)
+    loss = _chunked_cross_entropy(logits, labels, 259, chunk=8)
+    assert math.isnan(float(loss))
+
+
+def test_chunked_cross_entropy_gradients_flow():
+    from hwk_model.model import _chunked_cross_entropy
+
+    torch.manual_seed(4)
+    logits = torch.randn(1, 24, 259, requires_grad=True)
+    labels = torch.randint(0, 259, (1, 24))
+    loss = _chunked_cross_entropy(logits, labels, 259, chunk=5)
+    loss.backward()
+    assert logits.grad is not None
+    assert torch.isfinite(logits.grad).all()
+    assert float(logits.grad.abs().sum()) > 0
+
+
+def test_model_forward_loss_uses_chunked_path_and_is_unchanged():
+    # the model itself must go through the chunked helper: pin the small-config
+    # loss against a straight single-call cross-entropy on the same weights
+    from torch.nn import functional as F
+
+    torch.manual_seed(5)
+    model = _tiny_model()
+    inputs = torch.randint(0, 259, (2, 30))
+    targets = torch.randint(0, 259, (2, 30))
+    targets[:, :10] = -100
+    logits, loss = model(inputs, targets)
+    reference = F.cross_entropy(logits.reshape(-1, 259), targets.reshape(-1),
+                                ignore_index=-100)
+    assert torch.allclose(loss, reference, atol=1e-6)
+
+    # and with a chunk small enough to force multiple chunks on this config
+    import hwk_model.model as model_module
+
+    original = model_module.CE_CHUNK_TOKENS
+    try:
+        model_module.CE_CHUNK_TOKENS = 8
+        _, chunked_loss = model(inputs, targets)
+    finally:
+        model_module.CE_CHUNK_TOKENS = original
+    assert torch.allclose(chunked_loss, reference, atol=1e-6)
+
+
 def test_model_learns_from_synthetic_data():
     torch.manual_seed(1)
     model = _tiny_model()
@@ -573,14 +645,25 @@ def test_agent_workspace_and_instructions(tmp_path, monkeypatch):
     # A graduation PROMOTE writes promoted.json and reroutes mode="local"
     # to the promoted soup server - unit tests pin the scratch-model path.
     monkeypatch.setenv("AALI_OWN_MODEL", "0")
+    state: dict = {}
     response = agent_loop(
         "أنشئ ملف build_test.txt واكتب بداخله نجاح",
         tmp_path,
         mode="local",
         print_final=False,
+        gate_state=state,
     )
-    assert (tmp_path / "build_test.txt").exists()
-    assert "نجاح" in response or "نجاح" in (tmp_path / "build_test.txt").read_text(encoding="utf-8")
+    # Proposal-first contract: the agent turn halts at a staged edit and the
+    # real file stays untouched until /api/approve applies it.
+    assert not (tmp_path / "build_test.txt").exists()
+    pending = state.get("proposal") or {}
+    assert pending.get("status") == "pending_approval"
+    assert pending.get("path") == "build_test.txt"
+    assert pending.get("proposal_id") in response
+    from file_agent import proposals
+    applied = proposals.apply_proposal(pending["proposal_id"], tmp_path)
+    assert applied["status"] == "applied"
+    assert "نجاح" in (tmp_path / "build_test.txt").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

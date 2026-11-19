@@ -128,6 +128,95 @@ def test_stage4_launch_uses_available_corpora(_watch: Path) -> None:
     assert "--dropout" in cmd and cmd[cmd.index("--dropout") + 1] == "0.1"
 
 
+def test_stage6_in_table_extends_context_to_16k(_watch: Path) -> None:
+    """2026-10-27: stage 6 doubles context again (8192 -> 16384) on the same
+    corpus set, resuming from stage 5's weights like stage 5 did from stage 4."""
+    stage6 = wd.STAGES[5]
+    assert stage6["stage"] == 6
+    assert stage6["source_dir"].endswith("phase-d-8k")
+    assert stage6["output_dir"].endswith("phase-d-16k")
+    assert stage6["context"] == 16384
+    assert stage6["max_steps"] == 3000
+
+
+def test_stage6_command_carries_16k_and_all_corpora(_watch: Path) -> None:
+    for name in wd.ALL_CORPORA:
+        (wd.tokens_root() / name).mkdir(parents=True, exist_ok=True)
+        (wd.tokens_root() / name / "manifest.json").write_text("{}", encoding="utf-8")
+    cmd = wd.build_stage_command(wd.STAGES[5])
+    assert cmd[cmd.index("--context") + 1] == "16384"
+    assert cmd[cmd.index("--output-dir") + 1].endswith("phase-d-16k")
+    assert cmd[cmd.index("--mirror-dir") + 1].endswith("phase-d-16k")
+    corpora = cmd[cmd.index("--corpora") + 1]
+    assert set(corpora.split(",")) == set(wd.ALL_CORPORA)
+    # the resume traps that burned earlier nights stay pinned: dropout must
+    # match the payload config and the run must resume, not start over
+    assert cmd[cmd.index("--dropout") + 1] == "0.1"
+    assert "--resume" in cmd and "--grad-checkpoint" in cmd
+    assert cmd[cmd.index("--dtype") + 1] == "bf16"
+    assert cmd[cmd.index("--learning-rate") + 1] == "1e-4"
+
+
+def test_stage5_and_stage6_labels_show_real_corpora(_watch: Path) -> None:
+    # regression: stages 5+ carry corpora=None and the label used to print
+    # the literal string "None" instead of what will really be trained on
+    (wd.tokens_root() / "pile").mkdir(parents=True, exist_ok=True)
+    (wd.tokens_root() / "pile" / "manifest.json").write_text("{}", encoding="utf-8")
+    for stage in wd.STAGES[4:]:
+        assert wd.stage_corpora_label(stage) == "pile"
+
+
+def test_advance_from_stage5_launches_stage6(_watch: Path) -> None:
+    launched: list[dict] = []
+
+    def fake_launch(stage: dict) -> bool:
+        launched.append(stage)
+        return True
+
+    wd.save_state(wd.STAGES[4])   # stage 5 is the active one
+    with patch.object(wd, "launch_stage", fake_launch), \
+         patch.object(wd, "trainer_healthy",
+                      return_value=(True, "stage 5 COMPLETE (step 3000)")):
+        action = wd.check_cycle(heartbeat=False)
+    assert action == "advanced-to-6"
+    assert len(launched) == 1 and launched[0]["stage"] == 6
+
+
+def test_disk_rule_blocks_launch_below_20_percent(_watch: Path) -> None:
+    """AGENTS.md: never train on less than 20% free disk - a blocked launch
+    must not spawn anything."""
+    spawned: list = []
+    with patch.object(wd, "disk_free_percent", lambda disk: 12.0), \
+         patch.object(wd, "launch_detached",
+                      lambda command, log_base: spawned.append(command) or 1):
+        assert wd.launch_stage(wd.STAGES[5]) is False
+    assert spawned == []
+    assert "DISK rule blocks" in wd.WATCH_LOG.read_text(encoding="utf-8")
+
+
+def test_disk_rule_allows_launch_when_both_disks_are_healthy(_watch: Path) -> None:
+    with patch.object(wd, "disk_free_percent", lambda disk: 28.0):
+        assert wd.launch_stage(wd.STAGES[5]) is True
+
+
+def test_disk_ok_fails_closed_on_unreadable_disk(_watch: Path) -> None:
+    with patch.object(wd, "disk_free_percent", lambda disk: None):
+        ok, why = wd.disk_ok()
+    assert ok is False and "unreadable" in why
+
+
+def test_disk_rule_checks_every_training_disk(_watch: Path) -> None:
+    seen: list[str] = []
+
+    def fake(disk: str) -> float:
+        seen.append(disk)
+        return 21.0
+
+    with patch.object(wd, "disk_free_percent", fake):
+        assert wd.disk_ok() == (True, "")
+    assert set(seen) == set(wd.TRAIN_DISKS)
+
+
 def test_morning_report_written_on_window_end(_watch: Path) -> None:
     wd.WATCH_LOG.write_text("[01:00:00] ok: alive\n", encoding="utf-8")
     wd.write_morning_report("watch window over")

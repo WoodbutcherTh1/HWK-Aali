@@ -22,10 +22,13 @@ Duties (checked every CHECK_SECONDS):
      stage 4 (2026-09-23): bootstrap phase-d-wide -> phase-d-all, train on ALL
        tokenized corpora (the owner's +2-4B-token continuation; every
        stage-3 candidate already has a manifest)
+     stage 5 (2026-09-23): context 4096 -> 8192 on all tokenized corpora
+     stage 6 (2026-10-27): context 8192 -> 16384, same corpus set, 3000 steps
    Each stage restarts the cosine schedule (fresh optimizer, step 0) exactly
    like bootstrap_sft_state.py intends.
-4. Never kills anything by image name; never launches onto a busy card; every
-   action is logged to D:/hwk-data/phase_d_watchdog.log.
+4. Never kills anything by image name; never launches onto a busy card or a
+   disk below the 20% rule; every action is logged to
+   D:/hwk-data/phase_d_watchdog.log.
 
 Usage: .venv/Scripts/python.exe scripts/phase_d_watchdog.py  (detached;
        scripts/launch_detached.py --log phase_d_watchdog -- .venv/Scripts/python.exe scripts/phase_d_watchdog.py)
@@ -86,7 +89,23 @@ STAGES = [
      "corpora": None,  # built at launch time: every corpus with a manifest
      "context": 8192,
      "max_steps": 3000, "done_marker": None},
+    # 2026-10-27 (owner: "bigger context to remember more"): stage 6 doubles the
+    # context AGAIN, 8192 -> 16384. Same RoPE argument as stage 5 - no weight
+    # shape depends on context_size (train_scratch.py exempts it from the
+    # resume config check), so this is a plain --resume from stage 5's weights
+    # with its own fresh cosine schedule. Corpora: everything tokenized by
+    # launch time, unchanged from stage 5.
+    {"stage": 6, "output_dir": "D:/hwk-models/phase-d-16k",
+     "source_dir": "D:/hwk-models/phase-d-8k",
+     "corpora": None,  # built at launch time: every corpus with a manifest
+     "context": 16384,
+     "max_steps": 3000, "done_marker": None},
 ]
+# AGENTS.md rule: never start training on a disk below 20% free. Checked on
+# EVERY launch (restart or stage advance) because a night of restarts must not
+# be able to fill a disk one checkpoint at a time.
+MIN_FREE_PERCENT = 20.0
+TRAIN_DISKS = ("D:", "X:")
 STAGE3_CANDIDATES = ("law", "medical", "know", "mideast", "mmlu")
 TOKENIZE_CORPORA = ("law", "medical", "know", "mideast", "mmlu",
                     "code2", "code3", "law2")
@@ -253,7 +272,9 @@ def stage_corpora_label(stage: dict) -> str:
     """The corpora string this stage will actually launch with (for logs)."""
     if stage["stage"] == 3:
         return str(stage3_corpora_arg())
-    if stage["stage"] == 4:
+    if stage["stage"] >= 4:
+        # stages 4-6 all train on every corpus that has a manifest; without
+        # this the label logged the literal string "None" for stage 5.
         return stage4_corpora_arg()
     return str(stage["corpora"])
 
@@ -264,7 +285,7 @@ def build_stage_command(stage: dict) -> list[str]:
         corpora = stage3_corpora_arg()
     elif stage["stage"] == 4:
         corpora = stage4_corpora_arg()
-    elif stage["stage"] == 5:
+    elif stage["stage"] >= 5:
         corpora = stage5_corpora_arg()
     return [
         str(PYEXE), str(REPO / "train_scratch.py"),
@@ -308,7 +329,38 @@ def bootstrap_stage(stage: dict) -> bool:
     return ok
 
 
+def disk_free_percent(disk: str) -> float | None:
+    """Free space on a training disk as a percentage (None when unreadable)."""
+    try:
+        usage = shutil.disk_usage(disk + "/")
+    except OSError:
+        return None
+    if not usage.total:
+        return None
+    return usage.free / usage.total * 100.0
+
+
+def disk_ok() -> tuple[bool, str]:
+    """AGENTS.md: never train on less than 20% free disk.
+
+    Fail CLOSED: an unreadable disk is not a licence to train (the rule exists
+    precisely for the night when something is wrong).
+    """
+    for disk in TRAIN_DISKS:
+        pct = disk_free_percent(disk)
+        if pct is None:
+            return False, f"{disk} free space unreadable"
+        if pct < MIN_FREE_PERCENT:
+            return False, (f"{disk} only {pct:.1f}% free "
+                           f"(< {MIN_FREE_PERCENT:.0f}%)")
+    return True, ""
+
+
 def launch_stage(stage: dict) -> bool:
+    ok, why = disk_ok()
+    if not ok:
+        log(f"stage {stage['stage']}: DISK rule blocks the launch - {why}")
+        return False
     if not gpu_is_free():
         log(f"stage {stage['stage']}: GPU busy - launch deferred")
         return False
