@@ -1,0 +1,12 @@
+# Aali One (deploy/oracle/aali_one/) — Streamlit chat client
+#
+# Install once on the PC:
+#   python -m pip install -r deploy/oracle/aali_one/requirements.txt
+#
+# Then run:
+#   AALI_API_KEY=<hub-master-key> streamlit run deploy/oracle/aali_one/app.py
+#
+# The Gateway URL is baked into app.py.  Do NOT paste the Hub key into the
+# source file — it lives only in the AALI_API_KEY environment variable.
+
+streamlit>=1.30
