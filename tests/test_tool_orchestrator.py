@@ -31,7 +31,8 @@ def test_classification_counts_match_mission_spec() -> None:
     # 2026-09-23: agent toolbelt joins — 12+1 server (recall_search),
     # 13+7 client (artifacts, excel, plots, diff, plan, screenshot).
     # 2026-10-03: read_link (Aali Reach) runs on the server like fetch_url.
-    assert len(orch.server_tools()) == 15  # + spawn_agents + read_link
+    # 2026-11-06: switch_surface (engine surface router) -> server.
+    assert len(orch.server_tools()) == 16  # + spawn_agents + read_link
     assert len(orch.client_tools()) == 20
     assert "print_file" in orch.client_tools()
     assert "recall_search" in orch.server_tools()

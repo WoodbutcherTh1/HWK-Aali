@@ -39,6 +39,57 @@ from file_agent import prompts as aali_prompts
 from file_agent import assistants as aali_assistants
 
 app = Flask(__name__)
+
+# Free model (Pollinations.ai keyless) - dedicated endpoint
+def api_ask_free():
+    """Handle free model (Pollinations.ai keyless) - no API key needed."""
+    payload = request.get_json(silent=True) or {}
+    message = str(payload.get('message', '')).strip()
+    sid = str(payload.get('sid') or uuid.uuid4().hex)
+    
+    if not message:
+        return make_response({'ok': False, 'error': 'message is required'}, 400)
+    
+    # Direct call to Pollinations.ai keyless endpoint
+    import json
+    from urllib.request import Request, urlopen
+    
+    try:
+        url = 'https://text.pollinations.ai/openai/chat'
+        payload_data = {
+            'model': 'openai',
+            'messages': [{'role': 'user', 'content': message}],
+            'max_tokens': 2000,
+            'temperature': 0.7,
+        }
+        body_data = json.dumps(payload_data).encode('utf-8')
+        headers = {'Content-Type': 'application/json'}
+        req = Request(url, data=body_data, headers=headers, method='POST')
+        with urlopen(req, timeout=30) as resp:
+            data = json.load(resp)
+        choices = data.get('choices') or []
+        if choices:
+            msg = choices[0].get('message') or {}
+            reply = msg.get('content') or ''
+        else:
+            reply = 'لا أستطيع الرد في الوقت الحالي، جرب لاحقاً.'
+        
+        ok = True
+        status = 200
+        body = {'ok': ok, 'reply': reply, 'sid': sid}
+        from flask import make_response
+        return make_response(body, status)
+    except Exception as e:
+        ok = False
+        reply = 'الموديل السحابي غير متاح حالياً، جرب الموديل المحلي أو حاول لاحقاً.'
+        status = 500
+        body = {'ok': ok, 'reply': reply, 'sid': sid}
+        from flask import make_response
+        return make_response(body, status)
+
+app.add_url_rule('/api/ask-free', 'api_ask_free', api_ask_free, methods=['POST'])
+
+
 app.secret_key = os.getenv("SESSION_SECRET") or "hwk-local-dev-secret"
 
 

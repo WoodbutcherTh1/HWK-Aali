@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from file_agent import proposals as _proposals
+
 
 class FileAgentError(Exception):
     """Expected, user-facing filesystem error."""
@@ -38,7 +40,7 @@ _PATHY_PAYLOAD_RE = re.compile(r"%2e|%2f|%5c|\\x2e|\\x5c", re.IGNORECASE)
 
 # Directories never searched or listed recursively (build junk / VCS / deps).
 SKIP_DIRS = {
-    ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
+    ".git", ".hg", ".svn", ".aali", "node_modules", "__pycache__", ".venv", "venv",
     "dist", "build", ".next", ".idea", ".vscode", "target", "bin", "obj",
     ".mypy_cache", ".pytest_cache", ".ruff_cache",
 }
@@ -230,6 +232,12 @@ def write_file(path: str, content: str, workspace_root: str | Path, *,
                overwrite: bool = False, encoding: str = "utf-8") -> dict[str, Any]:
     if not isinstance(content, str):
         raise FileAgentError("content must be a string")
+    if _proposals.is_proposal_mode():
+        try:
+            return _proposals.stage_write(
+                path, content, workspace_root, overwrite=overwrite, encoding=encoding)
+        except _proposals.ProposalError as exc:
+            raise FileAgentError(str(exc)) from exc
     root, target = _resolve(path, workspace_root)
     existed = target.exists()
     if existed and target.is_dir():
@@ -249,6 +257,12 @@ def append_file(path: str, content: str, workspace_root: str | Path, *,
                 create: bool = False, encoding: str = "utf-8") -> dict[str, Any]:
     if not isinstance(content, str):
         raise FileAgentError("content must be a string")
+    if _proposals.is_proposal_mode():
+        try:
+            return _proposals.stage_append(
+                path, content, workspace_root, create=create, encoding=encoding)
+        except _proposals.ProposalError as exc:
+            raise FileAgentError(str(exc)) from exc
     root, target = _resolve(path, workspace_root)
     existed = target.exists()
     if existed and target.is_dir():
@@ -273,6 +287,13 @@ def replace_in_file(path: str, old_text: str, new_text: str, workspace_root: str
                     replace_all: bool = False, encoding: str = "utf-8") -> dict[str, Any]:
     if not old_text:
         raise FileAgentError("old_text must be non-empty")
+    if _proposals.is_proposal_mode():
+        try:
+            return _proposals.stage_replace(
+                path, old_text, new_text, workspace_root,
+                replace_all=replace_all, encoding=encoding)
+        except _proposals.ProposalError as exc:
+            raise FileAgentError(str(exc)) from exc
     root, target = _resolve(path, workspace_root, must_exist=True)
     if not target.is_file():
         raise FileAgentError(f"Path is not a file: {path}")
@@ -1252,6 +1273,32 @@ def spawn_agents(tasks: list[str], workspace_root: str | Path, *,
     return agent_tools.spawn_agents(tasks, workspace_root, request_id=request_id)
 
 
+SURFACES = ("chat", "studio", "graphics", "control")
+
+
+def switch_surface(
+    surface_name: str,
+    reason: str = "",
+    workspace_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Tell the client which product surface should handle this turn.
+
+    This is a pure routing instruction. It never changes files, never starts
+    a process, and never grants a capability; the client decides how to
+    animate the transition. An unknown surface is refused so a model cannot
+    invent a UI state the client does not implement.
+    """
+    name = str(surface_name or "").strip().lower()
+    if name not in SURFACES:
+        raise FileAgentError(
+            f"Unknown surface: {surface_name!r}; expected one of {', '.join(SURFACES)}")
+    return {
+        "surface": name,
+        "reason": str(reason or "").strip()[:500],
+        "switched": True,
+    }
+
+
 _FUNCTIONS: dict[str, ToolFunction] = {
     "list_files": list_files,
     "read_file": read_file,
@@ -1290,6 +1337,7 @@ _FUNCTIONS: dict[str, ToolFunction] = {
     "todo_plan": todo_plan,
     "recall_search": recall_search,
     "screenshot": screenshot,
+    "switch_surface": switch_surface,
 }
 
 
@@ -1349,6 +1397,7 @@ TOOL_EXECUTION: dict[str, str] = {
     "todo_plan": "client",
     "recall_search": "server",
     "screenshot": "client",
+    "switch_surface": "server",
     # the brain spawns its own sub-agents on the server; sub-agent tool calls
     # route through the normal server/client machinery from inside agent_loop
     "spawn_agents": "server",
@@ -1550,6 +1599,12 @@ _DEFINITIONS = [
     _definition("spawn_agents", "Run up to 4 sub-agents IN PARALLEL, each on one task, each writing to its own agents/agent-N subfolder. The RIGHT way: spawn when the user explicitly asks for parallel work OR when a mission splits into 2-4 INDEPENDENT parts (different files/topics that need no coordination). Never for dependent steps (sub-agents cannot see each other's work — do those yourself in order), never recursively (sub-agents cannot spawn). Collect every result and merge into ONE final answer.",
                 {"tasks": {"type": "array", "items": {"type": "string"},
                            "minItems": 1, "maxItems": 4}}, ["tasks"]),
+    # --- surface orchestration (Phase 1) ----------------------------------
+    _definition("switch_surface", "Route the conversation to the right Aali product surface BEFORE doing the work: 'studio' for complex coding/refactors/multi-file edits/tests, 'graphics' for images/design/charts, 'control' for automating the owner's PC, 'chat' for ordinary questions. The client listens for SURFACE_SWITCH and animates the transition. Never use it for small talk or when the current surface already fits.",
+                {"surface_name": {"type": "string",
+                                  "enum": ["chat", "studio", "graphics", "control"]},
+                 "reason": {"type": "string", "description": "one short sentence: why this surface"}},
+                ["surface_name"]),
 ]
 
 

@@ -16,6 +16,7 @@ import requests
 
 from agent_log import log_event, new_request_id, scratchpad_event
 from file_agent import execute_tool, get_tool_definitions, tool_guard
+from file_agent import proposals as aali_proposals
 from file_agent import memory as aali_memory
 from file_agent import emoji as aali_emoji
 from file_agent import autocorrect as aali_autocorrect
@@ -139,6 +140,17 @@ You are a careful local file assistant. Use only the provided tools to inspect
 or modify files. All paths are relative to the configured workspace and must
 stay inside it. Never claim an operation succeeded when a tool reports an
 error. Explain the changes in your final response.
+
+SURFACE ORCHESTRATION (product): You are Aali, an AI orchestrator. Analyze
+the user's intent before acting and, when the work belongs to another product
+surface, call switch_surface(surface_name, reason) FIRST:
+- "studio": complex coding, multi-file edits, refactors, tests, diffs, IDE work.
+- "graphics": images, design, charts, visual assets, editing pictures/video.
+- "control": automating the owner's PC, apps, processes, files, system tasks.
+- "chat": ordinary questions, explanations, short answers - the default.
+Stay in "chat" when the current surface already fits; never call the tool for
+small talk, and never call it more than once per turn. The client listens for
+SURFACE_SWITCH and animates the transition; the tool itself changes nothing.
 
 LANGUAGE RULE (top priority): reply in the SAME language the user wrote in.
 English message -> English reply. Arabic message -> Arabic reply. Mixed
@@ -1313,7 +1325,8 @@ def _ollama_agent_loop(
         if response_message is None:
             log_event(request_id, "ollama_error", model=OLLAMA_MODEL)
             return _local_agent_loop(message, root, request_id,
-                                     fallback_reason="ollama unreachable")
+                                     fallback_reason="ollama unreachable",
+                                     gate_state=gate_state)
         content = str(response_message.get("content", "") or "").strip()
         # Protocol-leak guard: when the model wraps a plain answer in the JSON
         # protocol ({"content": "..."}), unwrap it — the user must never see
@@ -1394,6 +1407,8 @@ def _ollama_agent_loop(
                     result = _policy_gate(tool_name, args, policy, confirmed, gate_state)
                     if result is None:
                         result = execute_tool(tool_name, args, root)
+            _note_surface(request_id, tool_name, result, gate_state, mode="local-ollama")
+            _check_proposal(request_id, tool_name, result, gate_state, mode="local-ollama")
             tools_used += 1
             last_tool, last_result = tool_name, result
             # Repeat-guard: small models loop on the same tool call. After two
@@ -1731,6 +1746,7 @@ def _local_agent_loop(
     request_id: str,
     *,
     fallback_reason: str | None = None,
+    gate_state: dict[str, Any] | None = None,
 ) -> str:
     """Run the deterministic fallback used when no scratch checkpoint is ready."""
     tool_call = _local_tool_call(message)
@@ -1771,6 +1787,8 @@ def _local_agent_loop(
         tool_name = guard_name
         log_event(request_id, "tool_requested", tool=tool_name, arguments=arguments, mode="local")
         result = execute_tool(tool_name, arguments, root)
+    _note_surface(request_id, tool_name, result, gate_state, mode="local")
+    _check_proposal(request_id, tool_name, result, gate_state, mode="local")
     log_event(request_id, "tool_result", tool=tool_name, result=result, mode="local")
     if result.get("ok"):
         response = (
@@ -1897,6 +1915,7 @@ def _local_model_loop(
             root,
             request_id,
             fallback_reason=f"checkpoint not found: {path}",
+            gate_state=gate_state,
         )
     try:
         import torch
@@ -1914,6 +1933,7 @@ def _local_model_loop(
             root,
             request_id,
             fallback_reason="scratch model dependencies are not installed",
+            gate_state=gate_state,
         )
     try:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1938,6 +1958,7 @@ def _local_model_loop(
             root,
             request_id,
             fallback_reason=f"checkpoint could not be loaded: {exc}",
+            gate_state=gate_state,
         )
 
     try:
@@ -2009,6 +2030,8 @@ def _local_model_loop(
             result = _policy_gate(value, arguments, policy, confirmed, gate_state)
             if result is None:
                 result = execute_tool(value, arguments, root)
+        _note_surface(request_id, value, result, gate_state, mode="scratch_model")
+        _check_proposal(request_id, value, result, gate_state, mode="scratch_model")
         log_event(
             request_id,
             "tool_result",
@@ -2045,6 +2068,49 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
     if not isinstance(arguments, dict):
         raise AgentLoopError("The model's tool arguments must be a JSON object")
     return arguments
+
+
+def _note_surface(request_id: str, tool_name: str, result: Any,
+                  gate_state: dict[str, Any] | None = None,
+                  mode: str | None = None) -> None:
+    """Publish a switch_surface decision as a dedicated SSE event."""
+    if tool_name != "switch_surface" or not isinstance(result, dict):
+        return
+    if not result.get("ok"):
+        return
+    payload = result.get("result")
+    if not isinstance(payload, dict) or not payload.get("surface"):
+        return
+    event = {
+        "surface": str(payload["surface"]),
+        "reason": str(payload.get("reason") or ""),
+    }
+    log_event(request_id, "surface_switch", mode=mode, **event)
+    scratchpad_event(request_id, f"↔ surface: {event['surface']}")
+    if gate_state is not None:
+        gate_state["surface"] = event
+
+
+def _check_proposal(request_id: str, tool_name: str, result: Any,
+                    gate_state: dict[str, Any] | None = None,
+                    mode: str | None = None) -> None:
+    """Stop the turn at a staged edit and announce it to the client."""
+    pending = aali_proposals.pending_payload(result)
+    if pending is None:
+        return
+    log_event(
+        request_id,
+        "proposal_created",
+        mode=mode,
+        proposal_id=pending.get("proposal_id"),
+        path=pending.get("path"),
+        tool=pending.get("tool"),
+        diff=pending.get("diff"),
+    )
+    scratchpad_event(request_id, f"✎ proposal pending: {pending.get('path')}")
+    if gate_state is not None:
+        gate_state["proposal"] = pending
+    raise aali_proposals.ProposalPending(pending)
 
 
 def _run_tool_call(
@@ -2086,6 +2152,8 @@ def _run_tool_call(
                 arguments,
                 root,
             )
+    _note_surface(request_id, tool_name, result, gate_state)
+    _check_proposal(request_id, tool_name, result, gate_state)
     log_event(request_id, "tool_result", tool=tool_name, result=result)
     _ok = bool(result.get("ok")) if isinstance(result, dict) else True
     scratchpad_event(request_id,
@@ -2246,6 +2314,8 @@ def _agent_loop(
                            else _policy_gate(guard_name, args, policy, confirmed, gate_state))
             tool_result = (gate_result if gate_result is not None
                            else execute_tool(guard_name, args, root))
+            _note_surface(request_id, guard_name, tool_result, gate_state)
+            _check_proposal(request_id, guard_name, tool_result, gate_state)
             log_event(request_id, "tool_result", tool=guard_name, result=tool_result)
             return tool_result
 
@@ -2271,7 +2341,7 @@ def _agent_loop(
             model if model != DEFAULT_MODEL else os.getenv("AI_INTEGRATIONS_OPENAI_MODEL", "gpt-4o-mini")
         )
         provider = "managed_cloud"
-    elif provider == "openai" and providers.api_key_for("openai"):
+    elif provider == "openai" and providers.api_key_for("openai") and providers.api_key_for("openai") != "OPENAI_API_KEY":
         api_key = providers.api_key_for("openai")
         endpoint = "https://api.openai.com/v1/chat/completions"
         selected_model = model if model != DEFAULT_MODEL else providers.default_model_for("openai")
@@ -2281,9 +2351,45 @@ def _agent_loop(
         endpoint = OPENROUTER_URL
         selected_model = model
         provider = "openrouter"
+    elif provider == "free":
+        # Free provider uses Pollinations.ai keyless endpoint
+        from file_agent import model_router as aali_model_router
+        api_key = ""  # no key needed
+        chosen = model or aali_model_router.PROVIDERS[provider]["default_model"]
+        endpoint = "https://text.pollinations.ai/openai/chat"
+        log_event(request_id, "provider_selected", provider="free", model=chosen)
+        try:
+            response = _openai_compat_loop(
+                user_message, root, request_id,
+                base_url=endpoint, api_key=api_key, model=chosen,
+                max_iterations=max_iterations, history=history,
+                policy=policy, confirmed=confirmed, gate_state=gate_state,
+                provider_label="free",
+            )
+            if print_final:
+                print(response)
+            return response
+        except Exception as e:
+            log_event(request_id, "tool_result", tool="free",
+                      result=f"free provider error ({e.__class__.__name__}) — falling back to local")
+            # Fall through to local model loop
+            local_path = local_model_path or os.getenv(
+                "LOCAL_MODEL_PATH",
+                DEFAULT_SCRATCH_CHECKPOINT,
+            )
+            log_event(request_id, "provider_selected", provider="scratch_model",
+                      model_path=str(local_path))
+            response = _local_model_loop(
+                user_message, root, request_id, local_path,
+                max_iterations, history, policy=policy,
+                confirmed=confirmed, gate_state=gate_state,
+            )
+            if print_final:
+                print(response)
+            return response
     else:
         raise AgentLoopError(
-            "لا يوجد اتصال سحابي مفعّل. اختر «النموذج المحلي» أو فعّل الاتصال السحابي "
+            "الموديل السحابي غير متاح حالياً، جرب الموديل المحلي أو حاول لاحقاً."
             "المُدار؛ لا تحتاج إلى إدخال مفتاح شخصي للوضع المحلي."
         )
 
@@ -2522,22 +2628,35 @@ def agent_loop(
     try:
         record_turn("user", user_message)
         _invalidate_memory_cache()
-        final_response = _agent_loop(
-            user_message,
-            workspace_root,
-            model=model,
-            max_iterations=max_iterations,
-            print_final=print_final,
-            http_client=http_client,
-            request_id=request_id,
-            mode=mode,
-            local_model_path=local_model_path,
-            history=history,
-            policy=policy,
-            confirmed=confirmed,
-            gate_state=gate_state,
-            provider=provider,
+        with aali_proposals.proposal_mode():
+            final_response = _agent_loop(
+                user_message,
+                workspace_root,
+                model=model,
+                max_iterations=max_iterations,
+                print_final=print_final,
+                http_client=http_client,
+                request_id=request_id,
+                mode=mode,
+                local_model_path=local_model_path,
+                history=history,
+                policy=policy,
+                confirmed=confirmed,
+                gate_state=gate_state,
+                provider=provider,
+            )
+    except aali_proposals.ProposalPending as exc:
+        elapsed_ms = int(
+            (datetime.now(timezone.utc) - started_at).total_seconds() * 1000
         )
+        log_event(
+            request_id,
+            "proposal_pending",
+            proposal_id=exc.proposal.get("proposal_id"),
+            path=exc.proposal.get("path"),
+            duration_ms=elapsed_ms,
+        )
+        final_response = exc.user_message
     except Exception as exc:
         elapsed_ms = int(
             (datetime.now(timezone.utc) - started_at).total_seconds() * 1000
