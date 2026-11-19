@@ -34,6 +34,7 @@ PROVIDERS: dict[str, dict[str, str]] = {
     "openai": {"style": "openai", "env_key": "OPENAI_API_KEY", "default_model": "gpt-4o-mini"},
     "anthropic": {"style": "anthropic", "env_key": "ANTHROPIC_API_KEY", "default_model": "claude-3-5-sonnet-latest"},
     "gemini": {"style": "gemini", "env_key": "GEMINI_API_KEY", "default_model": "gemini-2.0-flash"},
+    "free": {"style": "openai", "env_key": "", "default_model": "openai"},
 }
 
 

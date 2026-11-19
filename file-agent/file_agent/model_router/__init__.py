@@ -46,6 +46,12 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "default_model": "llama3.2",
         "base_url": "http://localhost:11434/v1",
     },
+    "free": {
+        "style": "openai",
+        "env_key": "",
+        "default_model": "openai",
+        "base_url": "https://text.pollinations.ai/openai",
+    },
     "groq": {
         "style": "openai",
         "env_key": "GROQ_API_KEY",
@@ -124,7 +130,8 @@ def api_key_value(provider: str) -> str | None:
     cfg = PROVIDERS.get(provider)
     if cfg is None:
         return None
-    return os.getenv(cfg["env_key"])
+    value = os.getenv(cfg["env_key"], "").strip()
+    return value or None
 
 
 def default_model_for(provider: str) -> str:
@@ -140,24 +147,73 @@ def register_provider(name: str, style: str, env_key: str, default_model: str) -
     }
 
 
-def _build_chat_payload(provider: str, user_message: str, system_prompt: str) -> dict:
+def _build_chat_payload(provider: str, user_message: str, system_prompt: str,
+                        model: str | None = None,
+                        history: list[dict[str, str]] | None = None) -> dict:
     cfg = PROVIDERS[provider]
-    model = cfg["default_model"]
+    chosen = model or cfg["default_model"]
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+    ]
+    for turn in history or []:
+        role = str(turn.get("role") or "")
+        if role in {"user", "assistant"} and turn.get("content"):
+            messages.append({"role": role, "content": str(turn["content"])})
+    messages.append({"role": "user", "content": user_message})
     payload: dict = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
+        "model": chosen,
+        "messages": messages,
         "max_tokens": 2000,
         "temperature": 0.7,
     }
     return payload
 
 
-def dispatch(user_message: str, system_prompt: str, provider: str, api_key: str | None = None) -> str:
+def dispatch(
+    user_message: str,
+    system_prompt: str,
+    provider: str,
+    api_key: str | None = None,
+    model: str | None = None,
+    max_iterations: int = 10,
+    history: list[dict[str, str]] | None = None,
+    tool_defs: Any | None = None,
+    run_tool: Any | None = None,
+) -> str:
+    """Single-shot chat dispatch.
+
+    ``max_iterations`` / ``tool_defs`` / ``run_tool`` are accepted for contract
+    parity with the agent loop; this lightweight router does one completion and
+    leaves tool execution to the full agent loop.
+    """
     if provider not in PROVIDERS:
         raise ProviderError(f"unknown provider: {provider}")
+    # "free" provider uses Pollinations.ai keyless endpoint
+    if provider == "free":
+        url = _chat_completion_url(provider)
+        chosen = model or PROVIDERS[provider]["default_model"]
+        payload = {
+            "model": chosen,
+            "messages": [{"role": "user", "content": user_message}],
+            "max_tokens": 2000,
+            "temperature": 0.7,
+        }
+        headers = {"Content-Type": "application/json"}
+        import json as _json
+        from urllib.request import Request, urlopen
+        try:
+            body = _json.dumps(payload).encode("utf-8")
+            req = Request(url, data=body, headers=headers, method="POST")
+            with urlopen(req, timeout=30) as resp:
+                data = _json.load(resp)
+        except Exception as exc:
+            raise ProviderError(f"free provider error: {exc}")
+        choices = data.get("choices") or []
+        if not choices:
+            raise ProviderError(f"free provider returned no choices: {data}")
+        msg = (choices[0].get("message") or {})
+        content = msg.get("content") or ""
+        return content
     key = api_key_for(provider)
     if key is None:
         raise ProviderError(f"unknown provider: {provider}")
@@ -170,7 +226,8 @@ def dispatch(user_message: str, system_prompt: str, provider: str, api_key: str 
     url = _chat_completion_url(provider)
     if url is None:
         raise ProviderError(f"no chat endpoint for {provider}")
-    payload = _build_chat_payload(provider, user_message, system_prompt)
+    payload = _build_chat_payload(provider, user_message, system_prompt,
+                                  model=model, history=history)
     headers = {
         "Authorization": f"Bearer {key_value}",
         "Content-Type": "application/json",
