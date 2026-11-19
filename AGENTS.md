@@ -90,6 +90,59 @@ in parallel:
 
 ## 5. الحالة الآن (Status pointer — keep current)
 
+- **aali-ui — React/TypeScript live client RUNNING (2026-11-06, Buffy)**:
+  new `aali-ui/` Vite app (`npm install` 69 packages / 0 vulnerabilities;
+  `npm run build` = `tsc --noEmit && vite build`, PASS). Dev server is
+  backgrounded on `0.0.0.0:5173` (listener PID 1860; log
+  `aali-ui/dev-server.log`): PC `http://localhost:5173/`, phone on the same
+  Wi-Fi `http://192.168.1.12:5173/` (both verified HTTP 200). Vite proxies
+  `/api` to the assumed engine at `http://localhost:5000`; `VITE_API_TARGET`
+  overrides it. UI: Arabic-first RTL dark chat (`POST /api/ask/stream`), live
+  workspace sidebar with the global `GET /api/brain/stream` feed and a
+  per-turn `activity` fallback, file/terminal/proposal/surface event cards,
+  `SURFACE_SWITCH` mode banner, `proposal_created` diff modal with
+  approve/reject, desktop two-pane layout, mobile Chat/Workspace tabs, and
+  session-link copying. Proposal list/detail/approve use the documented
+  endpoints. HONEST STATE: at verification time nothing was listening on
+  :5000, so the UI serves but shows the offline engine pill; no backend was
+  started. The global feed is admin-gated in key mode; approval follows the
+  engine's loopback/admin rule. Dev server binds LAN for phone access —
+  trusted networks only. Task: `tasks/aali-ui.md`.
+
+- **ENGINE API v1 — proposal-first edits + repo map + surface router
+  (2026-11-06, Buffy — LIVE in code)**: the duplicate
+  `file-agent/model_router/` package is GONE; only
+  `file_agent/model_router/` remains (its historical report moved to
+  `docs/model_router_int_report.md`). `dispatch()` now accepts the
+  `model`/`max_iterations`/`history` contract the server already passed, and
+  `/api/model/status` reads the real env-key value instead of the env-var
+  NAME (the old check was always true). NEW `file_agent/proposals.py`: agent
+  runs set a context-local proposal mode; `write_file`, `append_file` and
+  `replace_in_file` stage an exact candidate in `.aali/staging/<id>.{json,
+  before,after}` and return `pending_approval` — the real file is untouched.
+  The agent loop emits `proposal_created`, sets `gate_state["proposal"]` and
+  HALTS the turn with a review message; `/api/approve` applies only after a
+  `before`-content conflict check (409, never a clobber), `/api/reject`
+  discards it, `/api/proposals` lists them. Approval is loopback/admin only;
+  remote guests get the uniform 404. Proposal mode is context-local, so
+  Studio saves, Node sandbox calls and direct test/tool writes keep their
+  immediate-write contract; `AALI_PROPOSAL_MODE=0` is the global kill switch.
+  NEW `file_agent/repo_map.py`: `generate_repo_map(workspace_path,
+  max_tokens=4000)` — root .gitignore + `.git/info/exclude`, Python/TS/JS
+  classes/functions/interfaces/imports, optional tree-sitter with a tested
+  regex fallback, symlink/binary/size guards, deterministic token budget.
+  NEW `switch_surface(surface_name, reason)` tool (closed enum
+  chat|studio|graphics|control) + SYSTEM_PROMPT orchestrator paragraph;
+  agent loop logs `surface_switch` and `/api/ask/stream` emits a dedicated
+  `SURFACE_SWITCH` SSE event (also in `done` as `surface`). The tool is a
+  routing hint only — no file/process capability. CONTRACT: `docs/ENGINE_API.md`
+  (sessions, streaming, proposal lifecycle, approval, diffs, surface).
+  Tests: tests/test_repo_map.py, test_proposals.py, test_surface_router.py +
+  updated deliberate tool counts; targeted run **229 passed / 1 skipped**
+  (full suite NOT re-run). Known limits: repo map is a callable primitive and
+  is not auto-injected into every prompt; proposals are workspace-scoped;
+  remote/Node approval is not wired yet.
+
 - **GUEST CHAT TIER — DeepSeek/Gemini-style anonymous chat + optional account
   (2026-10-09, Buffy — LIVE in code)**: the owner's ask was «we need that like
   deepseek site or gemini — u can go talk without sign in but u have option to
