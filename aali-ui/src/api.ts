@@ -116,6 +116,16 @@ export async function streamAsk(message: string, opts: StreamOptions = {}): Prom
     err.serverError = serverError;
     throw err;
   }
+  if (isFreeModel) {
+    // /api/ask-free answers with ONE plain JSON body (no SSE framing). Running
+    // the stream parser over it yields zero frames, so the "done" event never
+    // arrives and the call throws "stream ended without a done event" even
+    // though the server answered. Read the JSON and shape it like a done.
+    const body = (await res.json()) as DoneResult;
+    if (body.sid) persistSid(body.sid);
+    return { ok: body.ok !== false, reply: body.reply, sid: body.sid, error: body.error };
+  }
+
   if (!res.body) throw new Error("stream response has no body");
 
   const state: { done: DoneResult | null } = { done: null };
