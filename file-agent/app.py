@@ -77,14 +77,12 @@ def api_ask_free():
         ok = True
         status = 200
         body = {'ok': ok, 'reply': reply, 'sid': sid}
-        from flask import make_response
         return make_response(body, status)
     except Exception as e:
         ok = False
         reply = 'الموديل السحابي غير متاح حالياً، جرب الموديل المحلي أو حاول لاحقاً.'
         status = 500
         body = {'ok': ok, 'reply': reply, 'sid': sid}
-        from flask import make_response
         return make_response(body, status)
 
 app.add_url_rule('/api/ask-free', 'api_ask_free', api_ask_free, methods=['POST'])
