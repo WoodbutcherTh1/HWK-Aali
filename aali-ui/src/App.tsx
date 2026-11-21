@@ -538,8 +538,7 @@ export default function App() {
             {feedStatusLabel(feedStatus)}
           </span>
           <select
-          minWidth={140}
-              style={{padding: '4px 8px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#1e293b', color: '#f1f5f9', fontSize: '11px'}}
+              style={{minWidth: 140, padding: '4px 8px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#1e293b', color: '#f1f5f9', fontSize: '11px'}}
               onChange={(e) => setModel(e.target.value)}>
                 <option value="local">Aali Local (HWK)</option>
                 <option value="free">Aali Free (No Key)</option>

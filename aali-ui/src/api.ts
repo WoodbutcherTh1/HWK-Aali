@@ -75,6 +75,7 @@ export async function health(): Promise<boolean> {
 export interface StreamOptions {
   sid?: string;
   signal?: AbortSignal;
+  model?: string;
   onEvent?: (eventName: string, payload: unknown) => void;
 }
 
